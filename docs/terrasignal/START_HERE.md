@@ -14,7 +14,7 @@ Open:
 
 **http://localhost:4173/?demo=1&welcome=1**
 
-Vite listens on **4173**. No `CESIUM_ION_TOKEN` or `GOOGLE_MAPS_API_KEY` is required: the keyless Esri World Imagery globe (OSM fallback) is the visual hero under the HUD. Optional keys only upgrade to Google 3D Tiles.
+Vite listens on **4173**. No `CESIUM_ION_TOKEN` or `GOOGLE_MAPS_API_KEY` is required: the keyless path tries Esri World Imagery, falls back to OSM on any failure (with a toast), and keeps the render loop alive so the first frames are not a black void. Optional keys only upgrade to Google 3D Tiles. If the canvas is live but no imagery layer attached, `#ts-globe-error` must appear — credits alone are not a painted Earth.
 
 The left **5-minute demo** rail shows the next step. Press **Send this phrase** (or type it in the command bar and hit SEND). **Play** auto-advances. The **DEMO** chip toggles the rail if you opened the app without `?demo=1`.
 
@@ -40,7 +40,7 @@ Classic GEV chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.
 
 This agent VM cannot initialize Cesium WebGL. On a GPU machine, also confirm:
 
-- Globe appears under the calm investor HUD (no TOP SECRET / filter dashboard)
+- Globe appears under the calm investor HUD (no TOP SECRET / filter dashboard). Black void + Cesium/Esri credits without Earth is a failure; after Atlanta/Decatur a gray ellipsoid without imagery must show `#ts-globe-error`
 - After Atlanta/Decatur, semantic pulses use the render governor only (FORECLOSURE heartbeat, TAX_SALE vertical, DISTRESS shimmer, LISTED ring, TOP_PICK gold)
 - `prefers-reduced-motion: reduce` freezes motion
 - Clicking a pulse focuses that mock house

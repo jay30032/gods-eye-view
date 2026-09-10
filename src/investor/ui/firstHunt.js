@@ -85,6 +85,7 @@ export function setHuntSuppressed(suppressed, storage) {
 export function initFirstHunt({
   root,
   onBegin,
+  onDismiss,
   storage,
   sessionStorageRef,
   location,
@@ -94,15 +95,18 @@ export function initFirstHunt({
 
   if (root._tsHunt) {
     if (onBegin) root._tsHunt.onBegin = onBegin;
+    if (onDismiss) root._tsHunt.onDismiss = onDismiss;
     return root._tsHunt;
   }
 
   let currentBegin = onBegin;
+  let currentDismiss = onDismiss;
   const show = shouldShowFirstHunt({ hasShareState, storage, sessionStorageRef, location });
   const dismiss = ({ persistSession = true } = {}) => {
     root.hidden = true;
     root.classList.remove('visible');
     if (persistSession) rememberHuntSessionDismissed(sessionStorageRef);
+    currentDismiss?.();
   };
 
   const begin = async (choice = 'atlanta') => {
@@ -139,6 +143,7 @@ export function initFirstHunt({
     dismiss,
     begin,
     set onBegin(fn) { currentBegin = fn; },
+    set onDismiss(fn) { currentDismiss = fn; },
     destroy() {
       document.removeEventListener('keydown', onKey, true);
       delete root._tsHunt;

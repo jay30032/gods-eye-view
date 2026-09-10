@@ -19,8 +19,13 @@ import {
   createConversationState,
   parseDemoIntent,
 } from './conversation.js';
-import { governorRequestRender } from '../renderGovernor.js';
+import { governorRequestRender, holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
 import { setScopeMaskEnabled } from '../scopeMask.js';
+import {
+  ensureKeylessVisibleBasemap,
+  INVESTOR_BASEMAP_HOLD,
+  INVESTOR_HUNT_HOLD,
+} from './ensureBasemap.js';
 import { applyInvestorChrome, relocateVoiceControl, setAiPrompt, setLodChip, setNavActive } from './ui/chrome.js';
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
@@ -74,8 +79,21 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   await disableLiveFeeds(dataManager);
   try { styleManager?.hud?.setVisible?.(false); } catch { /* optional */ }
   try { setScopeMaskEnabled(false); } catch { /* optional */ }
-  if (viewer?.scene?.globe && !globalThis.__godsEyeView?.tileset) {
+  const tileset = globalThis.__godsEyeView?.tileset || null;
+  const mapStackController = globalThis.__godsEyeView?.mapStackController
+    || styleManager?.mapStackController
+    || null;
+  if (viewer?.scene?.globe && !tileset) {
     viewer.scene.globe.show = true;
+    holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+    holdContinuousRender(INVESTOR_HUNT_HOLD);
+    await ensureKeylessVisibleBasemap({
+      viewer,
+      mapStackController,
+      styleManager,
+      tileset,
+      phase: 'session',
+    });
   }
   try { viewer?.resize?.(); } catch { /* optional */ }
   governorRequestRender('investor-session');
@@ -303,21 +321,43 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   setAiPrompt('Where are we hunting today?');
 
   const startHunt = async () => {
+    releaseContinuousRender(INVESTOR_HUNT_HOLD);
     setAiPrompt('Descending on Atlanta / Decatur…');
+    if (!tileset) {
+      holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+      if (viewer?.scene?.globe) viewer.scene.globe.show = true;
+    }
     await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });
+    if (!tileset) {
+      const painted = await ensureKeylessVisibleBasemap({
+        viewer,
+        mapStackController,
+        styleManager,
+        tileset,
+        phase: 'after-market',
+      });
+      if (painted.empty) {
+        setAiPrompt('Earth imagery failed — the gray globe is empty, not the Decatur market.');
+      }
+    }
     visuals.startScan();
     setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
-    setAiPrompt(market.greeting);
+    const banner = document.getElementById('ts-globe-error');
+    if (!banner || banner.hidden) setAiPrompt(market.greeting);
   };
 
   hunt = initFirstHunt({
     root: document.getElementById('ts-first-hunt'),
     hasShareState: Boolean(styleManager?.hasShareState),
     onBegin: startHunt,
+    onDismiss: () => releaseContinuousRender(INVESTOR_HUNT_HOLD),
   });
   session.beginHunt = startHunt;
   session.firstHunt = hunt;
-  if (!hunt?.show) await startHunt();
+  if (!hunt?.show) {
+    releaseContinuousRender(INVESTOR_HUNT_HOLD);
+    await startHunt();
+  }
 
   return session;
 }

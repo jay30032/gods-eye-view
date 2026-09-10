@@ -9667,6 +9667,31 @@ body.terrasignal-investor #cesiumContainer canvas {
   line-height: 1.45;
 }
 
+#ts-basemap-toast,
+#ts-imagery-status {
+  position: fixed;
+  left: 50%;
+  bottom: 6.4rem;
+  transform: translateX(-50%);
+  z-index: 70;
+  width: min(26rem, 90vw);
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.65rem;
+  background: rgba(12, 8, 4, 0.88);
+  border: 1px solid rgba(212, 160, 23, 0.35);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+
+#ts-basemap-toast[hidden],
+#ts-imagery-status[hidden] {
+  display: none;
+}
+
 #terrasignal-brand,
 #ts-ai-prompt,
 #ts-first-hunt,

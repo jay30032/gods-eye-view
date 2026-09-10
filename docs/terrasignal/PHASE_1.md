@@ -35,9 +35,12 @@ src/investor/
   visuals/               governor-held Cesium entities
   ui/                    brand, bottom nav, focus, saved
   session.js             bootstrap + demo intents
+  ensureBasemap.js       keyless Esri → OSM + render hold + empty-globe assert
   voiceTools.js          additive GEV tool handlers
   driveDemo.js           simulated route
 ```
+
+Keyless boot (`baseLayer: false`) starts with zero ImageryLayers. Esri credits can appear after provider construction without tiles painting. Investor forces Esri World Imagery, falls back to OSM on any failure, holds continuous render through first-hunt, and asserts `globe.show === true` plus at least one showing ImageryLayer after the stack is ready.
 
 Investor mode still *registers* GEV layers so `finalizeRegistrations` stays honest, then forces them off after layer-state restore. Opportunity Vision holds `investor-opportunity` only while enabled and near/clustered; Drive holds `investor-drive` only while running.
 

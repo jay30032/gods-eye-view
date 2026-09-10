@@ -37,13 +37,16 @@ test('initFirstHunt is idempotent and accepts a later onBegin', async () => {
   };
   const first = initFirstHunt({ root, location: { search: '?welcome=1' } });
   let started = '';
+  let dismissed = 0;
   const second = initFirstHunt({
     root,
     location: { search: '?welcome=1' },
     onBegin: (choice) => { started = choice; },
+    onDismiss: () => { dismissed += 1; },
   });
   assert.equal(first, second);
   await second.begin('atlanta');
   assert.equal(started, 'atlanta');
+  assert.equal(dismissed >= 1, true);
   first.destroy();
 });

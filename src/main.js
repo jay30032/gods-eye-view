@@ -38,6 +38,11 @@ import { isInvestorProduct, readInvestorConfig } from './investor/config.js';
 import { startInvestorSession } from './investor/session.js';
 import { applyInvestorChrome } from './investor/ui/chrome.js';
 import { showInvestorGlobeError } from './investor/globeReveal.js';
+import {
+  ensureKeylessVisibleBasemap,
+  INVESTOR_BASEMAP_HOLD,
+  INVESTOR_HUNT_HOLD,
+} from './investor/ensureBasemap.js';
 
 initLogoGaze();
 
@@ -206,6 +211,16 @@ async function init() {
       onError: (message) => console.warn('[MapStack]', message),
     });
     await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', { silent: true });
+    if (investorMode && !tileset) {
+      holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+      holdContinuousRender(INVESTOR_HUNT_HOLD);
+      await ensureKeylessVisibleBasemap({
+        viewer,
+        mapStackController,
+        tileset,
+        phase: 'boot',
+      });
+    }
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
@@ -301,6 +316,9 @@ async function init() {
     // Idle render governor: flips the scene into requestRenderMode whenever
     // nothing animates per frame. Installed AFTER every module above has had
     // its chance to register pre-install holds. (perf wave 2)
+    // Investor keyless: the basemap / first-hunt holds above keep the loop
+    // continuous so the first Esri/OSM tiles are actually requested instead
+    // of parking on a black unrendered frame.
     installRenderGovernor(viewer);
 
     // The explicit scope mask replaces the emergent six-pass artifact —
@@ -356,9 +374,17 @@ async function init() {
 
     if (investorMode) {
       try { await styleManager._layerStateRestorePromise; } catch { /* empty local state is fine */ }
+      try { await styleManager.initialRestorePromise; } catch { /* share restore is optional */ }
       setScopeMaskEnabled(false);
-      if (!tileset) viewer.scene.globe.show = true;
-      governorRequestRender('investor-globe');
+      if (!tileset) {
+        await ensureKeylessVisibleBasemap({
+          viewer,
+          mapStackController,
+          styleManager,
+          tileset,
+          phase: 'after-restore',
+        });
+      }
       window.__terraSignal = await startInvestorSession({ viewer, styleManager, dataManager });
       window.__godsEyeView.investor = window.__terraSignal;
     }
