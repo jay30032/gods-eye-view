@@ -98,15 +98,18 @@ function createDocument() {
 }
 
 function createTimers() {
-  const pending = [];
+  const pending = new Map();
+  let next = 0;
   return {
     setTimeout(fn) {
-      pending.push(fn);
-      return pending.length;
+      const id = ++next;
+      pending.set(id, fn);
+      return id;
     },
-    clearTimeout() {},
+    clearTimeout(id) { pending.delete(id); },
     flush() {
-      const run = pending.splice(0);
+      const run = [...pending.values()];
+      pending.clear();
       for (const fn of run) fn();
     },
   };
@@ -119,6 +122,30 @@ test('keyless inspect treats a hidden globe or zero layers as empty', () => {
   assert.equal(inspect.imageryLayerCount, 0);
   assert.equal(keylessGlobeLooksEmpty(inspect), true);
   assert.equal(countShowingImageryLayers(viewer), 0);
+});
+
+test('an already-attached imagery layer skips a second Esri setStack', async () => {
+  _resetRenderGovernorForTest();
+  const viewer = createMockViewer();
+  let switches = 0;
+  const mapStackController = createMockController(viewer, { esri: 'ok' });
+  const original = mapStackController.setStack.bind(mapStackController);
+  mapStackController.setStack = async (id) => {
+    switches += 1;
+    return original(id);
+  };
+  await original('esri-imagery');
+  const result = await ensureKeylessVisibleBasemap({
+    viewer,
+    mapStackController,
+    documentRef: createDocument(),
+    fetchImpl: async () => ({ ok: true }),
+    timers: createTimers(),
+    holdMs: 0,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.imageryLayerCount > 0, true);
+  assert.equal(switches, 0);
 });
 
 test('keyless investor init attaches a visible imagery layer and shows the globe', async () => {

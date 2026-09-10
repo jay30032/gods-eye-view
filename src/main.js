@@ -37,7 +37,7 @@ import { loadPhotorealisticTileset } from './mapStartup.js';
 import { isInvestorProduct, readInvestorConfig } from './investor/config.js';
 import { startInvestorSession } from './investor/session.js';
 import { applyInvestorChrome } from './investor/ui/chrome.js';
-import { showInvestorGlobeError } from './investor/globeReveal.js';
+import { cesiumCanvasIsLive, showInvestorGlobeError } from './investor/globeReveal.js';
 import {
   ensureKeylessVisibleBasemap,
   INVESTOR_BASEMAP_HOLD,
@@ -212,8 +212,10 @@ async function init() {
     });
     await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', { silent: true });
     if (investorMode && !tileset) {
-      holdContinuousRender(INVESTOR_BASEMAP_HOLD);
-      holdContinuousRender(INVESTOR_HUNT_HOLD);
+      if (cesiumCanvasIsLive(document.getElementById('cesiumContainer'))) {
+        holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+        holdContinuousRender(INVESTOR_HUNT_HOLD);
+      }
       await ensureKeylessVisibleBasemap({
         viewer,
         mapStackController,

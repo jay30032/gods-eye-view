@@ -30,6 +30,7 @@ import { applyInvestorChrome, relocateVoiceControl, setAiPrompt, setLodChip, set
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
 import { hideFocusCard, renderFocusCard } from './ui/focusCard.js';
+import { cesiumCanvasIsLive } from './globeReveal.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
 
 function readVisionPref(defaultValue) {
@@ -85,8 +86,10 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     || null;
   if (viewer?.scene?.globe && !tileset) {
     viewer.scene.globe.show = true;
-    holdContinuousRender(INVESTOR_BASEMAP_HOLD);
-    holdContinuousRender(INVESTOR_HUNT_HOLD);
+    if (cesiumCanvasIsLive(document.getElementById('cesiumContainer'))) {
+      holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+      holdContinuousRender(INVESTOR_HUNT_HOLD);
+    }
     await ensureKeylessVisibleBasemap({
       viewer,
       mapStackController,
@@ -324,7 +327,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     releaseContinuousRender(INVESTOR_HUNT_HOLD);
     setAiPrompt('Descending on Atlanta / Decatur…');
     if (!tileset) {
-      holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+      if (cesiumCanvasIsLive(document.getElementById('cesiumContainer'))) {
+        holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+      }
       if (viewer?.scene?.globe) viewer.scene.globe.show = true;
     }
     await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });

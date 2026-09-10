@@ -327,9 +327,33 @@ export async function ensureKeylessVisibleBasemap({
     return { ok: true, skipped: true, empty: false, globeShow: false, imageryLayerCount: 0 };
   }
 
-  holdContinuousRender(INVESTOR_BASEMAP_HOLD);
   if (viewer?.scene?.globe) viewer.scene.globe.show = true;
+  try { viewer?.resize?.(); } catch { /* optional */ }
   requestSceneRender(viewer);
+
+  const host = resolveCesiumContainer(viewer, container, documentRef);
+  const canvasLiveNow = () => {
+    const canvas = findCesiumCanvas(viewer, host, documentRef);
+    return cesiumCanvasIsLive(host) || cesiumCanvasIsLive({ querySelector: () => canvas });
+  };
+  if (canvasLiveNow()) holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+  else releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
+
+  const message = phase === 'after-market' ? GRAY_VOID_COPY : IMAGERY_FAILED_COPY;
+  let watchdog = null;
+  if (typeof timers?.setTimeout === 'function') {
+    watchdog = timers.setTimeout(() => {
+      releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
+      assertInvestorGlobeReady({
+        viewer,
+        container,
+        mapStackController,
+        documentRef,
+        message,
+      });
+    }, 4000);
+  }
+
   showImageryStatus('Loading Earth imagery…', documentRef);
 
   let usedFallback = false;
@@ -354,6 +378,11 @@ export async function ensureKeylessVisibleBasemap({
     requestSceneRender(viewer);
   };
 
+  const alreadyPainted = !keylessGlobeLooksEmpty(inspectKeylessGlobe(viewer, mapStackController));
+  if (alreadyPainted) {
+    probe = false;
+  }
+
   if (probe) {
     const probed = await probeEsriWorldImagery({ fetchImpl, timers });
     if (!probed.ok && !probed.skipped) {
@@ -362,7 +391,7 @@ export async function ensureKeylessVisibleBasemap({
     }
   }
 
-  if (!usedFallback) {
+  if (!usedFallback && !alreadyPainted) {
     esriAttempted = true;
     try {
       const state = await withTimeout(
@@ -409,12 +438,14 @@ export async function ensureKeylessVisibleBasemap({
   }
 
   kickRenderBurst(viewer, { timers });
+  if (canvasLiveNow()) holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+  else releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
   const release = timers?.setTimeout?.bind(timers);
   if (typeof release === 'function' && holdMs > 0) {
     release(() => releaseContinuousRender(INVESTOR_BASEMAP_HOLD), holdMs);
   }
+  if (watchdog != null) timers.clearTimeout?.(watchdog);
 
-  const message = phase === 'after-market' ? GRAY_VOID_COPY : IMAGERY_FAILED_COPY;
   const asserted = assertInvestorGlobeReady({
     viewer,
     container,
