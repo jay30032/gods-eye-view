@@ -313,10 +313,13 @@ export class MapStackController {
 
     if (this.googleTileset) this.googleTileset.show = false;
     this.viewer.scene.globe.show = true;
-    // Request a frame *before* the Re:Earth terrain await so the new layer
-    // can start fetching tiles instead of sitting on a black/gray ellipsoid.
+    // Request a frame immediately so the new ImageryLayer can fetch tiles.
+    // Do NOT await Re:Earth / ion terrain here: layer.json can hang on a
+    // filtered network while Esri credits are already on screen, leaving a
+    // black or gray ellipsoid. Terrain still installs when the fetch lands
+    // (same generation guard as before).
     try { this.viewer?.scene?.requestRender?.(); } catch { /* stub / pre-init */ }
-    await this._setWorldTerrainEnabled(!!this.cesiumToken, gen);
+    void this._setWorldTerrainEnabled(!!this.cesiumToken, gen);
     return resolution;
   }
 

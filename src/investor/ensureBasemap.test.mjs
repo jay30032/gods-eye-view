@@ -199,6 +199,22 @@ test('runtime assert fires when the canvas is live but the globe is empty', () =
   assert.match(banner.innerHTML, /imagery layer/i);
 });
 
+test('runtime assert fires when Cesium never created a canvas', () => {
+  const viewer = createMockViewer();
+  viewer.container = { querySelector: () => null };
+  const documentRef = createDocument();
+  const result = assertInvestorGlobeReady({
+    viewer,
+    mapStackController: createMockController(viewer),
+    documentRef,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.missingCanvas, true);
+  const banner = documentRef.getElementById('ts-globe-error');
+  assert.equal(banner.hidden, false);
+  assert.match(banner.innerHTML, /canvas/i);
+});
+
 test('photoreal tileset skips the keyless ellipsoid force', async () => {
   assert.equal(shouldSkipKeylessBasemap({ tileset: { show: true } }), true);
   const result = await ensureKeylessVisibleBasemap({

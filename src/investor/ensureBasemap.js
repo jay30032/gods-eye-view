@@ -39,6 +39,15 @@ const IMAGERY_FAILED_COPY =
   + 'Esri World Imagery failed and the OSM fallback did not attach. '
   + 'Cesium credits can appear without a painted Earth.';
 
+const MISSING_CANVAS_COPY =
+  'Cesium did not create a usable WebGL canvas. Credits can still appear '
+  + 'in the corner. Earth cannot paint until the canvas exists and has a '
+  + 'drawing buffer.';
+
+const ZERO_BUFFER_COPY =
+  'The Cesium canvas has no drawing buffer (it is missing or 0×0). '
+  + 'The black void behind the HUD is not a painted globe.';
+
 const GRAY_VOID_COPY =
   'Earth imagery failed after the Atlanta / Decatur descent. '
   + 'The gray globe is an empty ellipsoid — not a loading market. '
@@ -155,6 +164,36 @@ export function resolveCesiumContainer(viewer, container, documentRef = globalTh
     || null;
 }
 
+export function findCesiumCanvas(viewer, container, documentRef = globalThis.document) {
+  const host = resolveCesiumContainer(viewer, container, documentRef);
+  const fromHost = host?.querySelector?.('canvas');
+  if (fromHost) return fromHost;
+  return documentRef?.querySelector?.('#cesiumContainer canvas')
+    || viewer?.scene?.canvas
+    || viewer?.canvas
+    || null;
+}
+
+export function withTimeout(promise, ms, label = 'operation', timers = globalThis) {
+  const task = Promise.resolve(promise);
+  if (!(ms > 0)) return task;
+  return new Promise((resolve, reject) => {
+    const tid = timers.setTimeout?.(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    task.then(
+      (value) => {
+        timers.clearTimeout?.(tid);
+        resolve(value);
+      },
+      (error) => {
+        timers.clearTimeout?.(tid);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function assertInvestorGlobeReady({
   viewer,
   container,
@@ -163,49 +202,77 @@ export function assertInvestorGlobeReady({
   message = IMAGERY_FAILED_COPY,
 } = {}) {
   const inspect = inspectKeylessGlobe(viewer, mapStackController);
-  const canvasLive = cesiumCanvasIsLive(resolveCesiumContainer(viewer, container, documentRef));
+  const host = resolveCesiumContainer(viewer, container, documentRef);
+  const canvas = findCesiumCanvas(viewer, host, documentRef);
+  const canvasLive = cesiumCanvasIsLive(host) || cesiumCanvasIsLive({
+    querySelector: () => canvas,
+  });
   const empty = keylessGlobeLooksEmpty(inspect);
-  if (canvasLive && empty) {
+  if (!canvas) {
+    showInvestorGlobeError(MISSING_CANVAS_COPY, documentRef);
+    hideImageryStatus(documentRef);
+    return {
+      ...inspect,
+      ok: false,
+      empty: true,
+      canvasLive: false,
+      missingCanvas: true,
+      asserted: true,
+    };
+  }
+  if (!canvasLive) {
+    showInvestorGlobeError(ZERO_BUFFER_COPY, documentRef);
+    hideImageryStatus(documentRef);
+    return {
+      ...inspect,
+      ok: false,
+      empty: true,
+      canvasLive: false,
+      missingCanvas: false,
+      asserted: true,
+    };
+  }
+  if (empty) {
     showInvestorGlobeError(message, documentRef);
     showImageryStatus(
       'Earth imagery failed — the black or gray globe is empty, not a market view.',
       documentRef,
     );
-    return { ...inspect, ok: false, empty: true, canvasLive, asserted: true };
+    return { ...inspect, ok: false, empty: true, canvasLive, missingCanvas: false, asserted: true };
   }
-  if (!empty) {
-    hideInvestorGlobeError(documentRef);
-    hideImageryStatus(documentRef);
-  }
-  return { ...inspect, ok: !empty, empty, canvasLive, asserted: true };
+  hideInvestorGlobeError(documentRef);
+  hideImageryStatus(documentRef);
+  return { ...inspect, ok: true, empty: false, canvasLive, missingCanvas: false, asserted: true };
 }
 
 export async function probeEsriWorldImagery({
   fetchImpl = globalThis.fetch,
   timeoutMs = 3500,
   url = ESRI_WORLD_IMAGERY_URL,
+  timers = globalThis,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     return { ok: true, skipped: true, reason: 'no-fetch' };
   }
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
-  let timer = null;
   try {
-    if (controller && timeoutMs > 0) {
-      timer = globalThis.setTimeout?.(() => controller.abort(), timeoutMs);
-    }
-    const response = await fetchImpl(`${url}?f=json`, {
-      method: 'GET',
-      signal: controller?.signal,
-    });
+    const response = await withTimeout(
+      fetchImpl(`${url}?f=json`, {
+        method: 'GET',
+        signal: controller?.signal,
+      }),
+      timeoutMs,
+      'Esri probe',
+      timers,
+    );
     if (!response || response.ok === false) {
+      try { controller?.abort?.(); } catch { /* ignore */ }
       return { ok: false, skipped: false, reason: `http-${response?.status || 'error'}` };
     }
     return { ok: true, skipped: false, reason: null };
   } catch (error) {
+    try { controller?.abort?.(); } catch { /* ignore */ }
     return { ok: false, skipped: false, reason: error?.name || error?.message || 'fetch-failed' };
-  } finally {
-    if (timer) globalThis.clearTimeout?.(timer);
   }
 }
 
@@ -250,6 +317,7 @@ export async function ensureKeylessVisibleBasemap({
   timers = globalThis,
   probe = true,
   holdMs = 8000,
+  stackTimeoutMs = 5000,
   phase = 'boot',
 } = {}) {
   if (shouldSkipKeylessBasemap({
@@ -272,13 +340,22 @@ export async function ensureKeylessVisibleBasemap({
     usedFallback = true;
     fallbackReason = reason;
     toastEsriFallback(reason, { documentRef, styleManager });
-    await activateStack(mapStackController, 'osm');
+    try {
+      await withTimeout(
+        activateStack(mapStackController, 'osm'),
+        stackTimeoutMs,
+        'OSM map stack',
+        timers,
+      );
+    } catch {
+      // Last-ditch: still force the ellipsoid on so a later assert can speak.
+    }
     if (viewer?.scene?.globe) viewer.scene.globe.show = true;
     requestSceneRender(viewer);
   };
 
   if (probe) {
-    const probed = await probeEsriWorldImagery({ fetchImpl });
+    const probed = await probeEsriWorldImagery({ fetchImpl, timers });
     if (!probed.ok && !probed.skipped) {
       esriAttempted = true;
       await failToOsm('Esri Satellite is unreachable; using OSM');
@@ -288,7 +365,12 @@ export async function ensureKeylessVisibleBasemap({
   if (!usedFallback) {
     esriAttempted = true;
     try {
-      const state = await activateStack(mapStackController, 'esri-imagery');
+      const state = await withTimeout(
+        activateStack(mapStackController, 'esri-imagery'),
+        stackTimeoutMs,
+        'Esri map stack',
+        timers,
+      );
       if (viewer?.scene?.globe) viewer.scene.globe.show = true;
       requestSceneRender(viewer);
       const afterEsri = inspectKeylessGlobe(viewer, mapStackController);
