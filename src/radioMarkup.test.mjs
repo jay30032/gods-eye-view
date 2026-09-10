@@ -178,8 +178,24 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'select_nearest_aircraft',
     'set_map_stack',
   ]);
+  const INVESTOR_ADDED = new Set([
+    'set_opportunity_vision',
+    'search_mock_properties',
+    'focus_property',
+    'rank_mock_properties',
+    'explain_property',
+    'show_deal_vision',
+    'run_flip_analysis',
+    'run_rental_analysis',
+    'run_brrrr_analysis',
+    'run_wholesale_analysis',
+    'save_property',
+    'show_saved_properties',
+    'start_drive_demo',
+    'stop_drive_demo',
+  ]);
   const unchanged = realtimeTools()
-    .filter((tool) => !TOUCHED.has(tool.name))
+    .filter((tool) => !TOUCHED.has(tool.name) && !INVESTOR_ADDED.has(tool.name))
     .sort((a, b) => a.name.localeCompare(b.name));
   assert.equal(unchanged.length, 21);
   const digest = createHash('sha256')
