@@ -95,6 +95,7 @@ export const INVESTOR_LAYER_DENYLIST = Object.freeze([
   'local-dams',
   'telegeography-submarine-cables',
   'local-firms',
+  'news',
   'military-installations',
   'military-awareness',
 ]);

@@ -1,26 +1,91 @@
 import { analyzePropertyDeal, bestStrategyFor, normalizeStrategy } from './deal/index.js';
-import { findMoney } from './mock/search.js';
+import { FIND_MONEY_LIMIT, findMoney } from './mock/search.js';
 import { whyThisMatters } from './focus.js';
 
-const MONEY = /find(?:\s+me)?\s+money|where(?:'s| is) the money|hunt|show me opportunities|top pick/i;
-const WHY = /\bwhy\b|what(?:'s| is) special|explain|why this/i;
-const DEAL = /show me the deal|the deal|underwrite|run the numbers|deal vision/i;
-const REHAB_UP = /rehab.+(twenty|20)[ -]?thousand higher|assume rehab.+(higher|more)|rehab \+ ?20/i;
-const SAVE = /\bsave (it|this|that)\b|bookmark|keep this/i;
-const DRIVE = /start drive|drive demo|let'?s drive/i;
-const STOP_DRIVE = /stop drive|end drive/i;
+export { FIND_MONEY_LIMIT };
+
+export const ACCEPTANCE_PHRASES = Object.freeze([
+  'Find me money',
+  'Why?',
+  'Show me the deal',
+  'Assume rehab is twenty thousand higher',
+  'Save it',
+]);
+
+const EXACT_INTENTS = Object.freeze({
+  'find me money': 'find_money',
+  'find money': 'find_money',
+  "where's the money": 'find_money',
+  'where is the money': 'find_money',
+  'show me opportunities': 'find_money',
+  why: 'why',
+  'why this': 'why',
+  'why this matters': 'why',
+  "what's special": 'why',
+  'what is special': 'why',
+  explain: 'why',
+  'show me the deal': 'show_deal',
+  'show the deal': 'show_deal',
+  'the deal': 'show_deal',
+  underwrite: 'show_deal',
+  'run the numbers': 'show_deal',
+  'deal vision': 'show_deal',
+  'assume rehab is twenty thousand higher': 'rehab_plus_20k',
+  'assume rehab is 20 thousand higher': 'rehab_plus_20k',
+  'assume rehab is 20000 higher': 'rehab_plus_20k',
+  'rehab is twenty thousand higher': 'rehab_plus_20k',
+  'rehab +20k': 'rehab_plus_20k',
+  'save it': 'save',
+  'save this': 'save',
+  'save that': 'save',
+  bookmark: 'save',
+  'keep this': 'save',
+  'start drive': 'start_drive',
+  'drive demo': 'start_drive',
+  "let's drive": 'start_drive',
+  'stop drive': 'stop_drive',
+  'end drive': 'stop_drive',
+});
+
+export function normalizeDemoUtterance(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[“”]/g, '"')
+    .replace(/['’]/g, "'")
+    .replace(/[.!?]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function parseDemoIntent(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
-  if (MONEY.test(raw)) return { intent: 'find_money' };
-  if (REHAB_UP.test(raw)) return { intent: 'rehab_plus_20k' };
-  if (DEAL.test(raw)) return { intent: 'show_deal' };
-  if (WHY.test(raw)) return { intent: 'why' };
-  if (SAVE.test(raw)) return { intent: 'save' };
-  if (DRIVE.test(raw)) return { intent: 'start_drive' };
-  if (STOP_DRIVE.test(raw)) return { intent: 'stop_drive' };
-  return { intent: 'unknown', text: raw };
+  const normalized = normalizeDemoUtterance(raw);
+  const exact = EXACT_INTENTS[normalized];
+  if (exact) return { intent: exact, phrase: raw, normalized };
+
+  if (/find(?:\s+me)?\s+money|where(?:'s| is) the money|show me opportunities/.test(normalized)) {
+    return { intent: 'find_money', phrase: raw, normalized };
+  }
+  if (/rehab.+(twenty|20)[ -]?thousand higher|assume rehab.+(higher|more)|rehab \+ ?20/.test(normalized)) {
+    return { intent: 'rehab_plus_20k', phrase: raw, normalized };
+  }
+  if (/show me the deal|the deal|underwrite|run the numbers|deal vision/.test(normalized)) {
+    return { intent: 'show_deal', phrase: raw, normalized };
+  }
+  if (/\bwhy\b|what(?:'s| is) special|explain|why this/.test(normalized)) {
+    return { intent: 'why', phrase: raw, normalized };
+  }
+  if (/\bsave (it|this|that)\b|bookmark|keep this/.test(normalized)) {
+    return { intent: 'save', phrase: raw, normalized };
+  }
+  if (/start drive|drive demo|let'?s drive/.test(normalized)) {
+    return { intent: 'start_drive', phrase: raw, normalized };
+  }
+  if (/stop drive|end drive/.test(normalized)) {
+    return { intent: 'stop_drive', phrase: raw, normalized };
+  }
+  return { intent: 'unknown', text: raw, normalized };
 }
 
 export function createConversationState() {
@@ -29,22 +94,36 @@ export function createConversationState() {
     lastStrategy: null,
     rehabDelta: 0,
     lastSpoken: '',
+    candidateIds: [],
+    topPickId: null,
+    visionOn: false,
+    savedId: null,
+    dealVisible: false,
   };
 }
 
-export function applyFindMoney(properties, state) {
-  const hits = findMoney(properties, 5);
+export function applyFindMoney(properties, state, { limit = FIND_MONEY_LIMIT } = {}) {
+  const hits = findMoney(properties, limit);
   const top = hits[0] || null;
+  state.candidateIds = hits.map((hit) => hit.property.id);
+  state.topPickId = top?.property.id || null;
+  state.visionOn = true;
+  state.rehabDelta = 0;
+  state.dealVisible = false;
+  state.savedId = null;
   if (top) {
     state.focusedId = top.property.id;
     state.lastStrategy = top.bestStrategy;
-    state.rehabDelta = 0;
   }
   return {
     ok: Boolean(top),
     action: 'rank_mock_properties',
+    visionOn: true,
+    candidateCount: hits.length,
+    candidateIds: state.candidateIds.slice(),
+    topPickId: state.topPickId,
     spoken: top
-      ? `Top mock pick is ${top.property.address}. Composite ${top.score}. ${top.property.why}`
+      ? `Opportunity Vision on. ${hits.length} strong mock candidates. Gold pick is ${top.property.address.split(',')[0]}. Composite ${top.score}.`
       : 'No mock opportunities in this market.',
     focusId: top?.property.id || null,
     results: hits.map((hit) => ({
@@ -79,6 +158,7 @@ export function applyShowDeal(property, state) {
   }
   const strategy = state.lastStrategy || bestStrategyFor(property);
   state.lastStrategy = strategy;
+  state.dealVisible = true;
   const analysis = analyzePropertyDeal(property, strategy, { rehabDelta: state.rehabDelta });
   return {
     ok: true,
@@ -95,6 +175,7 @@ export function applyRehabDelta(property, state, delta = 20000) {
     return { ok: false, action: 'run_flip_analysis', spoken: 'Focus a property first, then we can change rehab.' };
   }
   state.rehabDelta = Number(state.rehabDelta || 0) + Number(delta || 0);
+  state.dealVisible = true;
   const strategy = state.lastStrategy || bestStrategyFor(property);
   const analysis = analyzePropertyDeal(property, strategy, { rehabDelta: state.rehabDelta });
   return {
@@ -105,6 +186,21 @@ export function applyRehabDelta(property, state, delta = 20000) {
     rehabDelta: state.rehabDelta,
     analysis,
     spoken: `Rehab is now ${formatMoney((property.deal?.rehab || 0) + state.rehabDelta)}. ${speakAnalysis(property, strategy, analysis)}`,
+  };
+}
+
+export function applySave(property, state, saver) {
+  if (!property) {
+    return { ok: false, action: 'save_property', spoken: 'Nothing to save.' };
+  }
+  const result = typeof saver === 'function'
+    ? saver(property, { strategy: state.lastStrategy, note: '' })
+    : { ok: true, id: property.id, saved: [{ id: property.id, address: property.address }] };
+  if (result.ok) state.savedId = property.id;
+  return {
+    ...result,
+    action: 'save_property',
+    spoken: result.ok ? `Saved ${property.address.split(',')[0]}.` : (result.error || 'Nothing to save.'),
   };
 }
 

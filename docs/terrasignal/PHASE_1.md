@@ -18,6 +18,8 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 - [x] Saved via `localStorage`
 - [x] Existing GEV voice tools kept; investor tools added
 - [x] Demo conversation: Find me money → Why? → Show me the deal → rehab +20k → Save it
+- [x] `?demo=1` / DEMO chip scripts the acceptance sequence; typed bar works without mic or API keys
+- [x] Find me money: vision ON, exactly 4 candidates, gold best, camera focus
 - [x] Drive demo simulation (not GPS): strong signals only; why/save/skip/next
 - [x] Investor path disables OpenSky / FIRMS / cables / news / other GEV live layers
 - [x] Phase 2 not started
@@ -55,3 +57,7 @@ TERRASIGNAL_DISABLE_LIVE_FEEDS=true
 ## Explicitly not Phase 2
 
 Live property APIs, real GPS drive, multi-market production data, seller outreach, underwriting against county records, or a React rewrite.
+
+## 5-minute demo
+
+See [START_HERE.md](./START_HERE.md). URL: `http://localhost:4173/?demo=1&welcome=1` after `npm run dev`.

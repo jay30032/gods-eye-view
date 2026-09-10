@@ -1,3 +1,4 @@
+import { readDemoMode } from '../demoSequence.js';
 import { initFirstHunt } from './firstHunt.js';
 
 const HIDDEN_GEV = [
@@ -38,6 +39,13 @@ export function applyInvestorChrome({ productName, tagline }) {
   initFirstHunt({
     root: document.getElementById('ts-first-hunt'),
   });
+  if (readDemoMode().enabled) {
+    const rail = document.getElementById('ts-demo-script');
+    if (rail) {
+      rail.hidden = false;
+      rail.classList.add('visible');
+    }
+  }
 }
 
 function ensureInvestorShell(productName, tagline) {
@@ -57,6 +65,7 @@ function ensureInvestorShell(productName, tagline) {
         <span>Opportunity Vision</span>
       </label>
       <div id="ts-lod-chip" aria-live="polite">CITY</div>
+      <button type="button" id="ts-demo-chip">DEMO</button>
     </header>
     <div id="ts-vignette" aria-hidden="true"></div>
     <p id="ts-ai-prompt" role="status" aria-live="polite">Where are we hunting today?</p>
@@ -78,6 +87,18 @@ function ensureInvestorShell(productName, tagline) {
         <input type="checkbox" data-ts-hunt-suppress />
         <span>Don't show this again</span>
       </label>
+    </aside>
+    <aside id="ts-demo-script" hidden>
+      <span class="ts-kicker">5-minute demo</span>
+      <strong data-ts-demo-step-title>1 · Hunt</strong>
+      <p data-ts-demo-step-copy>Where are we hunting today? Choose Atlanta / Decatur to descend.</p>
+      <code data-ts-demo-phrase hidden></code>
+      <div class="ts-demo-actions">
+        <button type="button" data-ts-demo-next>Atlanta / Decatur</button>
+        <button type="button" data-ts-demo-auto>Play</button>
+      </div>
+      <ol data-ts-demo-list></ol>
+      <p class="ts-demo-hint">Typed commands work with no mic and no API keys. Voice is optional.</p>
     </aside>
     <aside id="ts-focus-card" hidden></aside>
     <aside id="ts-saved-sheet" hidden></aside>

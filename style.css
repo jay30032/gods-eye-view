@@ -9612,6 +9612,7 @@ body.terrasignal-investor #key-setup-chip {
 #terrasignal-brand,
 #ts-ai-prompt,
 #ts-first-hunt,
+#ts-demo-script,
 #ts-focus-card,
 #ts-saved-sheet,
 #ts-bottom-nav,
@@ -9671,13 +9672,21 @@ body.terrasignal-investor #key-setup-chip {
   color: rgba(244, 239, 228, 0.8);
 }
 
-#ts-lod-chip {
+#ts-lod-chip,
+#ts-demo-chip {
   margin-left: 0.4rem;
   padding: 0.18rem 0.45rem;
   border: 1px solid rgba(212, 160, 23, 0.4);
   border-radius: 999px;
   font-size: 0.62rem;
   letter-spacing: 0.12em;
+}
+
+#ts-demo-chip {
+  background: transparent;
+  color: #e0b84a;
+  cursor: pointer;
+  font-family: Inter, sans-serif;
 }
 
 #ts-ai-prompt {
@@ -9866,6 +9875,87 @@ body.terrasignal-investor #key-setup-chip {
 
 .ts-hunt-explore {
   background: transparent !important;
+}
+
+#ts-demo-script {
+  position: fixed;
+  left: 1.1rem;
+  top: 5.4rem;
+  z-index: 44;
+  width: min(18.5rem, 42vw);
+  padding: 0.95rem 1rem 0.85rem;
+  border-radius: 0.85rem;
+  background: rgba(10, 8, 4, 0.9);
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-demo-script > strong {
+  display: block;
+  margin: 0.35rem 0 0.4rem;
+  font-size: 1rem;
+}
+
+#ts-demo-script > p {
+  margin: 0 0 0.65rem;
+  color: rgba(244, 239, 228, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+#ts-demo-script code {
+  display: block;
+  margin: 0 0 0.7rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.45rem;
+  background: rgba(212, 160, 23, 0.1);
+  color: #e0b84a;
+  font-size: 0.78rem;
+}
+
+.ts-demo-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+.ts-demo-actions button,
+#ts-demo-chip {
+  text-transform: uppercase;
+}
+
+.ts-demo-actions button {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  background: transparent;
+  color: #f4efe4;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+#ts-demo-script ol {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: rgba(244, 239, 228, 0.55);
+  font-size: 0.7rem;
+}
+
+#ts-demo-script li.is-done {
+  color: rgba(224, 184, 74, 0.7);
+  text-decoration: line-through;
+}
+
+#ts-demo-script li.is-current {
+  color: #f4efe4;
+}
+
+.ts-demo-hint {
+  margin: 0.65rem 0 0 !important;
+  font-size: 0.64rem !important;
 }
 
 .ts-hunt-suppress {

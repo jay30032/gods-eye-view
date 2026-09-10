@@ -6,9 +6,9 @@
 
 One world. One AI. Almost no menus. A mock-first investor globe on the existing Cesium / Vite / vanilla JS stack — **not** a React, Next, or Three.js rewrite.
 
-**Phase 1 demo:** globe → Atlanta / Decatur → ≥25 DEMO/MOCK properties pulse by signal → *Where are we hunting today?*
+**Phase 1 demo:** `npm run dev` → [http://localhost:4173/?demo=1&welcome=1](http://localhost:4173/?demo=1&welcome=1) → Atlanta / Decatur → `Find me money` → `Why?` → `Show me the deal` → `Assume rehab is twenty thousand higher` → `Save it`. No mic or API keys required.
 
-[Start here](docs/terrasignal/START_HERE.md) · [Product brief](docs/terrasignal/PRODUCT_BRIEF.md) · [Phase 1 notes](docs/terrasignal/PHASE_1.md)
+[Start here — 5-minute script](docs/terrasignal/START_HERE.md) · [Product brief](docs/terrasignal/PRODUCT_BRIEF.md) · [Phase 1 notes](docs/terrasignal/PHASE_1.md)
 
 This repository is a product fork of **[God's Eye View](https://github.com/bilawalsidhu/gods-eye-view)** by [Bilawal Sidhu](https://github.com/bilawalsidhu) (MIT). Attribution and the upstream license are kept. Investor listings are invented mock data — not a live property feed, not investment advice.
 
@@ -138,10 +138,9 @@ npm run doctor
 npm run dev
 ```
 
-This fork defaults to **TerraSignal Investor** (`TERRASIGNAL_PRODUCT=investor`, `PROPERTY_PROVIDER=mock`, Atlanta). See [docs/terrasignal/START_HERE.md](docs/terrasignal/START_HERE.md). For the original first-run missions, set `TERRASIGNAL_PRODUCT=classic`.
+This fork defaults to **TerraSignal Investor** (`TERRASIGNAL_PRODUCT=investor`, `PROPERTY_PROVIDER=mock`, Atlanta). **5-minute demo:** open **`http://localhost:4173/?demo=1&welcome=1`** and follow the on-screen rail (or type the phrases). No OpenAI key. See [docs/terrasignal/START_HERE.md](docs/terrasignal/START_HERE.md). For the original first-run missions, set `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.
 
-Open **`http://localhost:4173`**. Choose **Live Contacts**, **Space Missions**,
-**Environmental**, or **Explore Manually** from the first-run panel.
+Open **`http://localhost:4173`**. In investor mode the hunt card asks *Where are we hunting today?* Classic GEV still offers **Live Contacts**, **Space Missions**, **Environmental**, or **Explore Manually**.
 
 <details>
 <summary>Startup performance</summary>

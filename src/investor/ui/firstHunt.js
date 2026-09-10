@@ -50,6 +50,12 @@ export function shouldShowFirstHunt({
   }
   if (welcome === '0') return false;
   if (welcome === '1') return true;
+  try {
+    const demo = new URLSearchParams(location?.search || '').get('demo');
+    if (demo && demo !== '0' && demo !== 'false' && demo !== 'off') return true;
+  } catch {
+    // ignore
+  }
   if (readStore('local', storage, HUNT_STORAGE_KEY) === 'suppressed') return false;
   if (readStore('session', sessionStorageRef, HUNT_SESSION_KEY) === 'dismissed') return false;
   return true;

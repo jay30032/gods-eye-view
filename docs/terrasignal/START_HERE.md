@@ -1,41 +1,50 @@
 # Start here — TerraSignal Investor demo
 
-## Run
+## 5-minute demo script
+
+No OpenAI key. No mic. Mock data only.
 
 ```bash
-cp .env.example .env   # already defaults to investor + mock
-npm ci
+cp .env.example .env   # investor + PROPERTY_PROVIDER=mock already
+npm ci                 # once
 npm run dev
 ```
 
-Open `http://localhost:4173`. Optional Cesium ion or Google 3D keys improve the globe; they are not required for the mock hunt.
+Open:
 
-Classic God's Eye View chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.
+**http://localhost:4173/?demo=1&welcome=1**
 
-## First 60 seconds
+Vite listens on **4173**. Optional Cesium ion / Google 3D keys make the globe photoreal; they are not required for the typed sequence.
 
-1. The globe stays primary — dark-edge HUD, no GEV filter dashboard.
-2. First-run hunt ritual: **Where are we hunting today?** Choose Atlanta/Decatur or stay on the globe. Returning visitors skip it (`terrasignal:first-hunt:v1`). Share links and `?welcome=0` suppress it; `?welcome=1` replays.
-3. After you choose the hunt, the camera descends into Decatur. ≥25 DEMO/MOCK properties pulse by signal (unless `prefers-reduced-motion`).
-4. Type or say the demo conversation (OpenAI optional for typed demo):
+The left **5-minute demo** rail shows the next step. Press **Send this phrase** (or type it in the command bar and hit SEND). **Play** auto-advances. The **DEMO** chip toggles the rail if you opened the app without `?demo=1`.
 
-   - Find me money
-   - Why?
-   - Show me the deal
-   - Assume rehab is twenty thousand higher
-   - Save it
+### Exact phrases (case-insensitive; periods optional)
 
-5. Bottom dock: **WORLD · DRIVE · MIC · SAVED**. The central MIC is the GEV voice control (Space is still push-to-talk). No dense filter chrome.
+1. Hunt card: **Where are we hunting today?** → click **Atlanta / Decatur** (or press Next on the rail). Camera descends into the market. Houses pulse by signal.
+2. `Find me money`
+   - Opportunity Vision ON
+   - Ranks the mock neighborhood
+   - Exactly **4** strong candidates activate
+   - Best turns **gold** (TOP_PICK)
+   - Camera focuses that house
+3. `Why?` — why-this-matters for the focused house
+4. `Show me the deal` — Deal Vision on the globe (FLIP / RENT / BRRRR / WHOLESALE)
+5. `Assume rehab is twenty thousand higher` — deterministic +$20k; numbers update
+6. `Save it` — `localStorage` + SAVED sheet + saved-ring feedback
 
-## Screenshots to capture
+DRIVE is a separate simulated route (not GPS). It must not be required for the sequence above. WORLD recenters the market.
 
-- Globe descent into Decatur with Opportunity Vision on
-- Focus card on `DEMO-ATL-001` (Sycamore / foreclosure top pick)
-- Deal Vision after “Show me the deal”
-- Same card after “rehab is twenty thousand higher”
-- Saved sheet
-- Drive demo announcing a strong signal only
-- Reduced-motion: static colors, no pulse
+Classic GEV chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.
+
+### Headed-only checks (need WebGL)
+
+This agent VM cannot initialize Cesium WebGL. On a GPU machine, also confirm:
+
+- Globe appears under the calm investor HUD (no TOP SECRET / filter dashboard)
+- After Atlanta/Decatur, semantic pulses use the render governor only (FORECLOSURE heartbeat, TAX_SALE vertical, DISTRESS shimmer, LISTED ring, TOP_PICK gold)
+- `prefers-reduced-motion: reduce` freezes motion
+- Clicking a pulse focuses that mock house
+- OpenSky / FIRMS / cables / news stay off
 
 ## Honest limits
 

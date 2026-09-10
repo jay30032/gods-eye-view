@@ -60,7 +60,11 @@ export function rankMockProperties(properties, { strategy = 'composite', limit =
   return searchMockProperties(properties, { strategy, limit });
 }
 
-export function findMoney(properties, limit = 5) {
-  return rankMockProperties(properties, { strategy: 'composite', limit })
-    .filter((row) => row.score >= 70 || (row.primary && ['FORECLOSURE', 'TAX_SALE', 'TOP_PICK'].includes(row.primary.type)));
+export const FIND_MONEY_LIMIT = 4;
+
+export function findMoney(properties, limit = FIND_MONEY_LIMIT) {
+  const cap = Math.max(1, Number(limit) || FIND_MONEY_LIMIT);
+  return rankMockProperties(properties, { strategy: 'composite', limit: Math.max(cap * 4, 16) })
+    .filter((row) => row.score >= 70 || (row.primary && ['FORECLOSURE', 'TAX_SALE', 'TOP_PICK'].includes(row.primary.type)))
+    .slice(0, cap);
 }

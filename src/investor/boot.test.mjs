@@ -18,4 +18,6 @@ test('investor boot stays Cesium-free and is the first module in index.html', ()
   assert.match(html, /id="terrasignal-shell"/);
   assert.match(html, /Where are we hunting today\?/);
   assert.match(html, /data-ts-nav="world"/);
+  assert.match(html, /id="ts-demo-script"/);
+  assert.match(html, /id="ts-demo-chip"/);
 });

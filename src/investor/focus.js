@@ -33,6 +33,24 @@ export function formatPct(value) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+export function dealVisionCaption(strategy, analysis) {
+  const name = String(strategy || analysis?.strategy || 'flip').toUpperCase();
+  if (!analysis) return name;
+  if (analysis.strategy === 'flip' || name === 'FLIP') {
+    return `${name}\nProfit ${formatUsd(analysis.profit)}\nROI ${formatPct(analysis.roi)}`;
+  }
+  if (analysis.strategy === 'rental' || name === 'RENTAL') {
+    return `${name}\n${formatUsd(analysis.cashFlowMonthly)}/mo\nCap ${formatPct(analysis.capRate)}`;
+  }
+  if (analysis.strategy === 'brrrr' || name === 'BRRRR') {
+    return `${name}\nLeft in ${formatUsd(analysis.cashLeftIn)}\n${formatUsd(analysis.cashFlowMonthly)}/mo`;
+  }
+  if (analysis.strategy === 'wholesale' || name === 'WHOLESALE') {
+    return `${name}\nFee ${formatUsd(analysis.assignmentFee)}\nSpread ${formatUsd(analysis.spread)}`;
+  }
+  return name;
+}
+
 export function focusCardModel(property, { analysis = null, strategy = null, revealDeal = false } = {}) {
   if (!property) return null;
   const signal = primarySignal(property);

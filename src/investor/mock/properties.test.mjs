@@ -24,8 +24,8 @@ test('mock provider refuses a live property provider', () => {
 
 test('find money ranks high-signal mock properties first', () => {
   const provider = createMockPropertyProvider();
-  const hits = findMoney(provider.list(), 5);
-  assert.ok(hits.length >= 3);
+  const hits = findMoney(provider.list());
+  assert.equal(hits.length, 4);
   assert.ok(hits[0].score >= hits[1].score);
   assert.match(hits[0].property.id, /DEMO-ATL-001|DEMO-ATL-026|DEMO-ATL-010/);
 });

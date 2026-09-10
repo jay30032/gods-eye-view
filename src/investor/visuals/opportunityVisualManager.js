@@ -15,6 +15,7 @@ import {
 } from './propertyPulse.js';
 import { parcelGlowColor, parcelRadiusM } from './parcelGlow.js';
 import { GOLD, goldColumnHeight, goldHaloAlpha, isTopPick } from './goldHalo.js';
+import { dealVisionCaption } from '../focus.js';
 import { createReducedMotionPolicy } from './reducedMotionPolicy.js';
 import { SCAN_DURATION_MS, scanAlpha, scanIsActive, scanProgress, scanRadiusM } from './scanSweep.js';
 
@@ -47,7 +48,11 @@ export function createOpportunityVisualManager({
   const owned = new Map();
   let enabled = true;
   let dealStrategy = null;
+  let dealAnalysis = null;
   let focusedId = null;
+  let shortlistIds = null;
+  let topPickId = null;
+  let savedId = null;
   let scanStartedAt = 0;
   let destroyed = false;
   let removeMove = null;
@@ -98,9 +103,9 @@ export function createOpportunityVisualManager({
 
     const lod = lodFromHeight(cameraHeightM(viewer));
     const properties = visibleProperties();
-    const clusters = clusterProperties(properties, lod.showClusters ? lod.id : null);
+    const clusters = clusterProperties(properties, lod.showClusters && !shortlistIds ? lod.id : null);
 
-    if (lod.showClusters) {
+    if (lod.showClusters && !shortlistIds) {
       for (const cluster of clusters) {
         const look = lookForSignal(cluster.signalType);
         addOwned(`cluster:${cluster.id}`, entities.add({
@@ -133,6 +138,9 @@ export function createOpportunityVisualManager({
     }
 
     for (const property of properties) {
+      if (shortlistIds && !shortlistIds.has(property.id) && property.id !== focusedId) {
+        continue;
+      }
       paintProperty(property, lod);
     }
     paintScan(lod);
@@ -144,7 +152,8 @@ export function createOpportunityVisualManager({
     const type = signal?.type || 'DISTRESS';
     const look = lookForSignal(type);
     const focused = property.id === focusedId;
-    const top = isTopPick(property);
+    const top = property.id === topPickId || isTopPick(property);
+    const saved = property.id === savedId;
     const dealBoost = dealStrategy
       ? Number(property.opportunityScore?.[dealStrategy] || 0) / 100
       : 0;
@@ -193,7 +202,7 @@ export function createOpportunityVisualManager({
       }));
     }
 
-    if ((lod.showHalo && top) || focused) {
+    if ((lod.showHalo && top) || focused || saved) {
       addOwned(`halo:${property.id}`, entities.add({
         id: `ts-halo-${property.id}`,
         position,
@@ -204,7 +213,9 @@ export function createOpportunityVisualManager({
             return new Cesium.Color(GOLD.r, GOLD.g, GOLD.b, goldHaloAlpha(nowMs(), reduced()) * 0.35);
           }, false)),
           outline: true,
-          outlineColor: new Cesium.Color(GOLD.r, GOLD.g, GOLD.b, 0.9),
+          outlineColor: saved
+            ? new Cesium.Color(0.72, 0.86, 0.62, 0.95)
+            : new Cesium.Color(GOLD.r, GOLD.g, GOLD.b, 0.9),
           height: 8,
         },
         cylinder: {
@@ -233,12 +244,16 @@ export function createOpportunityVisualManager({
       }));
     }
 
-    if (lod.showLabels || focused) {
+    if (lod.showLabels || focused || (dealStrategy && focused)) {
+      const dealText = focused && dealStrategy
+        ? `\n${dealVisionCaption(dealStrategy, dealAnalysis)}`
+        : '';
+      const savedText = saved ? '\nSAVED' : '';
       addOwned(`label:${property.id}`, entities.add({
         id: `ts-label-${property.id}`,
         position,
         label: {
-          text: property.address.split(',')[0],
+          text: `${property.address.split(',')[0]}${savedText}${dealText}`,
           font: '11px Inter, sans-serif',
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
@@ -332,10 +347,28 @@ export function createOpportunityVisualManager({
     toggle() {
       return this.setEnabled(!enabled);
     },
-    setDealVision(strategy) {
+    setDealVision(strategy, analysis = null) {
       dealStrategy = strategy || null;
+      dealAnalysis = analysis || null;
       rebuild();
       return dealStrategy;
+    },
+    setShortlist(ids) {
+      const list = Array.isArray(ids) ? ids.filter(Boolean) : [];
+      shortlistIds = list.length ? new Set(list) : null;
+      rebuild();
+      return list.slice();
+    },
+    setTopPick(id) {
+      topPickId = id || null;
+      rebuild();
+      return topPickId;
+    },
+    setSaved(id) {
+      savedId = id || null;
+      if (savedId) topPickId = null;
+      rebuild();
+      return savedId;
     },
     setFocused(id) {
       focusedId = id || null;
