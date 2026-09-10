@@ -1,3 +1,5 @@
+import { initFirstHunt } from './firstHunt.js';
+
 const HIDDEN_GEV = [
   '#title-bar',
   '#style-indicator',
@@ -33,6 +35,9 @@ export function applyInvestorChrome({ productName, tagline }) {
   }
 
   ensureInvestorShell(productName, tagline);
+  initFirstHunt({
+    root: document.getElementById('ts-first-hunt'),
+  });
 }
 
 function ensureInvestorShell(productName, tagline) {

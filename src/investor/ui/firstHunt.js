@@ -86,6 +86,12 @@ export function initFirstHunt({
 } = {}) {
   if (!root) return null;
 
+  if (root._tsHunt) {
+    if (onBegin) root._tsHunt.onBegin = onBegin;
+    return root._tsHunt;
+  }
+
+  let currentBegin = onBegin;
   const show = shouldShowFirstHunt({ hasShareState, storage, sessionStorageRef, location });
   const dismiss = ({ persistSession = true } = {}) => {
     root.hidden = true;
@@ -95,7 +101,7 @@ export function initFirstHunt({
 
   const begin = async (choice = 'atlanta') => {
     dismiss();
-    await onBegin?.(choice);
+    await currentBegin?.(choice);
   };
 
   root.querySelector('[data-ts-begin-hunt]')?.addEventListener('click', () => {
@@ -122,12 +128,16 @@ export function initFirstHunt({
     root.hidden = true;
   }
 
-  return {
+  const api = {
     show,
     dismiss,
     begin,
+    set onBegin(fn) { currentBegin = fn; },
     destroy() {
       document.removeEventListener('keydown', onKey, true);
+      delete root._tsHunt;
     },
   };
+  root._tsHunt = api;
+  return api;
 }

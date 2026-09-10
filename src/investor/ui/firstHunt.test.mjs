@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldShowFirstHunt } from './firstHunt.js';
+import { initFirstHunt, shouldShowFirstHunt } from './firstHunt.js';
 
 function memoryStore(start = {}) {
   const data = { ...start };
@@ -22,4 +22,28 @@ test('welcome query outranks stored suppress, and durable suppress hides it', ()
   assert.equal(shouldShowFirstHunt({ storage, sessionStorageRef: session, location: { search: '' } }), false);
   assert.equal(shouldShowFirstHunt({ storage, sessionStorageRef: session, location: { search: '?welcome=1' } }), true);
   assert.equal(shouldShowFirstHunt({ location: { search: '?welcome=0' } }), false);
+});
+
+test('initFirstHunt is idempotent and accepts a later onBegin', async () => {
+  if (typeof document === 'undefined') {
+    globalThis.document = { addEventListener() {}, removeEventListener() {} };
+  }
+  const root = {
+    hidden: true,
+    classList: { add() {}, remove() {} },
+    querySelector() {
+      return { addEventListener() {}, checked: false };
+    },
+  };
+  const first = initFirstHunt({ root, location: { search: '?welcome=1' } });
+  let started = '';
+  const second = initFirstHunt({
+    root,
+    location: { search: '?welcome=1' },
+    onBegin: (choice) => { started = choice; },
+  });
+  assert.equal(first, second);
+  await second.begin('atlanta');
+  assert.equal(started, 'atlanta');
+  first.destroy();
 });
