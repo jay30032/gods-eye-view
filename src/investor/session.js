@@ -273,7 +273,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     setAiPrompt(market.greeting);
   };
 
-  const hunt = initFirstHunt({
+  hunt = initFirstHunt({
     root: document.getElementById('ts-first-hunt'),
     hasShareState: Boolean(styleManager?.hasShareState),
     onBegin: startHunt,
