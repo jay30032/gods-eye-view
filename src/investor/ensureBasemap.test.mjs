@@ -4,15 +4,20 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _resetRenderGovernorForTest } from '../renderGovernor.js';
+import { getRenderGovernorDiagnostics } from '../renderGovernor.js';
 import {
   assertInvestorGlobeReady,
   countShowingImageryLayers,
   ensureKeylessVisibleBasemap,
   inspectKeylessGlobe,
   keylessGlobeLooksEmpty,
+  kickRenderBurst,
   probeEsriWorldImagery,
+  releaseInvestorBootHolds,
   requestSceneRender,
+  scheduleInvestorImageryWatchdog,
   shouldSkipKeylessBasemap,
+  waitForFirstInvestorFrame,
 } from './ensureBasemap.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -272,14 +277,69 @@ test('requestSceneRender is safe on a stub viewer', () => {
   assert.equal(viewer.scene.renders, 1);
 });
 
-test('main.js holds investor render and re-asserts a keyless basemap after restore', () => {
+test('keyless ensure does not leave a continuous-render hold', async () => {
+  _resetRenderGovernorForTest();
+  const viewer = createMockViewer();
+  await ensureKeylessVisibleBasemap({
+    viewer,
+    mapStackController: createMockController(viewer, { esri: 'ok' }),
+    documentRef: createDocument(),
+    fetchImpl: async () => ({ ok: true }),
+    timers: createTimers(),
+    holdMs: 0,
+  });
+  const diag = getRenderGovernorDiagnostics();
+  assert.equal(diag.holds.includes('investor-basemap'), false);
+  assert.equal(diag.holds.includes('investor-first-hunt'), false);
+  releaseInvestorBootHolds();
+});
+
+test('waitForFirstInvestorFrame resolves on timeout without a Cesium scene', async () => {
+  const timers = createTimers();
+  const pending = waitForFirstInvestorFrame({ scene: { requestRender() {} } }, {
+    timeoutMs: 10,
+    timers,
+  });
+  timers.flush();
+  assert.equal(await pending, 'timeout');
+});
+
+test('8s imagery watchdog surfaces an error when the globe is still empty', () => {
+  _resetRenderGovernorForTest();
+  const viewer = createMockViewer();
+  viewer.container = { querySelector: () => null };
+  const documentRef = createDocument();
+  const timers = createTimers();
+  scheduleInvestorImageryWatchdog({
+    viewer,
+    mapStackController: createMockController(viewer),
+    documentRef,
+    delayMs: 8000,
+    timers,
+  });
+  timers.flush();
+  const banner = documentRef.getElementById('ts-globe-error');
+  assert.equal(banner.hidden, false);
+  assert.match(banner.innerHTML, /8 seconds|canvas|imagery/i);
+});
+
+test('kickRenderBurst schedules more than one scene request', () => {
+  const viewer = createMockViewer();
+  const timers = createTimers();
+  kickRenderBurst(viewer, { times: 4, intervalMs: 10, timers });
+  timers.flush();
+  assert.equal(viewer.scene.renders >= 4, true);
+});
+
+test('main.js bursts frames and watches for empty imagery instead of holding first-hunt', () => {
   const main = readFileSync(join(here, '../main.js'), 'utf8');
   assert.match(main, /ensureKeylessVisibleBasemap/);
-  assert.match(main, /holdContinuousRender\(INVESTOR_BASEMAP_HOLD\)/);
-  assert.match(main, /holdContinuousRender\(INVESTOR_HUNT_HOLD\)/);
-  const governorAt = main.indexOf('installRenderGovernor(viewer)');
-  const holdAt = main.indexOf('holdContinuousRender(INVESTOR_BASEMAP_HOLD)');
-  assert.equal(holdAt > 0 && holdAt < governorAt, true, 'basemap hold must register before the governor installs');
+  assert.match(main, /kickRenderBurst/);
+  assert.match(main, /scheduleInvestorImageryWatchdog/);
+  assert.match(main, /waitForFirstInvestorFrame/);
+  assert.match(main, /releaseInvestorBootHolds/);
+  assert.doesNotMatch(main, /holdContinuousRender\(INVESTOR_HUNT_HOLD\)/);
+  assert.doesNotMatch(main, /holdContinuousRender\(INVESTOR_BASEMAP_HOLD\)/);
 });
 
 test('MapStackController requests a scene frame even before the governor is installed', () => {
@@ -306,7 +366,16 @@ test('investor session re-asserts imagery after Atlanta/Decatur descent', () => 
   const session = readFileSync(join(here, 'session.js'), 'utf8');
   assert.match(session, /ensureKeylessVisibleBasemap/);
   assert.match(session, /after-market/);
-  assert.match(session, /INVESTOR_HUNT_HOLD/);
+  assert.match(session, /waitForFirstInvestorFrame/);
+  assert.match(session, /kickRenderBurst/);
+  assert.doesNotMatch(session, /holdContinuousRender\(INVESTOR_HUNT_HOLD\)/);
+  assert.doesNotMatch(session, /holdContinuousRender\(INVESTOR_BASEMAP_HOLD\)/);
+});
+
+test('Opportunity Vision does not hold continuous render at globe park', () => {
+  const src = readFileSync(join(here, 'visuals/opportunityVisualManager.js'), 'utf8');
+  assert.match(src, /lod\.id === 'globe' \|\| lod\.id === 'regional'\) return false/);
+  assert.match(src, /lod\.showPulses === true/);
 });
 
 test('StyleManager refuses a keyless photoreal restore that would hide the globe', () => {

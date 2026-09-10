@@ -40,13 +40,14 @@ export function createOpportunityVisualManager({
   Cesium,
   market,
   getProperties,
+  enabled: startEnabled = false,
 }) {
   const entities = viewer.entities;
   const reducedPolicy = createReducedMotionPolicy({
     onChange: () => syncHold(),
   });
   const owned = new Map();
-  let enabled = true;
+  let enabled = Boolean(startEnabled);
   let dealStrategy = null;
   let dealAnalysis = null;
   let focusedId = null;
@@ -68,11 +69,12 @@ export function createOpportunityVisualManager({
   function needsContinuous() {
     if (destroyed || !enabled) return false;
     if (reduced()) return false;
-    if (!isNearMarket(viewer, market, 220)) {
-      const lod = lodFromHeight(cameraHeightM(viewer));
-      return lod.id === 'globe' || lod.id === 'regional' ? enabled : false;
-    }
-    return true;
+    const lod = lodFromHeight(cameraHeightM(viewer));
+    // Parked globe / regional clusters are static. Holding continuous
+    // render here pegged laptop GPUs (Air) during the first-hunt modal.
+    if (lod.id === 'globe' || lod.id === 'regional') return false;
+    if (!isNearMarket(viewer, market, 220)) return false;
+    return lod.showPulses === true;
   }
 
   function syncHold() {

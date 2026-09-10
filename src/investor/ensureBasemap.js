@@ -11,9 +11,9 @@
  * This module:
  *   1. Forces globe.show when there is no photoreal tileset
  *   2. Tries Esri, then immediately falls back to OSM on any failure
- *   3. Calls scene.requestRender() directly (not only the governor)
- *   4. Holds continuous render through first-hunt / first tiles
- *   5. Asserts ImageryLayer count > 0 after the stack is ready
+ *   3. Calls scene.requestRender() bursts (not a long continuous hold)
+ *   4. Asserts ImageryLayer count > 0 after the stack is ready
+ *   5. 8s watchdog → #ts-globe-error if imagery never appears
  *
  * No Cesium import — safe for Node smoke tests with a mocked viewer.
  */
@@ -30,6 +30,12 @@ import {
 
 export const INVESTOR_BASEMAP_HOLD = 'investor-basemap';
 export const INVESTOR_HUNT_HOLD = 'investor-first-hunt';
+export const INVESTOR_BRIEF_HOLD_MS = 2500;
+export const INVESTOR_INIT_WATCHDOG_MS = 8000;
+
+const INIT_WATCHDOG_COPY =
+  'Earth imagery did not appear within 8 seconds. The HUD should stay usable. '
+  + 'Cesium credits can appear without a painted globe.';
 
 export const ESRI_WORLD_IMAGERY_URL =
   'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer';
@@ -97,6 +103,89 @@ export function requestSceneRender(viewer) {
   } catch {
     // Viewer teardown or a stub without a scene must not throw.
   }
+}
+
+export function releaseInvestorBootHolds() {
+  releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
+  releaseContinuousRender(INVESTOR_HUNT_HOLD);
+}
+
+/**
+ * Wait until Cesium paints one frame, then yield. Used to defer heavy
+ * investor session work (opportunity entities, drive) until the globe has
+ * had a chance to request imagery without a continuous 60 fps hold.
+ */
+export function waitForFirstInvestorFrame(viewer, {
+  timeoutMs = 2000,
+  timers = globalThis,
+} = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (reason) => {
+      if (done) return;
+      done = true;
+      resolve(reason);
+    };
+    requestSceneRender(viewer);
+    const scene = viewer?.scene;
+    let remove = null;
+    try {
+      remove = scene?.postRender?.addEventListener?.(() => {
+        try { remove?.(); } catch { /* ignore */ }
+        finish('post-render');
+      });
+    } catch {
+      remove = null;
+    }
+    const globe = scene?.globe;
+    let removeTiles = null;
+    try {
+      removeTiles = globe?.tileLoadProgressEvent?.addEventListener?.((queued) => {
+        if (queued === 0) return;
+        try { removeTiles?.(); } catch { /* ignore */ }
+        finish('tile-progress');
+      });
+    } catch {
+      removeTiles = null;
+    }
+    const raf = timers.requestAnimationFrame || globalThis.requestAnimationFrame;
+    if (typeof raf === 'function') {
+      raf(() => requestSceneRender(viewer));
+    }
+    timers.setTimeout?.(() => {
+      try { remove?.(); } catch { /* ignore */ }
+      try { removeTiles?.(); } catch { /* ignore */ }
+      finish('timeout');
+    }, timeoutMs);
+  });
+}
+
+export function scheduleInvestorImageryWatchdog({
+  viewer,
+  mapStackController,
+  documentRef = globalThis.document,
+  container = null,
+  delayMs = INVESTOR_INIT_WATCHDOG_MS,
+  timers = globalThis,
+} = {}) {
+  const tid = timers.setTimeout?.(() => {
+    releaseInvestorBootHolds();
+    const inspect = inspectKeylessGlobe(viewer, mapStackController);
+    const canvas = findCesiumCanvas(viewer, container, documentRef);
+    if (keylessGlobeLooksEmpty(inspect) || !canvas) {
+      assertInvestorGlobeReady({
+        viewer,
+        container,
+        mapStackController,
+        documentRef,
+        message: INIT_WATCHDOG_COPY,
+      });
+      showBasemapToast('Earth still not visible after 8 seconds.', documentRef);
+    } else {
+      hideImageryStatus(documentRef);
+    }
+  }, delayMs);
+  return () => timers.clearTimeout?.(tid);
 }
 
 export function kickRenderBurst(viewer, {
@@ -316,7 +405,8 @@ export async function ensureKeylessVisibleBasemap({
   fetchImpl = globalThis.fetch,
   timers = globalThis,
   probe = true,
-  holdMs = 8000,
+  holdMs = 0,
+  briefHoldMs = 0,
   stackTimeoutMs = 5000,
   phase = 'boot',
 } = {}) {
@@ -336,24 +426,26 @@ export async function ensureKeylessVisibleBasemap({
     const canvas = findCesiumCanvas(viewer, host, documentRef);
     return cesiumCanvasIsLive(host) || cesiumCanvasIsLive({ querySelector: () => canvas });
   };
-  if (canvasLiveNow()) holdContinuousRender(INVESTOR_BASEMAP_HOLD);
-  else releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
-
-  const message = phase === 'after-market' ? GRAY_VOID_COPY : IMAGERY_FAILED_COPY;
-  let watchdog = null;
-  if (typeof timers?.setTimeout === 'function') {
-    watchdog = timers.setTimeout(() => {
-      releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
-      assertInvestorGlobeReady({
-        viewer,
-        container,
-        mapStackController,
-        documentRef,
-        message,
+  // Never hold the first-hunt modal in continuous mode — that pegs a laptop
+  // GPU at 60 fps before imagery paints. A brief basemap hold is optional
+  // and always released; first frames use requestRender bursts.
+  releaseContinuousRender(INVESTOR_HUNT_HOLD);
+  const holdCap = Math.max(0, Number(holdMs) || 0, Number(briefHoldMs) || 0);
+  const allowBriefHold = holdCap > 0 && holdCap <= INVESTOR_BRIEF_HOLD_MS && canvasLiveNow();
+  if (allowBriefHold) {
+    holdContinuousRender(INVESTOR_BASEMAP_HOLD);
+    try {
+      viewer?.scene?.globe?.tileLoadProgressEvent?.addEventListener?.((queued) => {
+        if (queued > 0) releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
       });
-    }, 4000);
+    } catch {
+      // Globe tile events are optional on stubs.
+    }
+  } else {
+    releaseInvestorBootHolds();
   }
 
+  const message = phase === 'after-market' ? GRAY_VOID_COPY : IMAGERY_FAILED_COPY;
   showImageryStatus('Loading Earth imagery…', documentRef);
 
   let usedFallback = false;
@@ -437,14 +529,12 @@ export async function ensureKeylessVisibleBasemap({
     });
   }
 
-  kickRenderBurst(viewer, { timers });
-  if (canvasLiveNow()) holdContinuousRender(INVESTOR_BASEMAP_HOLD);
-  else releaseContinuousRender(INVESTOR_BASEMAP_HOLD);
-  const release = timers?.setTimeout?.bind(timers);
-  if (typeof release === 'function' && holdMs > 0) {
-    release(() => releaseContinuousRender(INVESTOR_BASEMAP_HOLD), holdMs);
+  kickRenderBurst(viewer, { times: 8, intervalMs: 180, timers });
+  if (allowBriefHold) {
+    timers.setTimeout?.(() => releaseInvestorBootHolds(), holdCap);
+  } else {
+    releaseInvestorBootHolds();
   }
-  if (watchdog != null) timers.clearTimeout?.(watchdog);
 
   const asserted = assertInvestorGlobeReady({
     viewer,

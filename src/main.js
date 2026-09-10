@@ -37,12 +37,15 @@ import { loadPhotorealisticTileset } from './mapStartup.js';
 import { isInvestorProduct, readInvestorConfig } from './investor/config.js';
 import { startInvestorSession } from './investor/session.js';
 import { applyInvestorChrome } from './investor/ui/chrome.js';
-import { cesiumCanvasIsLive, showInvestorGlobeError } from './investor/globeReveal.js';
+import { showInvestorGlobeError } from './investor/globeReveal.js';
 import {
   ensureKeylessVisibleBasemap,
-  INVESTOR_BASEMAP_HOLD,
-  INVESTOR_HUNT_HOLD,
+  kickRenderBurst,
+  releaseInvestorBootHolds,
+  scheduleInvestorImageryWatchdog,
+  waitForFirstInvestorFrame,
 } from './investor/ensureBasemap.js';
+import { applyInvestorFrameBudgetFromNavigator } from './investor/frameBudget.js';
 
 initLogoGaze();
 
@@ -132,7 +135,7 @@ async function init() {
         document.body.appendChild(el);
         return el;
       })(),
-      msaaSamples: 4,
+      msaaSamples: investorMode ? 1 : 4,
       contextOptions: {
         webgl: {
           preserveDrawingBuffer: true,
@@ -147,7 +150,8 @@ async function init() {
     // designed against wall-clock time, not frame count. Measured on the
     // 2026-08-05 perf investigation as a strict halving of idle burn on
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
-    viewer.targetFrameRate = 60;
+    viewer.targetFrameRate = investorMode ? 30 : 60;
+    if (investorMode) void applyInvestorFrameBudgetFromNavigator(viewer);
 
     // Register per-layer data attribution into the "Data attribution" popover.
     // Required by each source's license (ODbL, CC BY-NC-SA, NASA FIRMS, etc.);
@@ -212,16 +216,16 @@ async function init() {
     });
     await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', { silent: true });
     if (investorMode && !tileset) {
-      if (cesiumCanvasIsLive(document.getElementById('cesiumContainer'))) {
-        holdContinuousRender(INVESTOR_BASEMAP_HOLD);
-        holdContinuousRender(INVESTOR_HUNT_HOLD);
-      }
+      releaseInvestorBootHolds();
+      kickRenderBurst(viewer);
+      scheduleInvestorImageryWatchdog({ viewer, mapStackController });
       await ensureKeylessVisibleBasemap({
         viewer,
         mapStackController,
         tileset,
         phase: 'boot',
       });
+      await waitForFirstInvestorFrame(viewer);
     }
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
@@ -318,9 +322,8 @@ async function init() {
     // Idle render governor: flips the scene into requestRenderMode whenever
     // nothing animates per frame. Installed AFTER every module above has had
     // its chance to register pre-install holds. (perf wave 2)
-    // Investor keyless: the basemap / first-hunt holds above keep the loop
-    // continuous so the first Esri/OSM tiles are actually requested instead
-    // of parking on a black unrendered frame.
+    // Investor keyless: first frames use requestRender bursts, not a
+    // continuous hold. A long hold on a laptop GPU freezes the HUD.
     installRenderGovernor(viewer);
 
     // The explicit scope mask replaces the emergent six-pass artifact —
@@ -379,6 +382,7 @@ async function init() {
       try { await styleManager.initialRestorePromise; } catch { /* share restore is optional */ }
       setScopeMaskEnabled(false);
       if (!tileset) {
+        kickRenderBurst(viewer);
         await ensureKeylessVisibleBasemap({
           viewer,
           mapStackController,
@@ -386,7 +390,9 @@ async function init() {
           tileset,
           phase: 'after-restore',
         });
+        await waitForFirstInvestorFrame(viewer);
       }
+      releaseInvestorBootHolds();
       window.__terraSignal = await startInvestorSession({ viewer, styleManager, dataManager });
       window.__godsEyeView.investor = window.__terraSignal;
     }

@@ -19,18 +19,18 @@ import {
   createConversationState,
   parseDemoIntent,
 } from './conversation.js';
-import { governorRequestRender, holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
+import { governorRequestRender } from '../renderGovernor.js';
 import { setScopeMaskEnabled } from '../scopeMask.js';
 import {
   ensureKeylessVisibleBasemap,
-  INVESTOR_BASEMAP_HOLD,
-  INVESTOR_HUNT_HOLD,
+  kickRenderBurst,
+  releaseInvestorBootHolds,
+  waitForFirstInvestorFrame,
 } from './ensureBasemap.js';
 import { applyInvestorChrome, relocateVoiceControl, setAiPrompt, setLodChip, setNavActive } from './ui/chrome.js';
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
 import { hideFocusCard, renderFocusCard } from './ui/focusCard.js';
-import { cesiumCanvasIsLive } from './globeReveal.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
 
 function readVisionPref(defaultValue) {
@@ -86,10 +86,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     || null;
   if (viewer?.scene?.globe && !tileset) {
     viewer.scene.globe.show = true;
-    if (cesiumCanvasIsLive(document.getElementById('cesiumContainer'))) {
-      holdContinuousRender(INVESTOR_BASEMAP_HOLD);
-      holdContinuousRender(INVESTOR_HUNT_HOLD);
-    }
+    releaseInvestorBootHolds();
+    kickRenderBurst(viewer);
     await ensureKeylessVisibleBasemap({
       viewer,
       mapStackController,
@@ -97,6 +95,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       tileset,
       phase: 'session',
     });
+    await waitForFirstInvestorFrame(viewer);
   }
   try { viewer?.resize?.(); } catch { /* optional */ }
   governorRequestRender('investor-session');
@@ -107,7 +106,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     market,
     getProperties: () => properties,
   });
-  visuals.setEnabled(readVisionPref(config.opportunityVisionDefault));
+  // Keep pulses off until the first-hunt modal is done so a parked globe
+  // does not take investor-opportunity (continuous 60 fps) on a laptop GPU.
+  visuals.setEnabled(false);
 
   const drive = createDriveDemo({
     viewer,
@@ -323,16 +324,19 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   });
   setAiPrompt('Where are we hunting today?');
 
+  const enableVision = () => {
+    visuals.setEnabled(readVisionPref(config.opportunityVisionDefault));
+  };
+
   const startHunt = async () => {
-    releaseContinuousRender(INVESTOR_HUNT_HOLD);
+    releaseInvestorBootHolds();
     setAiPrompt('Descending on Atlanta / Decatur…');
     if (!tileset) {
-      if (cesiumCanvasIsLive(document.getElementById('cesiumContainer'))) {
-        holdContinuousRender(INVESTOR_BASEMAP_HOLD);
-      }
       if (viewer?.scene?.globe) viewer.scene.globe.show = true;
+      kickRenderBurst(viewer, { times: 6, intervalMs: 200 });
     }
     await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });
+    enableVision();
     if (!tileset) {
       const painted = await ensureKeylessVisibleBasemap({
         viewer,
@@ -355,12 +359,15 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     root: document.getElementById('ts-first-hunt'),
     hasShareState: Boolean(styleManager?.hasShareState),
     onBegin: startHunt,
-    onDismiss: () => releaseContinuousRender(INVESTOR_HUNT_HOLD),
+    onDismiss: () => {
+      releaseInvestorBootHolds();
+      enableVision();
+    },
   });
   session.beginHunt = startHunt;
   session.firstHunt = hunt;
   if (!hunt?.show) {
-    releaseContinuousRender(INVESTOR_HUNT_HOLD);
+    releaseInvestorBootHolds();
     await startHunt();
   }
 
