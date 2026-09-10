@@ -75,6 +75,11 @@ async function init() {
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
   const investorMode = isInvestorProduct();
+  if (!investorMode) {
+    document.documentElement.classList.remove('terrasignal-investor');
+    document.documentElement.classList.add('terrasignal-classic');
+    document.getElementById('terrasignal-shell')?.remove();
+  }
   if (investorMode) {
     applyInvestorChrome(readInvestorConfig());
     if (loaderStatus) loaderStatus.textContent = 'Opening one world…';
