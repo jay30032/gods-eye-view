@@ -19,6 +19,8 @@ const HIDDEN_GEV = [
   '#intel-hud',
   '#safe-frame-overlay',
   '#cockpit-hud',
+  '#scope-mask',
+  '#world-overlay-root',
 ];
 
 export function applyInvestorChrome({ productName, tagline }) {

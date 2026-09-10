@@ -14,7 +14,7 @@ Open:
 
 **http://localhost:4173/?demo=1&welcome=1**
 
-Vite listens on **4173**. Optional Cesium ion / Google 3D keys make the globe photoreal; they are not required for the typed sequence.
+Vite listens on **4173**. No `CESIUM_ION_TOKEN` or `GOOGLE_MAPS_API_KEY` is required: the keyless Esri World Imagery globe (OSM fallback) is the visual hero under the HUD. Optional keys only upgrade to Google 3D Tiles.
 
 The left **5-minute demo** rail shows the next step. Press **Send this phrase** (or type it in the command bar and hit SEND). **Play** auto-advances. The **DEMO** chip toggles the rail if you opened the app without `?demo=1`.
 

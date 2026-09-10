@@ -9562,6 +9562,10 @@ html.terrasignal-investor #intel-hud,
 html.terrasignal-investor #traffic-sync-chip,
 html.terrasignal-investor #cctv-sync-chip,
 html.terrasignal-investor #global-loading-status,
+html.terrasignal-investor #scope-mask,
+html.terrasignal-investor #world-overlay-root,
+html.terrasignal-investor #celestial-ring-overlay,
+html.terrasignal-investor .celestial-ring-overlay,
 html.terrasignal-investor #safe-frame-overlay,
 html.terrasignal-investor #cockpit-hud,
 html.terrasignal-investor .hud-classification,
@@ -9584,6 +9588,10 @@ body.terrasignal-investor #intel-hud,
 body.terrasignal-investor #traffic-sync-chip,
 body.terrasignal-investor #cctv-sync-chip,
 body.terrasignal-investor #global-loading-status,
+body.terrasignal-investor #scope-mask,
+body.terrasignal-investor #world-overlay-root,
+body.terrasignal-investor #celestial-ring-overlay,
+body.terrasignal-investor .celestial-ring-overlay,
 body.terrasignal-investor #safe-frame-overlay,
 body.terrasignal-investor #cockpit-hud,
 body.terrasignal-investor .hud-classification,
@@ -9599,6 +9607,24 @@ body.terrasignal-investor #key-setup-chip {
 
 #terrasignal-shell {
   pointer-events: none;
+  position: static;
+  background: none;
+  width: 0;
+  height: 0;
+  overflow: visible;
+}
+
+html.terrasignal-investor #cesiumContainer,
+body.terrasignal-investor #cesiumContainer {
+  z-index: 0;
+  background: transparent;
+}
+
+html.terrasignal-investor #cesiumContainer canvas,
+body.terrasignal-investor #cesiumContainer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 #ts-vignette {
@@ -9606,7 +9632,39 @@ body.terrasignal-investor #key-setup-chip {
   position: fixed;
   inset: 0;
   z-index: 20;
-  box-shadow: inset 0 0 120px 36px rgba(0, 0, 0, 0.55);
+  background: none;
+  box-shadow: inset 0 0 72px 10px rgba(0, 0, 0, 0.22);
+}
+
+#ts-globe-error {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  z-index: 80;
+  width: min(28rem, 90vw);
+  padding: 1.1rem 1.2rem;
+  border-radius: 0.85rem;
+  background: rgba(12, 8, 4, 0.92);
+  border: 1px solid rgba(212, 160, 23, 0.45);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-globe-error[hidden] {
+  display: none;
+}
+
+#ts-globe-error strong {
+  display: block;
+  margin-bottom: 0.45rem;
+}
+
+#ts-globe-error p {
+  margin: 0 0 0.5rem;
+  color: rgba(244, 239, 228, 0.78);
+  font-size: 0.85rem;
+  line-height: 1.45;
 }
 
 #terrasignal-brand,

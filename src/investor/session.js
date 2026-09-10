@@ -19,6 +19,8 @@ import {
   createConversationState,
   parseDemoIntent,
 } from './conversation.js';
+import { governorRequestRender } from '../renderGovernor.js';
+import { setScopeMaskEnabled } from '../scopeMask.js';
 import { applyInvestorChrome, relocateVoiceControl, setAiPrompt, setLodChip, setNavActive } from './ui/chrome.js';
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
@@ -71,6 +73,10 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   applyInvestorChrome(config);
   await disableLiveFeeds(dataManager);
   try { styleManager?.hud?.setVisible?.(false); } catch { /* optional */ }
+  try { setScopeMaskEnabled(false); } catch { /* optional */ }
+  if (viewer?.scene?.globe) viewer.scene.globe.show = true;
+  try { viewer?.resize?.(); } catch { /* optional */ }
+  governorRequestRender('investor-session');
 
   const visuals = createOpportunityVisualManager({
     viewer,

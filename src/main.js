@@ -30,13 +30,14 @@ import {
   holdContinuousRender,
   releaseContinuousRender,
 } from './renderGovernor.js';
-import { installScopeMask } from './scopeMask.js';
+import { installScopeMask, setScopeMaskEnabled } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { initKeySetup } from './keySetup.js';
 import { loadPhotorealisticTileset } from './mapStartup.js';
 import { isInvestorProduct, readInvestorConfig } from './investor/config.js';
 import { startInvestorSession } from './investor/session.js';
 import { applyInvestorChrome } from './investor/ui/chrome.js';
+import { showInvestorGlobeError } from './investor/globeReveal.js';
 
 initLogoGaze();
 
@@ -150,10 +151,11 @@ async function init() {
     // clutter the on-globe line. See docs/pre-ship-audit-2026-07-01.md H11.
     registerDataCredits(viewer);
 
-    // Hide Cesium's default globe — Google Photorealistic 3D Tiles provide their own
-    // globe at all LODs (street level → orbital). The default globe's 2D imagery
-    // clips through 3D tile buildings at close range.
-    viewer.scene.globe.show = false;
+    // Photoreal tiles replace the ellipsoid globe. Keyless investor (and any
+    // boot without Google/ion) must keep the Esri/OSM globe visible from the
+    // first frame — hiding it here is what left a black void behind the HUD.
+    const expectPhotoreal = Boolean(googleApiKey || cesiumToken);
+    viewer.scene.globe.show = !expectPhotoreal;
 
     // Keep a sky behind Google 3D Tiles, but soften Cesium's high-intensity
     // default atmosphere. With the globe hidden its bright limb otherwise
@@ -305,6 +307,7 @@ async function init() {
     // see src/scopeMask.js. Installed before the UI so the DISPLAY-rail
     // toggle finds it live.
     installScopeMask(viewer);
+    if (investorMode) setScopeMaskEnabled(false);
 
     // The follow camera recomputes the tracked target's dead-reckon position
     // every frame — tracking anything is a per-frame animation. (perf wave 2)
@@ -353,6 +356,9 @@ async function init() {
 
     if (investorMode) {
       try { await styleManager._layerStateRestorePromise; } catch { /* empty local state is fine */ }
+      setScopeMaskEnabled(false);
+      if (!tileset) viewer.scene.globe.show = true;
+      governorRequestRender('investor-globe');
       window.__terraSignal = await startInvestorSession({ viewer, styleManager, dataManager });
       window.__godsEyeView.investor = window.__terraSignal;
     }
@@ -361,8 +367,10 @@ async function init() {
     console.error(investorMode ? 'TerraSignal initialization failed:' : "God's Eye View initialization failed:", error);
     if (investorMode) {
       loadingScreen?.classList.add('hidden');
+      const detail = describeError(error);
+      showInvestorGlobeError(detail);
       const prompt = document.getElementById('ts-ai-prompt');
-      if (prompt) prompt.textContent = `Globe could not start — ${describeError(error)}`;
+      if (prompt) prompt.textContent = `Globe could not start — ${detail}`;
     } else {
       loaderStatus.textContent = `Error: ${describeError(error)}`;
       loaderStatus.style.color = '#ff4444';
