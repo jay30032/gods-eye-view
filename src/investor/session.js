@@ -74,7 +74,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   await disableLiveFeeds(dataManager);
   try { styleManager?.hud?.setVisible?.(false); } catch { /* optional */ }
   try { setScopeMaskEnabled(false); } catch { /* optional */ }
-  if (viewer?.scene?.globe) viewer.scene.globe.show = true;
+  if (viewer?.scene?.globe && !globalThis.__godsEyeView?.tileset) {
+    viewer.scene.globe.show = true;
+  }
   try { viewer?.resize?.(); } catch { /* optional */ }
   governorRequestRender('investor-session');
 
