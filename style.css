@@ -9524,6 +9524,47 @@ body.scene-playback-mode #key-setup {
 /* ==========================================================================
    TerraSignal Investor — one world, one AI, almost no menus
    ========================================================================== */
+html.terrasignal-investor #terrasignal-shell,
+body.terrasignal-investor #terrasignal-shell {
+  display: block;
+}
+
+html:not(.terrasignal-investor) #terrasignal-shell {
+  display: none;
+}
+
+html.terrasignal-investor #loading-screen {
+  z-index: 15;
+  background: transparent;
+  pointer-events: none;
+}
+
+html.terrasignal-investor #loading-screen .loader-content {
+  display: none;
+}
+
+html.terrasignal-investor #title-bar,
+html.terrasignal-investor #style-indicator,
+html.terrasignal-investor #top-center-actions,
+html.terrasignal-investor #data-panel,
+html.terrasignal-investor #control-panel,
+html.terrasignal-investor #location-bar,
+html.terrasignal-investor #cctv-panel,
+html.terrasignal-investor #scene-panel,
+html.terrasignal-investor #global-context-panel,
+html.terrasignal-investor #pp-toggles,
+html.terrasignal-investor #first-run-launcher,
+html.terrasignal-investor #command-dock,
+html.terrasignal-investor #param-slider-panel,
+html.terrasignal-investor #world-overlay-actions,
+html.terrasignal-investor #intel-hud,
+html.terrasignal-investor #traffic-sync-chip,
+html.terrasignal-investor #cctv-sync-chip,
+html.terrasignal-investor #global-loading-status,
+html.terrasignal-investor #safe-frame-overlay,
+html.terrasignal-investor #cockpit-hud,
+html.terrasignal-investor .hud-classification,
+html.terrasignal-investor .hud-top-bar-left,
 body.terrasignal-investor #title-bar,
 body.terrasignal-investor #style-indicator,
 body.terrasignal-investor #top-center-actions,

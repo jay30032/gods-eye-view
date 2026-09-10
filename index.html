@@ -4,6 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TerraSignal Investor — See what others miss.</title>
+  <script>
+    (function () {
+      try {
+        var product = new URLSearchParams(location.search).get('product') || '';
+        if (product === 'classic' || product === 'gev' || product === 'gods-eye-view') return;
+        document.documentElement.classList.add('terrasignal-investor');
+      } catch (e) { /* keep GEV fallback */ }
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="stylesheet" href="/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -910,6 +919,61 @@
 
   <!-- Intelligence HUD Overlay -->
   <div id="intel-hud"></div>
+
+  <div id="terrasignal-shell">
+    <header id="terrasignal-brand" aria-label="TerraSignal Investor">
+      <div class="ts-brand-mark">TS</div>
+      <div class="ts-brand-copy">
+        <strong>TerraSignal Investor</strong>
+        <span>See what others miss.</span>
+      </div>
+      <label class="ts-vision-toggle">
+        <input type="checkbox" id="ts-opportunity-vision" checked />
+        <span>Opportunity Vision</span>
+      </label>
+      <div id="ts-lod-chip" aria-live="polite">GLOBE</div>
+    </header>
+    <div id="ts-vignette" aria-hidden="true"></div>
+    <p id="ts-ai-prompt" role="status" aria-live="polite">Where are we hunting today?</p>
+    <aside id="ts-first-hunt">
+      <span class="ts-kicker">First hunt</span>
+      <strong id="ts-first-hunt-title">Where are we hunting today?</strong>
+      <p>One world. One AI. Mock signals only — not listings, not advice.</p>
+      <div class="ts-hunt-choices">
+        <button type="button" data-ts-begin-hunt>
+          <strong>Atlanta / Decatur</strong>
+          <small>Foreclosure, tax sale, and distress pulses</small>
+        </button>
+        <button type="button" class="ts-hunt-explore" data-ts-hunt-explore>
+          <strong>Stay on the globe</strong>
+          <small>Look around first. MIC still works.</small>
+        </button>
+      </div>
+      <label class="ts-hunt-suppress">
+        <input type="checkbox" data-ts-hunt-suppress />
+        <span>Don't show this again</span>
+      </label>
+    </aside>
+    <aside id="ts-focus-card" hidden></aside>
+    <aside id="ts-saved-sheet" hidden></aside>
+    <nav id="ts-bottom-nav" aria-label="TerraSignal">
+      <button type="button" data-ts-nav="world" class="is-active">WORLD</button>
+      <button type="button" data-ts-nav="drive">DRIVE</button>
+      <div id="ts-ai-slot">
+        <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="Hold Space to speak, or click the microphone">MIC</button>
+      </div>
+      <button type="button" data-ts-nav="saved">SAVED</button>
+    </nav>
+    <form id="ts-demo-form" autocomplete="off">
+      <label class="visually-hidden" for="ts-demo-input">Talk to TerraSignal</label>
+      <input id="ts-demo-input" name="q" placeholder="Find me money" />
+      <button type="submit">SEND</button>
+    </form>
+    <p id="ts-attribution">
+      Built on <a href="https://github.com/bilawalsidhu/gods-eye-view" rel="noreferrer">God's Eye View</a>
+      by Bilawal Sidhu · MIT · Mock data only · Not investment advice
+    </p>
+  </div>
 
   <!-- Loading screen -->
   <div id="loading-screen">
