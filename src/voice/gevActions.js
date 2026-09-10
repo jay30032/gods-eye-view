@@ -20,6 +20,7 @@ import { isPickedWorldPosition } from '../data/scenePick.js';
 import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
+import { isInvestorVoiceTool, runInvestorVoiceTool } from '../investor/voiceTools.js';
 
 const ALLOWED_STYLES = new Set(['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow']);
 const PANEL_ALIASES = new Map([
@@ -920,6 +921,15 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
 
     if (name === 'clear_annotations') {
       return clearAnnotations(annotations);
+    }
+
+    if (isInvestorVoiceTool(name)) {
+      return runInvestorVoiceTool(name, args, {
+        viewer,
+        styleManager,
+        dataManager,
+        investorSession: globalThis.__terraSignal || globalThis.__godsEyeView?.investor || null,
+      });
     }
 
     throw new Error(`Unknown GEV tool: ${name}`);

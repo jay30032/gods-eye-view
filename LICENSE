@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2026 Bilawal Sidhu
+Copyright (c) 2026 TerraSignal Investor contributors (jay30032 fork)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -52,3 +53,7 @@ The 3D models under public/models/ are also third-party works and are NOT
 licensed under MIT. They remain under their individual licenses. See
 public/models/README.md for the author, source, license, modification notice,
 and attribution covering each model file.
+
+This repository is a product fork of bilawalsidhu/gods-eye-view. TerraSignal
+Investor additions remain MIT. Keep the upstream copyright and this notice. The
+investor path ships DEMO/MOCK property data only — not a live listing feed.

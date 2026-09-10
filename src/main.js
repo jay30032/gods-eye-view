@@ -34,6 +34,8 @@ import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { initKeySetup } from './keySetup.js';
 import { loadPhotorealisticTileset } from './mapStartup.js';
+import { isInvestorProduct } from './investor/config.js';
+import { startInvestorSession } from './investor/session.js';
 
 initLogoGaze();
 
@@ -195,10 +197,15 @@ async function init() {
     const weatherEffects = null;
     const cockpitCloudEffects = initCockpitCloudEffects(viewer);
 
-    // If no share link state, do default fly-to Austin
-    if (!styleManager.hasShareState) {
+    const investorMode = isInvestorProduct();
+
+    // Classic GEV flies to Austin. Investor mode starts on the globe and
+    // descends into the Atlanta/Decatur mock market after layers are sealed.
+    if (!investorMode && !styleManager.hasShareState) {
       loaderStatus.textContent = 'Flying to Austin, TX...';
       flyToAustin(viewer);
+    } else if (investorMode) {
+      loaderStatus.textContent = 'Opening TerraSignal Investor…';
     } else {
       loaderStatus.textContent = 'Restoring shared view...';
     }
@@ -236,7 +243,9 @@ async function init() {
         return dataManager.unregisterForQa(layerId);
       };
     }
-    dataManager.buildTogglePanel(document.getElementById('data-toggles'));
+    if (!investorMode) {
+      dataManager.buildTogglePanel(document.getElementById('data-toggles'));
+    }
     styleManager.attachDataManager(dataManager);
 
     // Initialize deterministic scene playback for social clip capture
@@ -261,7 +270,7 @@ async function init() {
         // dataManager is passed explicitly: the globe missions enable bundled
         // keyless layers through it, and reaching for styleManager._dataManager
         // would make a private field part of this feature's contract.
-        initFirstRunExperience({ styleManager, dataManager });
+        if (!investorMode) initFirstRunExperience({ styleManager, dataManager });
       };
       loadingScreen.addEventListener('transitionend', revealFirstRun, { once: true });
       setTimeout(revealFirstRun, 900);
@@ -327,6 +336,12 @@ async function init() {
       requestRender: governorRequestRender,
     };
     window.__godsEyeView.voiceCommands = initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
+
+    if (investorMode) {
+      try { await styleManager._layerStateRestorePromise; } catch { /* empty local state is fine */ }
+      window.__terraSignal = await startInvestorSession({ viewer, styleManager, dataManager });
+      window.__godsEyeView.investor = window.__terraSignal;
+    }
 
   } catch (error) {
     console.error("God's Eye View initialization failed:", error);

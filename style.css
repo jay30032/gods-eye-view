@@ -9520,3 +9520,336 @@ body.scene-playback-mode #key-setup {
   border-color: rgba(255, 170, 150, 0.65);
   outline: none;
 }
+
+/* ==========================================================================
+   TerraSignal Investor — one world, one AI, almost no menus
+   ========================================================================== */
+body.terrasignal-investor #title-bar,
+body.terrasignal-investor #style-indicator,
+body.terrasignal-investor #top-center-actions,
+body.terrasignal-investor #data-panel,
+body.terrasignal-investor #control-panel,
+body.terrasignal-investor #location-bar,
+body.terrasignal-investor #cctv-panel,
+body.terrasignal-investor #scene-panel,
+body.terrasignal-investor #global-context-panel,
+body.terrasignal-investor #pp-toggles,
+body.terrasignal-investor #first-run-launcher,
+body.terrasignal-investor #command-dock,
+body.terrasignal-investor #param-slider-panel,
+body.terrasignal-investor #world-overlay-actions,
+body.terrasignal-investor #intel-hud,
+body.terrasignal-investor #traffic-sync-chip,
+body.terrasignal-investor #cctv-sync-chip,
+body.terrasignal-investor #global-loading-status {
+  display: none !important;
+}
+
+#terrasignal-shell {
+  pointer-events: none;
+}
+
+#terrasignal-brand,
+#ts-ai-prompt,
+#ts-focus-card,
+#ts-saved-sheet,
+#ts-bottom-nav,
+#ts-demo-form,
+#ts-attribution {
+  pointer-events: auto;
+}
+
+#terrasignal-brand {
+  position: fixed;
+  top: 1.1rem;
+  left: 1.2rem;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+.ts-brand-mark {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.45rem;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(160deg, #d4a017, #8a5a10);
+  color: #1a1408;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ts-brand-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.ts-brand-copy strong {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.ts-brand-copy span {
+  font-size: 0.72rem;
+  color: rgba(244, 239, 228, 0.72);
+}
+
+.ts-vision-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.6rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 239, 228, 0.8);
+}
+
+#ts-lod-chip {
+  margin-left: 0.4rem;
+  padding: 0.18rem 0.45rem;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+}
+
+#ts-ai-prompt {
+  position: fixed;
+  top: 4.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: min(42rem, 86vw);
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  background: rgba(10, 8, 4, 0.62);
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+#ts-focus-card,
+#ts-saved-sheet {
+  position: fixed;
+  right: 1.1rem;
+  bottom: 5.6rem;
+  z-index: 42;
+  width: min(22rem, 92vw);
+  padding: 1rem 1.05rem 0.9rem;
+  border-radius: 0.8rem;
+  background: rgba(12, 10, 6, 0.88);
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-focus-card header,
+#ts-saved-sheet header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.7rem;
+}
+
+#ts-saved-sheet header {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ts-kicker {
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #e0b84a;
+}
+
+#ts-focus-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem 0.8rem;
+  margin: 0 0 0.7rem;
+}
+
+#ts-focus-card dt {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 239, 228, 0.55);
+}
+
+#ts-focus-card dd {
+  margin: 0.1rem 0 0;
+  font-size: 0.95rem;
+}
+
+.ts-why,
+.ts-deal {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: rgba(244, 239, 228, 0.86);
+}
+
+.ts-deal {
+  padding-left: 1.1rem;
+}
+
+#ts-focus-card footer,
+#ts-bottom-nav,
+#ts-demo-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+#ts-focus-card footer button,
+#ts-demo-form button,
+#ts-saved-sheet button,
+#ts-bottom-nav button {
+  font-family: Inter, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: transparent;
+  color: #f4efe4;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+#ts-focus-card footer button,
+#ts-demo-form button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.68rem;
+}
+
+#ts-bottom-nav {
+  position: fixed;
+  left: 50%;
+  bottom: 1.05rem;
+  transform: translateX(-50%);
+  z-index: 45;
+  padding: 0.35rem;
+  border-radius: 999px;
+  background: rgba(10, 8, 4, 0.78);
+  border: 1px solid rgba(212, 160, 23, 0.3);
+}
+
+#ts-bottom-nav button {
+  min-width: 4.6rem;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.68rem;
+}
+
+#ts-bottom-nav button.is-active,
+#ts-focus-card footer button:hover,
+#ts-bottom-nav button:hover {
+  background: rgba(212, 160, 23, 0.18);
+}
+
+#ts-ai-slot {
+  position: relative;
+  min-width: 4.6rem;
+}
+
+#ts-ai-slot #gev-voice-control.ts-voice {
+  position: static;
+  transform: none;
+  width: auto;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-heading,
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-visualizer,
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-readout,
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-help-tray {
+  display: none;
+}
+
+#ts-ai-slot #gev-voice-button {
+  min-width: 4.6rem;
+  padding: 0.45rem 0.7rem;
+}
+
+#ts-demo-form {
+  position: fixed;
+  left: 50%;
+  bottom: 4.15rem;
+  transform: translateX(-50%);
+  z-index: 44;
+  width: min(28rem, 90vw);
+}
+
+#ts-demo-form input {
+  flex: 1;
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  background: rgba(10, 8, 4, 0.72);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-attribution {
+  position: fixed;
+  left: 0.8rem;
+  bottom: 0.45rem;
+  z-index: 40;
+  margin: 0;
+  max-width: 22rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  color: rgba(244, 239, 228, 0.55);
+  font-family: Inter, sans-serif;
+}
+
+#ts-attribution a {
+  color: #e0b84a;
+}
+
+#ts-saved-sheet ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#ts-saved-sheet li button {
+  width: 100%;
+  margin-bottom: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.terrasignal-investor #ts-ai-prompt,
+  body.terrasignal-investor #ts-bottom-nav {
+    transition: none;
+  }
+}

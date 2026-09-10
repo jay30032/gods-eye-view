@@ -21,15 +21,18 @@ function realtimeTools() {
   return new Function(`return ${literal};`)();
 }
 
-test('Realtime schema exposes the authoritative 28-tool inventory', () => {
+test('Realtime schema exposes the authoritative 42-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 28);
+  assert.equal(tools.length, 42);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 28, 'tool names are unique');
+  assert.equal(new Set(names).size, 42, 'tool names are unique');
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('select_nearest_aircraft'));
   assert.ok(names.includes('control_radio'));
+  assert.ok(names.includes('rank_mock_properties'));
+  assert.ok(names.includes('run_flip_analysis'));
+  assert.ok(names.includes('start_drive_demo'));
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
