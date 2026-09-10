@@ -14,9 +14,9 @@ Classic God's Eye View chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classi
 
 ## First 60 seconds
 
-1. The globe opens, then descends into Atlanta / Decatur.
-2. ≥25 DEMO/MOCK properties animate by signal (unless `prefers-reduced-motion`).
-3. The AI line asks **Where are we hunting today?**
+1. The globe stays primary — dark-edge HUD, no GEV filter dashboard.
+2. First-run hunt ritual: **Where are we hunting today?** Choose Atlanta/Decatur or stay on the globe. Returning visitors skip it (`terrasignal:first-hunt:v1`). Share links and `?welcome=0` suppress it; `?welcome=1` replays.
+3. After you choose the hunt, the camera descends into Decatur. ≥25 DEMO/MOCK properties pulse by signal (unless `prefers-reduced-motion`).
 4. Type or say the demo conversation (OpenAI optional for typed demo):
 
    - Find me money
@@ -25,7 +25,7 @@ Classic God's Eye View chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classi
    - Assume rehab is twenty thousand higher
    - Save it
 
-5. Bottom nav: **WORLD** recenters the market, **DRIVE** runs the simulated route, **SAVED** opens local bookmarks, **AI** is the mic (and the text line).
+5. Bottom dock: **WORLD · DRIVE · MIC · SAVED**. The central MIC is the GEV voice control (Space is still push-to-talk). No dense filter chrome.
 
 ## Screenshots to capture
 

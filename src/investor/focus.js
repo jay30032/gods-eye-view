@@ -33,7 +33,7 @@ export function formatPct(value) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
-export function focusCardModel(property, { analysis = null, strategy = null } = {}) {
+export function focusCardModel(property, { analysis = null, strategy = null, revealDeal = false } = {}) {
   if (!property) return null;
   const signal = primarySignal(property);
   const best = strategy || bestStrategyFor(property);
@@ -51,7 +51,7 @@ export function focusCardModel(property, { analysis = null, strategy = null } = 
     signalConfidence: signal ? Math.round(signal.confidence * 100) : 0,
     strategy: best,
     analysis: run,
-    why: whyThisMatters(property, run),
+    why: whyThisMatters(property, revealDeal ? run : null),
     demo: true,
   };
 }

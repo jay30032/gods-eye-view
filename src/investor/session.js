@@ -19,6 +19,7 @@ import {
   parseDemoIntent,
 } from './conversation.js';
 import { applyInvestorChrome, relocateVoiceControl, setAiPrompt, setLodChip, setNavActive } from './ui/chrome.js';
+import { initFirstHunt } from './ui/firstHunt.js';
 import { hideFocusCard, renderFocusCard } from './ui/focusCard.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
 
@@ -62,6 +63,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   const conversation = createConversationState();
   let focused = null;
   let lastAnalysis = null;
+  let lastAnalysisId = null;
+  let hunt = null;
 
   applyInvestorChrome(config);
   await disableLiveFeeds(dataManager);
@@ -109,7 +112,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       conversation.focusedId = property.id;
       visuals.setFocused(property.id);
       if (fly) flyToProperty(viewer, Cesium, property, { reduced: prefersReducedMotion() });
-      renderFocusCard(property, { analysis: lastAnalysis, strategy: conversation.lastStrategy });
+      const analysisForCard = lastAnalysisId === property.id ? lastAnalysis : null;
+      renderFocusCard(property, {
+        analysis: analysisForCard,
+        strategy: conversation.lastStrategy,
+        revealDeal: Boolean(analysisForCard),
+      });
       hideSavedSheet();
       setNavActive('world');
       return { ok: true, action: 'focus_property', id: property.id, address: property.address };
@@ -128,7 +136,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       visuals.setDealVision(name);
       if (focused) {
         lastAnalysis = analyzePropertyDeal(focused, name, { rehabDelta: conversation.rehabDelta });
-        renderFocusCard(focused, { analysis: lastAnalysis, strategy: name });
+        lastAnalysisId = focused.id;
+        renderFocusCard(focused, { analysis: lastAnalysis, strategy: name, revealDeal: true });
       }
       setAiPrompt(`${name.toUpperCase()} vision on the globe.`);
       return { ok: true, action: 'show_deal_vision', strategy: name, id: focused?.id || null };
@@ -141,7 +150,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         rehabDelta: conversation.rehabDelta,
         ...overrides,
       });
-      renderFocusCard(focused, { analysis: lastAnalysis, strategy: name });
+      lastAnalysisId = focused.id;
+      renderFocusCard(focused, { analysis: lastAnalysis, strategy: name, revealDeal: true });
       return { ok: true, action: `run_${name}_analysis`, id: focused.id, strategy: name, analysis: lastAnalysis };
     },
     search(args) {
@@ -194,7 +204,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         const result = applyRehabDelta(focused, conversation, 20000);
         if (result.ok) {
           lastAnalysis = result.analysis;
-          renderFocusCard(focused, { analysis: lastAnalysis, strategy: result.strategy });
+          lastAnalysisId = focused.id;
+          renderFocusCard(focused, { analysis: lastAnalysis, strategy: result.strategy, revealDeal: true });
         }
         setAiPrompt(result.spoken);
         return result;
@@ -222,10 +233,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       visuals.setFocused(null);
       focused = null;
       setNavActive('world');
+      hunt?.dismiss?.({ persistSession: true });
       flyToMarket(viewer, Cesium, market, {
         heightM: market.overviewHeightM,
         duration: prefersReducedMotion() ? 0.8 : 2.6,
       });
+      visuals.startScan();
       setAiPrompt(market.greeting);
     },
   };
@@ -242,22 +255,32 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     if (event.detail?.id) session.focus(event.detail.id, { fly: true });
   });
 
-  const hunt = document.getElementById('ts-first-hunt');
-  if (hunt) hunt.hidden = false;
-  hunt?.querySelector('[data-ts-begin-hunt]')?.addEventListener('click', () => {
-    if (hunt) hunt.hidden = true;
-    setAiPrompt(market.greeting);
-    document.getElementById('ts-demo-input')?.focus();
-  }, { once: true });
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(market.globeLng, market.globeLat, 18_000_000),
+    orientation: {
+      heading: 0,
+      pitch: Cesium.Math.toRadians(-90),
+      roll: 0,
+    },
+  });
+  setAiPrompt('Where are we hunting today?');
 
-  setAiPrompt('Descending on Atlanta / Decatur…');
-  await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });
-  visuals.startScan();
-  setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
-  setAiPrompt(market.greeting);
-  if (hunt) {
-    globalThis.setTimeout(() => { hunt.hidden = true; }, prefersReducedMotion() ? 1200 : 5200);
-  }
+  const startHunt = async () => {
+    setAiPrompt('Descending on Atlanta / Decatur…');
+    await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });
+    visuals.startScan();
+    setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
+    setAiPrompt(market.greeting);
+  };
+
+  const hunt = initFirstHunt({
+    root: document.getElementById('ts-first-hunt'),
+    hasShareState: Boolean(styleManager?.hasShareState),
+    onBegin: startHunt,
+  });
+  session.beginHunt = startHunt;
+  session.firstHunt = hunt;
+  if (!hunt?.show) await startHunt();
 
   return session;
 }

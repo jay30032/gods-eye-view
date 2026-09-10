@@ -13,6 +13,9 @@ const HIDDEN_GEV = [
   '#command-dock',
   '#param-slider-panel',
   '#world-overlay-actions',
+  '#intel-hud',
+  '#safe-frame-overlay',
+  '#cockpit-hud',
 ];
 
 export function applyInvestorChrome({ productName, tagline }) {
@@ -50,12 +53,26 @@ function ensureInvestorShell(productName, tagline) {
       </label>
       <div id="ts-lod-chip" aria-live="polite">CITY</div>
     </header>
+    <div id="ts-vignette" aria-hidden="true"></div>
     <p id="ts-ai-prompt" role="status" aria-live="polite">Where are we hunting today?</p>
     <aside id="ts-first-hunt" hidden>
-      <span class="ts-kicker">TerraSignal · Hunt</span>
-      <strong>Where are we hunting today?</strong>
-      <p>One market. Mock signals only. Talk or type — the globe does the rest.</p>
-      <button type="button" data-ts-begin-hunt>Begin Atlanta / Decatur</button>
+      <span class="ts-kicker">First hunt</span>
+      <strong id="ts-first-hunt-title">Where are we hunting today?</strong>
+      <p>One world. One AI. Mock signals only — not listings, not advice.</p>
+      <div class="ts-hunt-choices">
+        <button type="button" data-ts-begin-hunt>
+          <strong>Atlanta / Decatur</strong>
+          <small>Foreclosure, tax sale, and distress pulses</small>
+        </button>
+        <button type="button" class="ts-hunt-explore" data-ts-hunt-explore>
+          <strong>Stay on the globe</strong>
+          <small>Look around first. MIC still works.</small>
+        </button>
+      </div>
+      <label class="ts-hunt-suppress">
+        <input type="checkbox" data-ts-hunt-suppress />
+        <span>Don't show this again</span>
+      </label>
     </aside>
     <aside id="ts-focus-card" hidden></aside>
     <aside id="ts-saved-sheet" hidden></aside>
@@ -63,7 +80,7 @@ function ensureInvestorShell(productName, tagline) {
       <button type="button" data-ts-nav="world" class="is-active">WORLD</button>
       <button type="button" data-ts-nav="drive">DRIVE</button>
       <div id="ts-ai-slot">
-        <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="AI microphone">MIC</button>
+        <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="Hold Space to speak, or click the microphone">MIC</button>
       </div>
       <button type="button" data-ts-nav="saved">SAVED</button>
     </nav>
@@ -96,11 +113,26 @@ export function setNavActive(name) {
   }
 }
 
-export function relocateVoiceControl() {
-  const slot = document.getElementById('ts-ai-slot');
+let voiceObserver = null;
+
+function placeVoiceInSlot(slot) {
   const voice = document.getElementById('gev-voice-control');
+  const fallback = document.getElementById('ts-ai-button');
   if (slot && voice && voice.parentElement !== slot) {
     slot.appendChild(voice);
     voice.classList.add('ts-voice');
   }
+  if (voice && fallback) fallback.hidden = true;
+  const label = voice?.querySelector('.gev-mic-label');
+  if (label) label.textContent = 'MIC';
+  return Boolean(voice);
+}
+
+export function relocateVoiceControl() {
+  const slot = document.getElementById('ts-ai-slot');
+  if (!slot) return;
+  placeVoiceInSlot(slot);
+  if (voiceObserver || typeof MutationObserver === 'undefined') return;
+  voiceObserver = new MutationObserver(() => placeVoiceInSlot(slot));
+  voiceObserver.observe(document.body, { childList: true, subtree: true });
 }

@@ -17,13 +17,15 @@ export function renderFocusCard(property, options = {}) {
       <span>${model.neighborhood || ''} · ${String(model.propertyType).toUpperCase()}</span>
     </header>
     <p class="ts-why">${model.why}</p>
-    <dl>
+    <dl class="ts-focus-glance">
       <div><dt>Score</dt><dd>${model.score}</dd></div>
+      <div><dt>Path</dt><dd>${String(model.strategy).toUpperCase()}</dd></div>
+      ${options.revealDeal ? `
       <div><dt>Value</dt><dd>${model.estimatedValue}</dd></div>
       <div><dt>Equity</dt><dd>${model.estimatedEquityPct}</dd></div>
-      <div><dt>Path</dt><dd>${String(model.strategy).toUpperCase()}</dd></div>
+      ` : ''}
     </dl>
-    ${renderAnalysis(model)}
+    ${options.revealDeal ? renderAnalysis(model) : ''}
     <footer>
       <button type="button" data-ts-focus-action="save">Save</button>
       <button type="button" data-ts-focus-action="deal">Show deal</button>

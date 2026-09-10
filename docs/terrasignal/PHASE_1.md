@@ -5,8 +5,8 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 ## Done criteria
 
 - [x] Rebrand to TerraSignal Investor; MIT + Bilawal Sidhu / God's Eye View attribution kept
-- [x] Investor default: globe → Atlanta/Decatur → ≥25 mock properties animate by signal → “Where are we hunting today?”
-- [x] Bottom nav only: WORLD · DRIVE · SAVED · AI/mic. No filter dashboard
+- [x] Investor default: globe-first park → hunt ritual “Where are we hunting today?” → Atlanta/Decatur → ≥25 mock properties animate by signal
+- [x] Bottom nav only: WORLD · DRIVE · MIC · SAVED. Central mic. No filter dashboard
 - [x] Mock dataset ≥25 with schema `{id,address,lat,lng,propertyType,estimatedValue,estimatedEquityPct,opportunityScore,signals,deal}`
 - [x] Visuals under `src/investor/visuals/` integrated with the render governor (no standalone `requestAnimationFrame`)
 - [x] Signal looks: FORECLOSURE heartbeat, PREFORECLOSURE breathe, TAX_SALE vertical, DISTRESS shimmer, LISTED ring, TOP_PICK gold halo/column

@@ -8,7 +8,7 @@ TerraSignal Investor is a mock-first globe for hunting distressed and off-market
 
 ## What Phase 1 is
 
-A cinematic investor demo: globe → Atlanta / Decatur → mock signals pulse by type → the AI asks *Where are we hunting today?* Bottom chrome is only **WORLD · DRIVE · SAVED · AI**. Click or talk. No filter dashboard.
+A cinematic investor demo: globe-first canvas, then a hunt ritual (*Where are we hunting today?*) before descending into Atlanta / Decatur. Mock signals pulse by type. Bottom chrome is only **WORLD · DRIVE · MIC · SAVED**. Click or talk. No filter dashboard.
 
 ## What Phase 1 is not
 
