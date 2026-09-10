@@ -78,6 +78,11 @@ async function init() {
   if (investorMode) {
     applyInvestorChrome(readInvestorConfig());
     if (loaderStatus) loaderStatus.textContent = 'Opening one world…';
+    loadingScreen?.classList.add('hidden');
+    await new Promise((resolve) => {
+      const raf = globalThis.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
+      raf(() => raf(resolve));
+    });
   }
 
   try {
