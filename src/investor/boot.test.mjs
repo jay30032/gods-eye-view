@@ -15,4 +15,7 @@ test('investor boot stays Cesium-free and is the first module in index.html', ()
   const bootIdx = html.indexOf('src="/src/investor/boot.js"');
   const mainIdx = html.indexOf('src="/src/main.js"');
   assert.equal(bootIdx > 0 && bootIdx < mainIdx, true);
+  assert.match(html, /id="terrasignal-shell"/);
+  assert.match(html, /Where are we hunting today\?/);
+  assert.match(html, /data-ts-nav="world"/);
 });
