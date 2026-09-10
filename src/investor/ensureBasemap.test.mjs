@@ -268,6 +268,11 @@ test('MapStackController requests a scene frame even before the governor is inst
     /this\.viewer\.imageryLayers\.add\(this\._imageryLayer/,
     'esri/osm path must add an ImageryLayer that covers the globe',
   );
+  assert.match(
+    src,
+    /void this\._setWorldTerrainEnabled/,
+    'Re:Earth terrain must not block the first imagery frame',
+  );
 });
 
 test('investor session re-asserts imagery after Atlanta/Decatur descent', () => {
