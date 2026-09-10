@@ -2,7 +2,7 @@ import { normalizeStrategy } from './deal/index.js';
 import { whyThisMatters } from './focus.js';
 import { isPropertySaved } from './saved.js';
 
-function explainProperty(property) {
+export function explainProperty(property) {
   if (!property) return { ok: false, error: 'No property' };
   return {
     ok: true,
