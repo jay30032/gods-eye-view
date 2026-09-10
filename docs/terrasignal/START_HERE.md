@@ -14,7 +14,7 @@ Open:
 
 **http://localhost:4173/?demo=1&welcome=1**
 
-Vite listens on **4173**. No `CESIUM_ION_TOKEN` or `GOOGLE_MAPS_API_KEY` is required: the keyless path tries Esri World Imagery, falls back to OSM on any failure (with a toast), and paints first frames with `requestRender` bursts (not a continuous 60 fps hold). Investor demo caps at **30 fps** on battery/unknown power. If imagery is still missing after 8 seconds, `#ts-globe-error` must appear — credits alone are not a painted Earth. Classic GEV (`?product=classic`) stays on its 60 fps idle governor.
+Vite listens on **4173**. No `CESIUM_ION_TOKEN` or `GOOGLE_MAPS_API_KEY` is required: the keyless path tries Esri World Imagery, falls back to OSM on any failure (with a toast), then keeps `requestRender` until the first painted frame (`tilesLoaded` / non-black center pixel / 10s error). A 4s `investor-first-paint` hold prevents idle `requestRenderMode` before tiles are requested — it is not a forever 60 fps loop. Investor demo caps at **30 fps** on battery/unknown power. Classic GEV (`?product=classic`) stays on its 60 fps idle governor.
 
 The left **5-minute demo** rail shows the next step. Press **Send this phrase** (or type it in the command bar and hit SEND). **Play** auto-advances. The **DEMO** chip toggles the rail if you opened the app without `?demo=1`.
 

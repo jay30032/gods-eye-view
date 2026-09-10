@@ -40,6 +40,7 @@ import { applyInvestorChrome } from './investor/ui/chrome.js';
 import { showInvestorGlobeError } from './investor/globeReveal.js';
 import {
   ensureKeylessVisibleBasemap,
+  INVESTOR_PAINT_HOLD,
   kickRenderBurst,
   releaseInvestorBootHolds,
   scheduleInvestorImageryWatchdog,
@@ -216,7 +217,9 @@ async function init() {
     });
     await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', { silent: true });
     if (investorMode && !tileset) {
-      releaseInvestorBootHolds();
+      // Keep the governor from going idle before Esri tiles are requested.
+      // Released on first tile progress or 4s inside renderUntilGlobePaints.
+      holdContinuousRender(INVESTOR_PAINT_HOLD);
       kickRenderBurst(viewer);
       scheduleInvestorImageryWatchdog({ viewer, mapStackController });
       await ensureKeylessVisibleBasemap({

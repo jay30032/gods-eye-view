@@ -10,10 +10,12 @@ import {
   countShowingImageryLayers,
   ensureKeylessVisibleBasemap,
   inspectKeylessGlobe,
+  isNonBlackPixel,
   keylessGlobeLooksEmpty,
   kickRenderBurst,
   probeEsriWorldImagery,
   releaseInvestorBootHolds,
+  renderUntilGlobePaints,
   requestSceneRender,
   scheduleInvestorImageryWatchdog,
   shouldSkipKeylessBasemap,
@@ -102,20 +104,39 @@ function createDocument() {
   return documentRef;
 }
 
+function paintSkip() {
+  return { paintTimeoutMs: 0, paintHoldMs: 0, paintPredicate: () => true };
+}
+
 function createTimers() {
   const pending = new Map();
   let next = 0;
   return {
-    setTimeout(fn) {
+    setTimeout(fn, ms = 0) {
       const id = ++next;
-      pending.set(id, fn);
+      pending.set(id, { fn, ms: Number(ms) || 0 });
       return id;
     },
     clearTimeout(id) { pending.delete(id); },
     flush() {
       const run = [...pending.values()];
       pending.clear();
-      for (const fn of run) fn();
+      for (const item of run) item.fn();
+    },
+    flushSoonest() {
+      let bestId = null;
+      let bestMs = Infinity;
+      for (const [id, item] of pending) {
+        if (item.ms < bestMs) {
+          bestMs = item.ms;
+          bestId = id;
+        }
+      }
+      if (bestId == null) return null;
+      const item = pending.get(bestId);
+      pending.delete(bestId);
+      item.fn();
+      return bestMs;
     },
   };
 }
@@ -147,6 +168,7 @@ test('an already-attached imagery layer skips a second Esri setStack', async () 
     fetchImpl: async () => ({ ok: true }),
     timers: createTimers(),
     holdMs: 0,
+    ...paintSkip(),
   });
   assert.equal(result.ok, true);
   assert.equal(result.imageryLayerCount > 0, true);
@@ -165,6 +187,7 @@ test('keyless investor init attaches a visible imagery layer and shows the globe
     fetchImpl: async () => ({ ok: true }),
     timers: createTimers(),
     holdMs: 0,
+    ...paintSkip(),
   });
   assert.equal(result.skipped, false);
   assert.equal(result.globeShow, true);
@@ -187,6 +210,7 @@ test('Esri construction or probe failure immediately uses OSM and toasts', async
     fetchImpl: async () => ({ ok: false, status: 503 }),
     timers: createTimers(),
     holdMs: 0,
+    ...paintSkip(),
   });
   assert.equal(result.usedFallback, true);
   assert.equal(result.activeId, 'osm');
@@ -209,6 +233,7 @@ test('Esri layer that never attaches falls back to OSM', async () => {
     timers: createTimers(),
     holdMs: 0,
     probe: false,
+    ...paintSkip(),
   });
   assert.equal(result.usedFallback, true);
   assert.equal(result.activeId, 'osm');
@@ -287,6 +312,7 @@ test('keyless ensure does not leave a continuous-render hold', async () => {
     fetchImpl: async () => ({ ok: true }),
     timers: createTimers(),
     holdMs: 0,
+    ...paintSkip(),
   });
   const diag = getRenderGovernorDiagnostics();
   assert.equal(diag.holds.includes('investor-basemap'), false);
@@ -323,6 +349,67 @@ test('8s imagery watchdog surfaces an error when the globe is still empty', () =
   assert.match(banner.innerHTML, /8 seconds|canvas|imagery/i);
 });
 
+test('isNonBlackPixel matches the headed Air samples', () => {
+  assert.equal(isNonBlackPixel([0, 0, 0, 255]), false);
+  assert.equal(isNonBlackPixel([1, 1, 1, 255]), false);
+  assert.equal(isNonBlackPixel([138, 154, 126, 255]), true);
+});
+
+test('renderUntilGlobePaints keeps requesting frames until the predicate passes', async () => {
+  _resetRenderGovernorForTest();
+  const viewer = createMockViewer();
+  const timers = createTimers();
+  const pending = renderUntilGlobePaints(viewer, {
+    timers,
+    documentRef: createDocument(),
+    intervalMs: 16,
+    timeoutMs: 10_000,
+    holdMs: 4000,
+    paintPredicate: () => viewer.scene.renders >= 4,
+  });
+  for (let i = 0; i < 20 && viewer.scene.renders < 4; i += 1) {
+    timers.flushSoonest();
+  }
+  const result = await pending;
+  assert.equal(result.painted, true);
+  assert.equal(result.reason, 'predicate');
+  assert.equal(viewer.scene.renders >= 4, true);
+  assert.equal(getRenderGovernorDiagnostics().holds.includes('investor-first-paint'), false);
+});
+
+test('ensureKeylessVisibleBasemap schedules renders until a paint predicate passes', async () => {
+  _resetRenderGovernorForTest();
+  const viewer = createMockViewer();
+  const timers = createTimers();
+  let checks = 0;
+  const pending = ensureKeylessVisibleBasemap({
+    viewer,
+    mapStackController: createMockController(viewer, { esri: 'ok' }),
+    documentRef: createDocument(),
+    fetchImpl: async () => ({ ok: true }),
+    probe: false,
+    timers,
+    paintPredicate: () => {
+      checks += 1;
+      return checks >= 4;
+    },
+    paintIntervalMs: 16,
+    paintTimeoutMs: 10_000,
+    paintHoldMs: 4000,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  for (let i = 0; i < 40 && checks < 4; i += 1) {
+    timers.flushSoonest();
+    await Promise.resolve();
+  }
+  const result = await pending;
+  assert.equal(result.painted, true);
+  assert.equal(checks >= 4, true);
+  assert.equal(viewer.scene.renders > 1, true);
+  assert.equal(getRenderGovernorDiagnostics().holds.includes('investor-first-paint'), false);
+});
+
 test('kickRenderBurst schedules more than one scene request', () => {
   const viewer = createMockViewer();
   const timers = createTimers();
@@ -331,15 +418,17 @@ test('kickRenderBurst schedules more than one scene request', () => {
   assert.equal(viewer.scene.renders >= 4, true);
 });
 
-test('main.js bursts frames and watches for empty imagery instead of holding first-hunt', () => {
+test('main.js holds first-paint only until tiles, never first-hunt', () => {
   const main = readFileSync(join(here, '../main.js'), 'utf8');
   assert.match(main, /ensureKeylessVisibleBasemap/);
   assert.match(main, /kickRenderBurst/);
   assert.match(main, /scheduleInvestorImageryWatchdog/);
-  assert.match(main, /waitForFirstInvestorFrame/);
-  assert.match(main, /releaseInvestorBootHolds/);
+  assert.match(main, /holdContinuousRender\(INVESTOR_PAINT_HOLD\)/);
   assert.doesNotMatch(main, /holdContinuousRender\(INVESTOR_HUNT_HOLD\)/);
   assert.doesNotMatch(main, /holdContinuousRender\(INVESTOR_BASEMAP_HOLD\)/);
+  const governorAt = main.indexOf('installRenderGovernor(viewer)');
+  const holdAt = main.indexOf('holdContinuousRender(INVESTOR_PAINT_HOLD)');
+  assert.equal(holdAt > 0 && holdAt < governorAt, true);
 });
 
 test('MapStackController requests a scene frame even before the governor is installed', () => {

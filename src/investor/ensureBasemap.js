@@ -30,12 +30,17 @@ import {
 
 export const INVESTOR_BASEMAP_HOLD = 'investor-basemap';
 export const INVESTOR_HUNT_HOLD = 'investor-first-hunt';
+export const INVESTOR_PAINT_HOLD = 'investor-first-paint';
 export const INVESTOR_BRIEF_HOLD_MS = 2500;
-export const INVESTOR_INIT_WATCHDOG_MS = 8000;
+export const INVESTOR_PAINT_HOLD_MS = 4000;
+export const INVESTOR_PAINT_TIMEOUT_MS = 10000;
+export const INVESTOR_PAINT_INTERVAL_MS = 100;
+export const INVESTOR_INIT_WATCHDOG_MS = 10000;
 
 const INIT_WATCHDOG_COPY =
-  'Earth imagery did not appear within 8 seconds. The HUD should stay usable. '
-  + 'Cesium credits can appear without a painted globe.';
+  'Earth imagery did not appear within 10 seconds. The WebGL canvas and Esri '
+  + 'layer can be live while the ellipsoid stays black — that is an unpainted '
+  + 'frame, not a missing basemap. Credits are not a painted globe.';
 
 export const ESRI_WORLD_IMAGERY_URL =
   'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer';
@@ -110,6 +115,192 @@ export function releaseInvestorBootHolds() {
   releaseContinuousRender(INVESTOR_HUNT_HOLD);
 }
 
+export function releaseInvestorPaintHold() {
+  releaseContinuousRender(INVESTOR_PAINT_HOLD);
+}
+
+/**
+ * Clear-color black vs a painted Earth sample. Headed proof on a MacBook Air:
+ * idle investor stayed [0,0,0,*]; after forced renders the center pixel was
+ * [138,154,126,255].
+ */
+export function isNonBlackPixel(rgba) {
+  if (!rgba || rgba.length < 3) return false;
+  const r = Number(rgba[0]) || 0;
+  const g = Number(rgba[1]) || 0;
+  const b = Number(rgba[2]) || 0;
+  const a = rgba.length > 3 ? Number(rgba[3]) : 255;
+  if (a < 8) return false;
+  return (r + g + b) > 24;
+}
+
+export function sampleCenterPixel(viewer, readPixels) {
+  if (typeof readPixels === 'function') {
+    try { return readPixels(viewer); } catch { return null; }
+  }
+  const canvas = viewer?.scene?.canvas || findCesiumCanvas(viewer);
+  const gl = viewer?.scene?.context?._gl
+    || canvas?.getContext?.('webgl2')
+    || canvas?.getContext?.('webgl');
+  if (!gl || !canvas) return null;
+  const width = Number(canvas.width || 0);
+  const height = Number(canvas.height || 0);
+  if (width < 2 || height < 2) return null;
+  const pixels = new Uint8Array(4);
+  try {
+    gl.readPixels(
+      Math.floor(width / 2),
+      Math.floor(height / 2),
+      1,
+      1,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixels,
+    );
+    return pixels;
+  } catch {
+    return null;
+  }
+}
+
+export function globeHasPainted(viewer, {
+  paintPredicate,
+  readPixels,
+  sawTileProgress = false,
+} = {}) {
+  if (typeof paintPredicate === 'function') {
+    try { return Boolean(paintPredicate(viewer)); } catch { return false; }
+  }
+  const pixel = sampleCenterPixel(viewer, readPixels);
+  if (pixel && isNonBlackPixel(pixel)) return true;
+  const globe = viewer?.scene?.globe;
+  if (globe?.tilesLoaded === true && sawTileProgress) return true;
+  return false;
+}
+
+/**
+ * Keep requesting frames after a keyless ImageryLayer attaches until Earth
+ * actually paints. Investor was going `requestRenderMode = true` (idle) with
+ * globe.show and an Esri layer live — credits on a black clear-color void.
+ *
+ * Mechanism:
+ *   1. holdContinuousRender('investor-first-paint') so the governor cannot
+ *      flip idle (max 4s, released on first tileLoadProgress queued > 0).
+ *   2. scene.requestRender() on a 100ms interval, on tileLoadProgressEvent,
+ *      and once per postRender *check* (postRender does not re-request).
+ *   3. Stop when paintPredicate / non-black center pixel / (tilesLoaded
+ *      after progress). After 10s, surface #ts-globe-error.
+ *
+ * Not an indefinite 60 fps hold.
+ */
+export function renderUntilGlobePaints(viewer, {
+  timers = globalThis,
+  intervalMs = INVESTOR_PAINT_INTERVAL_MS,
+  timeoutMs = INVESTOR_PAINT_TIMEOUT_MS,
+  holdMs = INVESTOR_PAINT_HOLD_MS,
+  paintPredicate,
+  readPixels,
+  onTimeout,
+  documentRef = globalThis.document,
+} = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    let sawTileProgress = false;
+    let intervalId = null;
+    let timeoutId = null;
+    let holdId = null;
+    let removeTiles = null;
+    let removePost = null;
+
+    const painted = () => globeHasPainted(viewer, {
+      paintPredicate,
+      readPixels,
+      sawTileProgress,
+    });
+
+    const cleanup = () => {
+      try { timers.clearTimeout?.(intervalId); } catch { /* ignore */ }
+      try { timers.clearTimeout?.(timeoutId); } catch { /* ignore */ }
+      try { timers.clearTimeout?.(holdId); } catch { /* ignore */ }
+      try { removeTiles?.(); } catch { /* ignore */ }
+      try { removePost?.(); } catch { /* ignore */ }
+      releaseInvestorPaintHold();
+    };
+
+    const finish = (reason) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      const ok = reason !== 'timeout';
+      if (!ok) {
+        try { onTimeout?.(); } catch { /* ignore */ }
+        showInvestorGlobeError(INIT_WATCHDOG_COPY, documentRef);
+        showBasemapToast('Earth still not visible — the globe never painted.', documentRef);
+      } else {
+        hideInvestorGlobeError(documentRef);
+        hideImageryStatus(documentRef);
+      }
+      resolve({ painted: ok, reason, sawTileProgress });
+    };
+
+    if (timeoutMs === 0) {
+      requestSceneRender(viewer);
+      finish(painted() ? 'already' : 'skipped');
+      return;
+    }
+
+    if (holdMs > 0) holdContinuousRender(INVESTOR_PAINT_HOLD);
+    requestSceneRender(viewer);
+    if (painted()) {
+      finish('already');
+      return;
+    }
+
+    const globe = viewer?.scene?.globe;
+    const scene = viewer?.scene;
+    try {
+      removeTiles = globe?.tileLoadProgressEvent?.addEventListener?.((queued) => {
+        if (done) return;
+        if (Number(queued) > 0) {
+          sawTileProgress = true;
+          releaseInvestorPaintHold();
+        }
+        requestSceneRender(viewer);
+        if (painted()) finish(Number(queued) > 0 ? 'tile-progress' : 'tiles-idle');
+      });
+    } catch {
+      removeTiles = null;
+    }
+    try {
+      removePost = scene?.postRender?.addEventListener?.(() => {
+        if (done) return;
+        if (painted()) finish('post-render');
+      });
+    } catch {
+      removePost = null;
+    }
+
+    const tick = () => {
+      if (done) return;
+      requestSceneRender(viewer);
+      if (painted()) {
+        finish('predicate');
+        return;
+      }
+      intervalId = timers.setTimeout?.(tick, intervalMs);
+    };
+    intervalId = timers.setTimeout?.(tick, intervalMs);
+
+    if (holdMs > 0) {
+      holdId = timers.setTimeout?.(() => releaseInvestorPaintHold(), holdMs);
+    }
+    timeoutId = timers.setTimeout?.(() => {
+      if (painted()) finish('timeout-painted');
+      else finish('timeout');
+    }, timeoutMs);
+  });
+}
+
 /**
  * Wait until Cesium paints one frame, then yield. Used to defer heavy
  * investor session work (opportunity entities, drive) until the globe has
@@ -167,11 +358,15 @@ export function scheduleInvestorImageryWatchdog({
   container = null,
   delayMs = INVESTOR_INIT_WATCHDOG_MS,
   timers = globalThis,
+  paintPredicate,
+  readPixels,
 } = {}) {
   const tid = timers.setTimeout?.(() => {
     releaseInvestorBootHolds();
+    releaseInvestorPaintHold();
     const inspect = inspectKeylessGlobe(viewer, mapStackController);
     const canvas = findCesiumCanvas(viewer, container, documentRef);
+    const painted = globeHasPainted(viewer, { paintPredicate, readPixels });
     if (keylessGlobeLooksEmpty(inspect) || !canvas) {
       assertInvestorGlobeReady({
         viewer,
@@ -180,7 +375,13 @@ export function scheduleInvestorImageryWatchdog({
         documentRef,
         message: INIT_WATCHDOG_COPY,
       });
-      showBasemapToast('Earth still not visible after 8 seconds.', documentRef);
+      showBasemapToast('Earth still not visible after 10 seconds.', documentRef);
+    } else if (!painted) {
+      showInvestorGlobeError(INIT_WATCHDOG_COPY, documentRef);
+      showBasemapToast(
+        'Esri is attached but the globe never painted — still a black frame.',
+        documentRef,
+      );
     } else {
       hideImageryStatus(documentRef);
     }
@@ -409,6 +610,11 @@ export async function ensureKeylessVisibleBasemap({
   briefHoldMs = 0,
   stackTimeoutMs = 5000,
   phase = 'boot',
+  paintPredicate,
+  readPixels,
+  paintTimeoutMs = INVESTOR_PAINT_TIMEOUT_MS,
+  paintHoldMs = INVESTOR_PAINT_HOLD_MS,
+  paintIntervalMs = INVESTOR_PAINT_INTERVAL_MS,
 } = {}) {
   if (shouldSkipKeylessBasemap({
     tileset,
@@ -536,6 +742,16 @@ export async function ensureKeylessVisibleBasemap({
     releaseInvestorBootHolds();
   }
 
+  const paint = await renderUntilGlobePaints(viewer, {
+    timers,
+    documentRef,
+    paintPredicate,
+    readPixels,
+    timeoutMs: paintTimeoutMs,
+    holdMs: paintHoldMs,
+    intervalMs: paintIntervalMs,
+  });
+
   const asserted = assertInvestorGlobeReady({
     viewer,
     container,
@@ -551,5 +767,7 @@ export async function ensureKeylessVisibleBasemap({
     esriAttempted,
     skipped: false,
     phase,
+    painted: paint?.painted,
+    paintReason: paint?.reason,
   };
 }
