@@ -16,13 +16,13 @@ export function renderFocusCard(property, options = {}) {
       <strong>${model.address}</strong>
       <span>${model.neighborhood || ''} · ${String(model.propertyType).toUpperCase()}</span>
     </header>
+    <p class="ts-why">${model.why}</p>
     <dl>
       <div><dt>Score</dt><dd>${model.score}</dd></div>
       <div><dt>Value</dt><dd>${model.estimatedValue}</dd></div>
       <div><dt>Equity</dt><dd>${model.estimatedEquityPct}</dd></div>
       <div><dt>Path</dt><dd>${String(model.strategy).toUpperCase()}</dd></div>
     </dl>
-    <p class="ts-why">${model.why}</p>
     ${renderAnalysis(model)}
     <footer>
       <button type="button" data-ts-focus-action="save">Save</button>

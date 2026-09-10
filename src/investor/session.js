@@ -242,11 +242,22 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     if (event.detail?.id) session.focus(event.detail.id, { fly: true });
   });
 
+  const hunt = document.getElementById('ts-first-hunt');
+  if (hunt) hunt.hidden = false;
+  hunt?.querySelector('[data-ts-begin-hunt]')?.addEventListener('click', () => {
+    if (hunt) hunt.hidden = true;
+    setAiPrompt(market.greeting);
+    document.getElementById('ts-demo-input')?.focus();
+  }, { once: true });
+
   setAiPrompt('Descending on Atlanta / Decatur…');
   await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });
   visuals.startScan();
   setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
   setAiPrompt(market.greeting);
+  if (hunt) {
+    globalThis.setTimeout(() => { hunt.hidden = true; }, prefersReducedMotion() ? 1200 : 5200);
+  }
 
   return session;
 }

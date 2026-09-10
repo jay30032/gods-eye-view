@@ -51,15 +51,21 @@ function ensureInvestorShell(productName, tagline) {
       <div id="ts-lod-chip" aria-live="polite">CITY</div>
     </header>
     <p id="ts-ai-prompt" role="status" aria-live="polite">Where are we hunting today?</p>
+    <aside id="ts-first-hunt" hidden>
+      <span class="ts-kicker">TerraSignal · Hunt</span>
+      <strong>Where are we hunting today?</strong>
+      <p>One market. Mock signals only. Talk or type — the globe does the rest.</p>
+      <button type="button" data-ts-begin-hunt>Begin Atlanta / Decatur</button>
+    </aside>
     <aside id="ts-focus-card" hidden></aside>
     <aside id="ts-saved-sheet" hidden></aside>
     <nav id="ts-bottom-nav" aria-label="TerraSignal">
       <button type="button" data-ts-nav="world" class="is-active">WORLD</button>
       <button type="button" data-ts-nav="drive">DRIVE</button>
-      <button type="button" data-ts-nav="saved">SAVED</button>
       <div id="ts-ai-slot">
-        <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="AI microphone">AI</button>
+        <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="AI microphone">MIC</button>
       </div>
+      <button type="button" data-ts-nav="saved">SAVED</button>
     </nav>
     <form id="ts-demo-form" autocomplete="off">
       <label class="visually-hidden" for="ts-demo-input">Talk to TerraSignal</label>

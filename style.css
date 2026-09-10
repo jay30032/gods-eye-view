@@ -9731,6 +9731,44 @@ body.terrasignal-investor #global-loading-status {
   font-size: 0.68rem;
 }
 
+#ts-first-hunt {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  z-index: 46;
+  width: min(26rem, 90vw);
+  padding: 1.35rem 1.4rem 1.2rem;
+  border-radius: 1rem;
+  background: rgba(10, 8, 4, 0.88);
+  border: 1px solid rgba(212, 160, 23, 0.32);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+  text-align: center;
+}
+
+#ts-first-hunt strong {
+  display: block;
+  margin: 0.45rem 0 0.5rem;
+  font-size: 1.25rem;
+}
+
+#ts-first-hunt p {
+  margin: 0 0 1rem;
+  color: rgba(244, 239, 228, 0.72);
+  font-size: 0.9rem;
+}
+
+#ts-first-hunt button {
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 160, 23, 0.45);
+  background: rgba(212, 160, 23, 0.16);
+  color: #f4efe4;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
 #ts-bottom-nav {
   position: fixed;
   left: 50%;
@@ -9741,12 +9779,22 @@ body.terrasignal-investor #global-loading-status {
   border-radius: 999px;
   background: rgba(10, 8, 4, 0.78);
   border: 1px solid rgba(212, 160, 23, 0.3);
+  align-items: center;
 }
 
 #ts-bottom-nav button {
   min-width: 4.6rem;
   padding: 0.55rem 0.8rem;
   font-size: 0.68rem;
+}
+
+#ts-ai-slot #ts-ai-button,
+#ts-ai-slot #gev-voice-button {
+  min-width: 4.8rem;
+  min-height: 3.1rem;
+  border-color: rgba(212, 160, 23, 0.7);
+  background: rgba(212, 160, 23, 0.14);
+  font-weight: 600;
 }
 
 #ts-bottom-nav button.is-active,
