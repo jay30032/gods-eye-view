@@ -9529,7 +9529,8 @@ body.terrasignal-investor #terrasignal-shell {
   display: block;
 }
 
-html:not(.terrasignal-investor) #terrasignal-shell {
+html:not(.terrasignal-investor) #terrasignal-shell,
+html.terrasignal-classic #terrasignal-shell {
   display: none;
 }
 
