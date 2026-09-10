@@ -34,8 +34,9 @@ import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { initKeySetup } from './keySetup.js';
 import { loadPhotorealisticTileset } from './mapStartup.js';
-import { isInvestorProduct } from './investor/config.js';
+import { isInvestorProduct, readInvestorConfig } from './investor/config.js';
 import { startInvestorSession } from './investor/session.js';
+import { applyInvestorChrome } from './investor/ui/chrome.js';
 
 initLogoGaze();
 
@@ -73,9 +74,14 @@ function describeError(error) {
 async function init() {
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
+  const investorMode = isInvestorProduct();
+  if (investorMode) {
+    applyInvestorChrome(readInvestorConfig());
+    if (loaderStatus) loaderStatus.textContent = 'Opening one world…';
+  }
 
   try {
-    loaderStatus.textContent = 'Configuring viewer...';
+    loaderStatus.textContent = investorMode ? 'Opening one world…' : 'Configuring viewer...';
 
     // A direct Google key provides Google 3D plus GEV place search. Cesium ion
     // can host the same 3D tiles and also powers Bing/world-terrain stacks.
@@ -196,8 +202,6 @@ async function init() {
     // Cesium fog or post-process stages and is fully stopped in map mode.
     const weatherEffects = null;
     const cockpitCloudEffects = initCockpitCloudEffects(viewer);
-
-    const investorMode = isInvestorProduct();
 
     // Classic GEV flies to Austin. Investor mode starts on the globe and
     // descends into the Atlanta/Decatur mock market after layers are sealed.
@@ -344,9 +348,15 @@ async function init() {
     }
 
   } catch (error) {
-    console.error("God's Eye View initialization failed:", error);
-    loaderStatus.textContent = `Error: ${describeError(error)}`;
-    loaderStatus.style.color = '#ff4444';
+    console.error(investorMode ? 'TerraSignal initialization failed:' : "God's Eye View initialization failed:", error);
+    if (investorMode) {
+      loadingScreen?.classList.add('hidden');
+      const prompt = document.getElementById('ts-ai-prompt');
+      if (prompt) prompt.textContent = `Globe could not start — ${describeError(error)}`;
+    } else {
+      loaderStatus.textContent = `Error: ${describeError(error)}`;
+      loaderStatus.style.color = '#ff4444';
+    }
   }
 }
 
