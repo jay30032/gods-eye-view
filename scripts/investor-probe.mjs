@@ -30,7 +30,8 @@
  */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const PAINT_DEADLINE_MS = 8_000;
 const RESPOND_AT_MS = 15_000;
@@ -62,6 +63,9 @@ const PLAY_PHRASES = [
   'Compare',
 ];
 const PLAY_GAP_MS = 4_000;
+const SHOT_DIR = arg('shots', '/tmp/shots');
+/** A dropped frame is anything the eye reads as a stutter on this hardware. */
+const FRAME_P95_BUDGET_MS = 120;
 const URL_ARG = arg('url', SPAWN_KEYLESS
   ? `http://localhost:${KEYLESS_PORT}/?demo=1&welcome=1`
   : 'http://localhost:4173/?demo=1&welcome=1');
@@ -71,6 +75,26 @@ const LOG_PATH = arg('log', null);
 const log = [];
 let started = Date.now();
 const record = (line) => log.push(`[${String(Date.now() - started).padStart(6)}ms] ${line}`);
+
+/** p95 of the frame gaps recorded inside [start, end] page-clock milliseconds. */
+function frameStats(frames, window) {
+  if (!window || !frames.length) return null;
+  const [start, end] = window;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  const gaps = frames
+    .filter(([stamp]) => stamp >= start && stamp <= end)
+    .map(([, gap]) => gap)
+    .sort((a, b) => a - b);
+  if (gaps.length < 5) return null;
+  const at = (q) => gaps[Math.min(gaps.length - 1, Math.floor(q * gaps.length))];
+  return {
+    n: gaps.length,
+    p50: at(0.50),
+    p95: at(0.95),
+    worst: gaps.at(-1),
+    seconds: Math.round((end - start) / 100) / 10,
+  };
+}
 
 async function waitForServer(url, timeoutMs = 40_000) {
   const deadline = Date.now() + timeoutMs;
@@ -117,6 +141,7 @@ async function main() {
 
   const tiles = new Map(TILE_HOSTS.map((h) => [h, { n: 0, bytes: 0, statuses: new Map() }]));
   const errors = [];
+  const shots = [];
 
   page.on('response', (response) => {
     try {
@@ -127,6 +152,18 @@ async function main() {
       row.bytes += Number(response.headers()['content-length'] || 0);
       row.statuses.set(response.status(), (row.statuses.get(response.status()) || 0) + 1);
     } catch { /* opaque url */ }
+  });
+
+  // Frame-time sampler. Runs from the first frame so the descent is covered.
+  await page.addInitScript(() => {
+    window.__probeFrames = [];
+    let previous = performance.now();
+    const tick = (stamp) => {
+      window.__probeFrames.push([Math.round(stamp), Math.round((stamp - previous) * 100) / 100]);
+      previous = stamp;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   });
 
   // Cesium's own failure surfaces, watched from the page.
@@ -156,6 +193,39 @@ async function main() {
     errors.push({ t: Date.now() - started, kind: 'pageerror', text });
     record(`PAGEERROR ${text}`);
   });
+
+  const cameraState = () => page.evaluate(() => ({
+    shot: window.__terraSignal?.camera?.shot ?? null,
+    flying: window.__terraSignal?.camera?.flying ?? false,
+    orbiting: window.__terraSignal?.camera?.orbiting ?? false,
+  })).catch(() => ({ shot: null, flying: false }));
+
+  /** Wait for a shot to be reached and settled, bounded. */
+  const waitForShot = async (name, timeoutMs = 25_000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const state = await cameraState();
+      if (state.shot === name && !state.flying) return true;
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    return false;
+  };
+
+  const pageNow = () => page.evaluate(() => performance.now()).catch(() => null);
+
+  const shot = async (label) => {
+    try {
+      mkdirSync(SHOT_DIR, { recursive: true });
+      const file = join(SHOT_DIR, `${label}.png`);
+      await page.screenshot({ path: file });
+      shots.push(file);
+      record(`SHOT ${label} -> ${file}`);
+      return file;
+    } catch (error) {
+      record(`SHOT ${label} FAILED ${error.message}`);
+      return null;
+    }
+  };
 
   const cesiumDialogText = () => page.evaluate(() => {
     const el = document.querySelector('.cesium-widget-errorPanel, .cesium-widget-errorPanel-message');
@@ -198,9 +268,11 @@ async function main() {
   }, PIXEL_EVERY_MS);
 
   const playLog = [];
+  const windows = {};
   if (PLAY) {
     // Descend first — pulses only exist once the camera is in the market.
     await new Promise((r) => setTimeout(r, 5_000));
+    const descentStart = await pageNow();
     const clicked = await page.evaluate(() => {
       const button = [...document.querySelectorAll('button, [role="button"], a')]
         .find((b) => /atlanta\s*\/?\s*decatur/i.test(b.textContent || ''));
@@ -210,9 +282,52 @@ async function main() {
     }).catch(() => false);
     record(`PLAY market button clicked=${clicked}`);
     playLog.push(`market button: ${clicked ? 'clicked' : 'NOT FOUND'}`);
-    await new Promise((r) => setTimeout(r, 9_000));
 
-    for (const phrase of PLAY_PHRASES) {
+    // The descent is WORLD -> STAGING -> (tiles) -> CRUISE.
+    const cruised = await waitForShot('CRUISE');
+    windows.descent = [descentStart, await pageNow()];
+    playLog.push(`descent settled on CRUISE: ${cruised}`);
+    await new Promise((r) => setTimeout(r, 900));
+    await shot('1-cruise-settled');
+
+    // Find me money: REVEAL settles (halo appears), then HERO.
+    const heroStart = await pageNow();
+    await page.evaluate(() => {
+      const input = document.getElementById('ts-demo-input');
+      const form = document.getElementById('ts-demo-form');
+      if (input && form) {
+        input.value = 'Find me money';
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      } else {
+        window.__terraSignal?.handleIntent?.('Find me money');
+      }
+    }).catch(() => {});
+    playLog.push('"Find me money" → typed-bar');
+
+    if (await waitForShot('REVEAL')) await shot('2-reveal-settled');
+    else record('SHOT 2 skipped — REVEAL never settled');
+
+    const heroed = await waitForShot('HERO');
+    windows.hero = [heroStart, await pageNow()];
+    playLog.push(`hero settled: ${heroed}`);
+    await shot('3-hero-settled');
+
+    await new Promise((r) => setTimeout(r, 5_000));
+    await shot('4-hero-orbit-5s');
+
+    // A hop: move to the next house and catch it at the apex.
+    await page.evaluate(() => window.__terraSignal?.handleIntent?.('next')).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1_250));
+    await shot('5-hop-midpoint');
+    await new Promise((r) => setTimeout(r, 2_500));
+
+    await page.evaluate(() => window.__terraSignal?.handleIntent?.('start drive')).catch(() => {});
+    await new Promise((r) => setTimeout(r, 3_500));
+    await shot('6-drive');
+    await page.evaluate(() => window.__terraSignal?.handleIntent?.('stop drive')).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1_000));
+
+    for (const phrase of PLAY_PHRASES.filter((p) => p !== 'Find me money')) {
       // Through the typed bar, the way a reviewer drives it.
       const sent = await page.evaluate((text) => {
         const input = document.getElementById('ts-demo-input');
@@ -272,6 +387,7 @@ async function main() {
   const recovered = await page.evaluate(
     () => (window.__terraSignalRenderErrors || []).map((e) => e.message).slice(0, 5),
   ).catch(() => []);
+  const frames = await page.evaluate(() => window.__probeFrames || []).catch(() => []);
   const finalDialog = await cesiumDialogText();
   if (finalDialog && !errors.some((e) => e.kind === 'cesium-dialog')) {
     errors.push({ t: Date.now() - started, kind: 'cesium-dialog', text: finalDialog });
@@ -289,7 +405,13 @@ async function main() {
   const errorsOk = errors.length === 0;
   const renderOk = renderErrors.length === 0 && recovered.length === 0;
   const loopOk = !loopStopped;
-  const pass = paintOk && respondOk && errorsOk && renderOk && loopOk;
+  const descentFrames = frameStats(frames, windows.descent);
+  const heroFrames = frameStats(frames, windows.hero);
+  const measured = [descentFrames, heroFrames].filter(Boolean);
+  // Only a --play run measures frames; a plain run must not fail on no data.
+  const framesOk = !PLAY || (measured.length === 2
+    && measured.every((stat) => stat.p95 <= FRAME_P95_BUDGET_MS));
+  const pass = paintOk && respondOk && errorsOk && renderOk && loopOk && framesOk;
 
   const tileSummary = TILE_HOSTS.map((h) => {
     const row = tiles.get(h);
@@ -309,11 +431,26 @@ async function main() {
       + `${dialogs.length ? ` (${dialogs.length} Cesium dialog)` : ''}`,
     `  ${renderOk ? 'PASS' : 'FAIL'}  render errors      ${renderErrors.length + recovered.length}`,
     `  ${loopOk ? 'PASS' : 'FAIL'}  render loop alive  ${loopStopped ? 'STOPPED' : 'running'}`,
+    ...(PLAY ? [
+      `  ${framesOk ? 'PASS' : 'FAIL'}  frame time p95     `
+        + `descent ${descentFrames ? `${descentFrames.p95}ms` : 'no data'} · `
+        + `hero ${heroFrames ? `${heroFrames.p95}ms` : 'no data'} `
+        + `(budget ${FRAME_P95_BUDGET_MS}ms)`,
+    ] : []),
     `        tiles              ${tileSummary}`,
     `        governor           mode=${state.mode ?? '?'} holds=[${(state.holds || []).join(', ')}]`,
     '='.repeat(74),
   ];
   if (PLAY) {
+    for (const [label, stat] of [['descent', descentFrames], ['hero flight', heroFrames]]) {
+      if (!stat) { out.push(`  frames ${label}: no data`); continue; }
+      out.push(`  frames ${label}: n=${stat.n} over ${stat.seconds}s  `
+        + `p50 ${stat.p50}ms  p95 ${stat.p95}ms  worst ${stat.worst}ms`);
+    }
+    if (shots.length) {
+      out.push('  screenshots:');
+      for (const file of shots) out.push(`    ${file}`);
+    }
     out.push('  play sequence:');
     for (const line of playLog) out.push(`    ${line}`);
   }

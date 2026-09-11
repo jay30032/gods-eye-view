@@ -8,6 +8,8 @@ import { createOpportunityVisualManager } from './visuals/opportunityVisualManag
 import { prefersReducedMotion } from './visuals/reducedMotionPolicy.js';
 import { whyThisMatters } from './focus.js';
 import { createCameraDirector } from './camera/director.js';
+import { DURATIONS, worldToggleTarget } from './camera/shots.js';
+import { clampApplies, clampPitchDeg, pitchNeedsClamp } from './camera/pitchClamp.js';
 import { cameraHeightM, lodFromHeight } from './lod.js';
 import { readSavedProperties, removeSavedProperty, saveProperty } from './saved.js';
 import { createDriveDemo } from './driveDemo.js';
@@ -123,6 +125,29 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   // does not take investor-opportunity (continuous 60 fps) on a laptop GPU.
   visuals.setEnabled(false);
 
+  // Visuals never fight the camera: freeze animation and defer rebuilds for the
+  // duration of every flight, resume the moment it settles.
+  camera.onFlight(({ flying }) => visuals.setFlightActive(flying));
+
+  /**
+   * Keep the user inside a watchable pitch band without disabling scroll-zoom.
+   * Only ever corrects camera state the user produced — a flight owns the
+   * camera while it runs, and WORLD/STAGING are nadir on purpose.
+   */
+  viewer.camera.changed.addEventListener(() => {
+    if (!clampApplies({ shot: camera.shot, flying: camera.flying })) return;
+    const pitchDeg = Cesium.Math.toDegrees(viewer.camera.pitch);
+    if (!pitchNeedsClamp(pitchDeg)) return;
+    viewer.camera.setView({
+      orientation: {
+        heading: viewer.camera.heading,
+        pitch: Cesium.Math.toRadians(clampPitchDeg(pitchDeg)),
+        roll: 0,
+      },
+    });
+    governorRequestRender('investor-pitch-clamp');
+  });
+
   const drive = createDriveDemo({
     viewer,
     Cesium,
@@ -159,23 +184,28 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       focused = property;
       conversation.focusedId = property.id;
       visuals.setFocused(property.id);
+      const analysisForCard = lastAnalysisId === property.id ? lastAnalysis : null;
+      const paintCard = () => renderFocusCard(property, {
+        analysis: analysisForCard,
+        strategy: conversation.lastStrategy,
+        revealDeal: Boolean(analysisForCard),
+        customNumbers: hasCustomNumbers(conversation),
+      });
       if (fly) {
         // Moving house to house is a hop, not a slide across the rooftops.
         const arrival = previous && previous.id !== property.id
           ? camera.hop(previous, property)
           : camera.fly('HERO', property);
         arrival.then((result) => {
-          // Only orbit if we actually landed — a superseded flight must not
-          // start an orbit on a house the user has already moved off.
-          if (!result.cancelled && focused?.id === property.id) camera.orbit(property);
+          // Only act if we actually landed — a superseded flight must not
+          // orbit or open a card on a house the user has already left.
+          if (result.cancelled || focused?.id !== property.id) return;
+          paintCard();
+          camera.orbit(property);
         });
+      } else {
+        paintCard();
       }
-      const analysisForCard = lastAnalysisId === property.id ? lastAnalysis : null;
-      renderFocusCard(property, {
-        analysis: analysisForCard,
-        strategy: conversation.lastStrategy,
-        revealDeal: Boolean(analysisForCard),
-      });
       hideSavedSheet();
       setNavActive('world');
       return { ok: true, action: 'focus_property', id: property.id, address: property.address };
@@ -270,21 +300,22 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         }
         visuals.setSaved(null);
         visuals.setShortlist(result.candidateIds);
-        visuals.setTopPick(result.topPickId);
         visuals.startScan();
-        // REVEAL fits the whole shortlist, then HERO drops onto the gold pick.
+        // REVEAL fits the whole shortlist; the gold halo is the payoff of that
+        // shot, so it appears when the shot settles — not while still flying.
         const shortlist = result.candidateIds
           .map((candidateId) => this.getById(candidateId))
           .filter(Boolean);
-        camera.fly('REVEAL', shortlist).then((reveal) => {
-          if (reveal.cancelled || !result.focusId) return;
-          this.focus(result.focusId);
+        camera.fly('REVEAL', shortlist).then(async (reveal) => {
+          if (reveal.cancelled) return;
+          visuals.setTopPick(result.topPickId);
+          await camera.dwell(DURATIONS.revealDwell);
+          if (result.focusId) this.focus(result.focusId);
         });
         if (result.focusId) {
           focused = this.getById(result.focusId);
           conversation.focusedId = result.focusId;
           visuals.setFocused(result.focusId);
-          renderFocusCard(focused, { strategy: conversation.lastStrategy });
           setNavActive('world');
         }
         setAiPrompt(result.spoken);
@@ -395,7 +426,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
 
       if (parsed.intent === 'world') {
         this.world();
-        return { ok: true, action: 'world', spoken: market.greeting };
+        return { ok: true, action: 'world', spoken: FIRST_HINT };
       }
 
       if (parsed.intent === 'start_drive') {
@@ -447,8 +478,11 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       focused = null;
       setNavActive('world');
       hunt?.dismiss?.({ persistSession: true });
-      camera.fly('CRUISE');
-      visuals.startScan();
+      // First press comes back to the market; pressing again from the market
+      // goes all the way out to the globe.
+      const target = worldToggleTarget(camera.shot);
+      camera.fly(target);
+      if (target === 'CRUISE') visuals.startScan();
       setAiPrompt(market.greeting);
     },
   };

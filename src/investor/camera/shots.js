@@ -30,6 +30,8 @@ export const DURATIONS = Object.freeze({
   hop: 2.5,
   heroToCruise: 2.0,
   toDrive: 2.0,
+  /** Let REVEAL breathe before dropping to HERO — otherwise it is never seen. */
+  revealDwell: 0.8,
 });
 
 /** Parked globe: the view the app opens on. */
@@ -53,18 +55,16 @@ export const STAGING = Object.freeze({
 /**
  * The market view after the descent.
  *
- * NOTE ON HEADING: 20° is the specified value and is what ships. The stated
- * intent — "the downtown skyline on the horizon" — does not follow from it:
- * from this aim point downtown Atlanta (33.7550, -84.3900) bears **264.3°**,
- * almost due west. Heading 20 looks north-north-east, over Scottdale and
- * Clarkston. Change CRUISE.headingDeg to ~264 if the skyline is what matters.
+ * Heading 264 is the bearing from this aim point to downtown Atlanta
+ * (33.7550, -84.3900), so the skyline sits on the horizon. `shots.test.mjs`
+ * recomputes that bearing and fails if the constant drifts away from it.
  */
 export const CRUISE = Object.freeze({
   // Midway between Decatur Square and Kirkwood — the dense side of the board.
   // The 30-property centroid is (33.7625, -84.3274), so this frames the cluster.
   aim: Object.freeze({ lat: 33.7640, lng: -84.3110 }),
   altitudeM: 1_800,
-  headingDeg: 20,
+  headingDeg: 264,
   pitchDeg: -35,
 });
 
@@ -72,7 +72,7 @@ export const CRUISE = Object.freeze({
 export const REVEAL = Object.freeze({
   paddingPct: 0.25,
   pitchDeg: -45,
-  headingDeg: 20,
+  headingDeg: 264,
   minAltitudeM: 900,
   maxAltitudeM: 2_500,
 });
@@ -97,6 +97,8 @@ export const HERO = Object.freeze({
   /** Fraction of frame height the subject sits below centre (lower third). */
   lowerThirdFraction: 1 / 6,
   orbitDegPerSec: 2,
+  /** One revolution, then stop: a parked demo must not hold the GPU forever. */
+  orbitMaxDeg: 360,
 });
 
 /** Between two houses: up and over, so it reads as a hop rather than a slide. */
@@ -314,6 +316,17 @@ export function driveShot(property, routeHeadingDeg = HERO.headingDeg) {
     headingDeg: routeHeadingDeg,
     pitchDeg: DRIVE.pitchDeg,
   };
+}
+
+/**
+ * What the WORLD button does next.
+ *
+ * From anywhere in the market it brings you back to the market view — the
+ * common case, and the one that used to throw the user out to space. Pressing
+ * it again *from* the market is an explicit "all the way out".
+ */
+export function worldToggleTarget(currentShot) {
+  return currentShot === 'CRUISE' ? 'WORLD' : 'CRUISE';
 }
 
 /** Compass heading from one point to another, 0-360. */

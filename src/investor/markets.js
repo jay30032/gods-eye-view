@@ -13,6 +13,10 @@ export const MARKETS = Object.freeze({
     lng: -84.2963,
     globeLng: -84.39,
     globeLat: 33.75,
+    // Ground elevation above the WGS84 ellipsoid. Camera altitudes in the shot
+    // list are above GROUND; Cartesian3.fromDegrees takes ellipsoid height, so
+    // without this a 111 m hero camera sits ~200 m underground in Decatur.
+    groundElevationM: 310,
     overviewHeightM: 14000,
     huntHeightM: 2200,
     streetHeightM: 420,

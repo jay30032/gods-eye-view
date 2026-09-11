@@ -30,7 +30,7 @@ function cesiumColor(Cesium, rgba, alphaOverride) {
   return new Cesium.Color(r, g, b, alphaOverride ?? a);
 }
 
-function nowMs() {
+function wallClockMs() {
   return Date.now();
 }
 
@@ -61,9 +61,25 @@ export function createOpportunityVisualManager({
   let scanStartedAt = 0;
   let destroyed = false;
   let removeMove = null;
+  // Camera-aware: a flight owns the screen, so animation freezes and rebuilds
+  // defer until it settles. Rebuilding mid-flight is what made tiles and pulses
+  // flicker past the camera.
+  let flightActive = false;
+  let frozenAtMs = 0;
+  let rebuildPending = false;
+  let hoveredId = null;
 
   function reduced() {
     return reducedPolicy.reduced;
+  }
+
+  /**
+   * The animation clock. Frozen for the duration of a camera flight so pulses
+   * hold still while the camera moves — two things moving at once is what read
+   * as "clunky".
+   */
+  function nowMs() {
+    return flightActive ? frozenAtMs : wallClockMs();
   }
 
   function visibleProperties() {
@@ -73,6 +89,8 @@ export function createOpportunityVisualManager({
   function needsContinuous() {
     if (destroyed || !enabled) return false;
     if (reduced()) return false;
+    // A frozen clock has nothing to animate; the flight holds its own frames.
+    if (flightActive) return false;
     const lod = lodFromHeight(cameraHeightM(viewer));
     // Parked globe / regional clusters are static. Holding continuous
     // render here pegged laptop GPUs (Air) during the first-hunt modal.
@@ -101,6 +119,11 @@ export function createOpportunityVisualManager({
 
   function rebuild() {
     if (destroyed) return;
+    if (flightActive) {
+      // Entities must not churn under a moving camera; catch up on settle.
+      rebuildPending = true;
+      return;
+    }
     clearOwned();
     if (!enabled) {
       syncHold();
@@ -320,7 +343,45 @@ export function createOpportunityVisualManager({
     return null;
   }
 
+  function setHovered(propertyId) {
+    if (hoveredId === propertyId) return;
+    hoveredId = propertyId;
+    const canvas = viewer.scene.canvas;
+    if (canvas?.style) canvas.style.cursor = propertyId ? 'pointer' : '';
+    const existing = owned.get('hover');
+    if (existing) {
+      try { entities.remove(existing); } catch { /* already gone */ }
+      owned.delete('hover');
+    }
+    const property = propertyId
+      ? (visibleProperties().find((row) => row.id === propertyId) || null)
+      : null;
+    if (property) {
+      addOwned('hover', entities.add({
+        id: 'ts-hover-label',
+        position: Cesium.Cartesian3.fromDegrees(property.lng, property.lat, 6),
+        label: {
+          text: property.address.split(',')[0],
+          font: '12px Inter, sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -34),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    }
+    governorRequestRender('investor-hover');
+  }
+
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  handler.setInputAction((movement) => {
+    if (destroyed || flightActive) return;
+    const picked = viewer.scene.pick(movement.endPosition);
+    setHovered(pickPropertyId(picked));
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
   handler.setInputAction((movement) => {
     const picked = viewer.scene.pick(movement.position);
     const propertyId = pickPropertyId(picked);
@@ -372,6 +433,28 @@ export function createOpportunityVisualManager({
       rebuild();
       return topPickId;
     },
+
+    /**
+     * Called by the camera director. While a flight is in progress the pulse
+     * clock freezes and rebuilds defer; on settle the clock resumes from the
+     * wall clock and any deferred rebuild runs exactly once.
+     */
+    setFlightActive(active) {
+      const next = Boolean(active);
+      if (next === flightActive) return flightActive;
+      flightActive = next;
+      if (flightActive) {
+        frozenAtMs = wallClockMs();
+        setHovered(null);
+        syncHold();
+      } else if (rebuildPending) {
+        rebuildPending = false;
+        rebuild();
+      } else {
+        syncHold();
+      }
+      return flightActive;
+    },
     setSaved(id) {
       savedId = id || null;
       if (savedId) topPickId = null;
@@ -390,6 +473,7 @@ export function createOpportunityVisualManager({
     pickPropertyId,
     destroy() {
       destroyed = true;
+      setHovered(null);
       handler.destroy();
       if (typeof removeMove === 'function') removeMove();
       clearOwned();

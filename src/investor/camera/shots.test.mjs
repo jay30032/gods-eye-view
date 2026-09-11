@@ -25,6 +25,7 @@ import {
   revealShot,
   stagingShot,
   worldShot,
+  worldToggleTarget,
 } from './shots.js';
 
 const market = resolveMarket('atlanta');
@@ -94,7 +95,7 @@ test('CRUISE frames the dense side of the board', () => {
   const shot = cruiseShot();
   assert.equal(shot.heightM, 1_800);
   assert.equal(shot.pitchDeg, -35);
-  assert.equal(shot.headingDeg, 20);
+  assert.equal(shot.headingDeg, 264);
 
   // The aim point, not the camera, is what sits over the cluster.
   const centroid = {
@@ -224,12 +225,36 @@ test('shot geometry is deterministic', () => {
     revealShot(ATLANTA_DECATUR_PROPERTIES.slice(0, 4)));
 });
 
-test('the documented skyline bearing does not match the shipped heading', () => {
-  // CRUISE.headingDeg is 20 as specified. Downtown Atlanta is almost due west
-  // of the aim point, so heading 20 cannot put the skyline on the horizon.
-  // Pinned so the discrepancy is a decision on the record, not a silent bug.
+test('CRUISE actually points at the downtown skyline', () => {
+  // The heading is not a taste call: it is the bearing to downtown Atlanta from
+  // the aim point. Recomputed here so moving the aim without moving the heading
+  // fails loudly instead of quietly pointing at Scottdale.
   const downtown = { lat: 33.7550, lng: -84.3900 };
   const bearing = headingBetween(CRUISE.aim, downtown);
-  assert.ok(Math.abs(bearing - 264) < 3, `skyline bears ${bearing.toFixed(1)}`);
-  assert.equal(CRUISE.headingDeg, 20);
+  assert.ok(Math.abs(bearing - CRUISE.headingDeg) < 3,
+    `heading ${CRUISE.headingDeg} but the skyline bears ${bearing.toFixed(1)}`);
+  assert.equal(CRUISE.headingDeg, 264);
+});
+
+test('WORLD comes back to the market first, and only then goes to space', () => {
+  // The old behaviour threw the user out to the globe from anywhere, which is
+  // almost never what someone pressing WORLD mid-hunt wants.
+  for (const shot of ['HERO', 'REVEAL', 'DRIVE', 'HOP', 'STAGING', 'WORLD']) {
+    assert.equal(worldToggleTarget(shot), 'CRUISE', `${shot} should return to the market`);
+  }
+  assert.equal(worldToggleTarget('CRUISE'), 'WORLD', 'a second press goes to the globe');
+  // And a third press comes back, so it is a toggle rather than a dead end.
+  assert.equal(worldToggleTarget(worldToggleTarget('CRUISE')), 'CRUISE');
+  assert.equal(worldToggleTarget(undefined), 'CRUISE');
+});
+
+test('REVEAL dwells long enough to be seen but not long enough to drag', () => {
+  assert.ok(DURATIONS.revealDwell >= 0.5, 'a shot nobody sees is not a shot');
+  assert.ok(DURATIONS.revealDwell <= 1.5, 'the demo should not stall on it');
+});
+
+test('the hero orbit is capped at one revolution', () => {
+  assert.equal(HERO.orbitMaxDeg, 360);
+  const seconds = HERO.orbitMaxDeg / HERO.orbitDegPerSec;
+  assert.equal(seconds, 180, 'one revolution at 2 deg/s is three minutes');
 });

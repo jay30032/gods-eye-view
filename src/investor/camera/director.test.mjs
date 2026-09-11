@@ -330,3 +330,91 @@ test('route heading falls back to the hero heading without a leg', () => {
   assert.ok(heading >= 0 && heading < 360);
   _resetRenderGovernorForTest();
 });
+
+test('flight listeners see start and settle, so visuals can pause and resume', async () => {
+  const { viewer, director } = makeDirector();
+  const seen = [];
+  const off = director.onFlight((state) => seen.push(state));
+
+  const flight = director.fly('CRUISE');
+  assert.deepEqual(seen.map((s) => s.flying), [true], 'takeoff is announced');
+  assert.equal(director.flying, true);
+
+  viewer.complete();
+  await flight;
+  assert.deepEqual(seen.map((s) => s.flying), [true, false], 'settle is announced');
+  assert.equal(seen.at(-1).cancelled, false);
+  assert.equal(director.flying, false);
+
+  off();
+  const second = director.fly('WORLD');
+  viewer.complete();
+  await second;
+  assert.equal(seen.length, 2, 'unsubscribe actually unsubscribes');
+  _resetRenderGovernorForTest();
+});
+
+test('a superseded flight never announces a settle — visuals must not un-pause mid-move', () => {
+  const { director } = makeDirector();
+  const seen = [];
+  director.onFlight((state) => seen.push(state.flying));
+
+  director.fly('CRUISE');
+  director.fly('HERO', houses[0]);
+  // takeoff, takeoff — never a false "we have landed" between the two.
+  assert.deepEqual(seen, [true, true]);
+  _resetRenderGovernorForTest();
+});
+
+test('reduced motion still announces a settle so visuals resume', async () => {
+  const { director } = makeDirector({ reduced: true });
+  const seen = [];
+  director.onFlight((state) => seen.push(state));
+  await director.fly('HERO', houses[0]);
+  assert.deepEqual(seen.map((s) => s.flying), [false], 'no takeoff, but it does settle');
+  assert.equal(seen[0].reduced, true);
+  _resetRenderGovernorForTest();
+});
+
+test('a listener that throws cannot break the flight', async () => {
+  const { viewer, director } = makeDirector();
+  director.onFlight(() => { throw new Error('listener blew up'); });
+  const reached = [];
+  director.onFlight((state) => reached.push(state.flying));
+  const flight = director.fly('CRUISE');
+  viewer.complete();
+  assert.equal((await flight).cancelled, false);
+  assert.deepEqual(reached, [true, false], 'later listeners still run');
+  _resetRenderGovernorForTest();
+});
+
+test('the orbit stops itself after one revolution and hands back the GPU', () => {
+  const { viewer, director, clock } = makeDirector();
+  director.orbit(houses[0]);
+  assert.equal(director.orbiting, true);
+  assert.ok(holds().includes('investor-camera-orbit'));
+
+  // 2 deg/s for 180s is exactly one lap. Step in frames the stall-cap allows.
+  for (let elapsed = 0; elapsed < 200_000 && director.orbiting; elapsed += 200) {
+    clock.advance(200);
+    viewer.tick();
+  }
+
+  assert.equal(director.orbiting, false, 'a parked demo must not orbit forever');
+  assert.equal(holds().includes('investor-camera-orbit'), false, 'the hold is released');
+  assert.equal(viewer.postRenderCount, 0, 'the per-frame listener is gone');
+  _resetRenderGovernorForTest();
+});
+
+test('the orbit is still running well before a full revolution', () => {
+  const { viewer, director, clock } = makeDirector();
+  director.orbit(houses[0]);
+  // 60 seconds is a third of a lap.
+  for (let elapsed = 0; elapsed < 60_000; elapsed += 200) {
+    clock.advance(200);
+    viewer.tick();
+  }
+  assert.equal(director.orbiting, true, 'it should not stop early');
+  director.stopOrbit();
+  _resetRenderGovernorForTest();
+});
