@@ -6,7 +6,8 @@ import { rankMockProperties, searchMockProperties } from './mock/search.js';
 import { analyzePropertyDeal, bestStrategyFor, normalizeStrategy } from './deal/index.js';
 import { createOpportunityVisualManager } from './visuals/opportunityVisualManager.js';
 import { prefersReducedMotion } from './visuals/reducedMotionPolicy.js';
-import { flyGlobeThenMarket, flyToMarket, flyToProperty, whyThisMatters } from './focus.js';
+import { whyThisMatters } from './focus.js';
+import { createCameraDirector } from './camera/director.js';
 import { cameraHeightM, lodFromHeight } from './lod.js';
 import { readSavedProperties, removeSavedProperty, saveProperty } from './saved.js';
 import { createDriveDemo } from './driveDemo.js';
@@ -109,6 +110,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   try { viewer?.resize?.(); } catch { /* optional */ }
   governorRequestRender('investor-session');
 
+  // One owner for the camera. Nothing else in the investor path calls flyTo.
+  const camera = createCameraDirector({ viewer, Cesium, market });
+
   const visuals = createOpportunityVisualManager({
     viewer,
     Cesium,
@@ -122,6 +126,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   const drive = createDriveDemo({
     viewer,
     Cesium,
+    camera,
     getProperties: () => properties,
     onAnnounce: (event) => {
       focused = event.property;
@@ -140,6 +145,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     properties,
     conversation,
     visuals,
+    camera,
     drive,
     get focused() { return focused; },
     get lastAnalysis() { return lastAnalysis; },
@@ -149,10 +155,21 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     focus(id, { fly = true } = {}) {
       const property = this.getById(id);
       if (!property) return { ok: false, action: 'focus_property', error: 'Unknown mock property' };
+      const previous = focused;
       focused = property;
       conversation.focusedId = property.id;
       visuals.setFocused(property.id);
-      if (fly) flyToProperty(viewer, Cesium, property, { reduced: prefersReducedMotion() });
+      if (fly) {
+        // Moving house to house is a hop, not a slide across the rooftops.
+        const arrival = previous && previous.id !== property.id
+          ? camera.hop(previous, property)
+          : camera.fly('HERO', property);
+        arrival.then((result) => {
+          // Only orbit if we actually landed — a superseded flight must not
+          // start an orbit on a house the user has already moved off.
+          if (!result.cancelled && focused?.id === property.id) camera.orbit(property);
+        });
+      }
       const analysisForCard = lastAnalysisId === property.id ? lastAnalysis : null;
       renderFocusCard(property, {
         analysis: analysisForCard,
@@ -255,7 +272,21 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         visuals.setShortlist(result.candidateIds);
         visuals.setTopPick(result.topPickId);
         visuals.startScan();
-        if (result.focusId) this.focus(result.focusId);
+        // REVEAL fits the whole shortlist, then HERO drops onto the gold pick.
+        const shortlist = result.candidateIds
+          .map((candidateId) => this.getById(candidateId))
+          .filter(Boolean);
+        camera.fly('REVEAL', shortlist).then((reveal) => {
+          if (reveal.cancelled || !result.focusId) return;
+          this.focus(result.focusId);
+        });
+        if (result.focusId) {
+          focused = this.getById(result.focusId);
+          conversation.focusedId = result.focusId;
+          visuals.setFocused(result.focusId);
+          renderFocusCard(focused, { strategy: conversation.lastStrategy });
+          setNavActive('world');
+        }
         setAiPrompt(result.spoken);
         return result;
       }
@@ -416,10 +447,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       focused = null;
       setNavActive('world');
       hunt?.dismiss?.({ persistSession: true });
-      flyToMarket(viewer, Cesium, market, {
-        heightM: market.overviewHeightM,
-        duration: prefersReducedMotion() ? 0.8 : 2.6,
-      });
+      camera.fly('CRUISE');
       visuals.startScan();
       setAiPrompt(market.greeting);
     },
@@ -439,14 +467,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     if (event.detail?.id) session.focus(event.detail.id, { fly: true });
   });
 
-  viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(market.globeLng, market.globeLat, 18_000_000),
-    orientation: {
-      heading: 0,
-      pitch: Cesium.Math.toRadians(-90),
-      roll: 0,
-    },
-  });
+  camera.fly('WORLD');
   setAiPrompt('Where are we hunting today?');
 
   const enableVision = () => {
@@ -528,7 +549,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       if (viewer?.scene?.globe) viewer.scene.globe.show = true;
       kickRenderBurst(viewer, { times: 6, intervalMs: 200 });
     }
-    await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });
+    // WORLD → STAGING (nadir at 40 km, tiles stream) → CRUISE.
+    await camera.descend();
     // The descent is over; stop telling the user it is still happening.
     setAiPrompt(FIRST_HINT);
     enableVision();

@@ -48,6 +48,7 @@ export function buildDriveRoute(properties) {
 export function createDriveDemo({
   viewer,
   Cesium,
+  camera = null,
   getProperties,
   onAnnounce,
   onStop,
@@ -71,16 +72,10 @@ export function createDriveDemo({
 
   function goTo(property, { announce = true } = {}) {
     if (!property || !viewer) return;
-    viewer.camera.cancelFlight();
-    viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(property.lng, property.lat, 380),
-      orientation: {
-        heading: Cesium.Math.toRadians(40),
-        pitch: Cesium.Math.toRadians(-28),
-        roll: 0,
-      },
-      duration: 2.1,
-    });
+    // Chase camera: behind and above, looking along the leg we just drove.
+    const previous = stops[index - 1] || null;
+    const heading = camera?.routeHeading?.(previous, property);
+    camera?.fly?.('DRIVE', property, { headingDeg: heading });
     if (announce) {
       onAnnounce?.({
         id: property.id,
