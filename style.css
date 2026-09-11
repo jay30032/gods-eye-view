@@ -9520,3 +9520,836 @@ body.scene-playback-mode #key-setup {
   border-color: rgba(255, 170, 150, 0.65);
   outline: none;
 }
+
+/* ==========================================================================
+   TerraSignal Investor — one world, one AI, almost no menus
+   ========================================================================== */
+html.terrasignal-investor #terrasignal-shell,
+body.terrasignal-investor #terrasignal-shell {
+  display: block;
+}
+
+html:not(.terrasignal-investor) #terrasignal-shell,
+html.terrasignal-classic #terrasignal-shell {
+  display: none;
+}
+
+html.terrasignal-investor #loading-screen {
+  z-index: 15;
+  background: transparent;
+  pointer-events: none;
+}
+
+html.terrasignal-investor #loading-screen .loader-content {
+  display: none;
+}
+
+html.terrasignal-investor #title-bar,
+html.terrasignal-investor #style-indicator,
+html.terrasignal-investor #top-center-actions,
+html.terrasignal-investor #data-panel,
+html.terrasignal-investor #control-panel,
+html.terrasignal-investor #location-bar,
+html.terrasignal-investor #cctv-panel,
+html.terrasignal-investor #scene-panel,
+html.terrasignal-investor #global-context-panel,
+html.terrasignal-investor #pp-toggles,
+html.terrasignal-investor #first-run-launcher,
+html.terrasignal-investor #command-dock,
+html.terrasignal-investor #param-slider-panel,
+html.terrasignal-investor #world-overlay-actions,
+html.terrasignal-investor #intel-hud,
+html.terrasignal-investor #traffic-sync-chip,
+html.terrasignal-investor #cctv-sync-chip,
+html.terrasignal-investor #global-loading-status,
+html.terrasignal-investor #scope-mask,
+html.terrasignal-investor #world-overlay-root,
+html.terrasignal-investor #celestial-ring-overlay,
+html.terrasignal-investor .celestial-ring-overlay,
+html.terrasignal-investor #safe-frame-overlay,
+html.terrasignal-investor #cockpit-hud,
+html.terrasignal-investor .hud-classification,
+html.terrasignal-investor .hud-top-bar-left,
+body.terrasignal-investor #title-bar,
+body.terrasignal-investor #style-indicator,
+body.terrasignal-investor #top-center-actions,
+body.terrasignal-investor #data-panel,
+body.terrasignal-investor #control-panel,
+body.terrasignal-investor #location-bar,
+body.terrasignal-investor #cctv-panel,
+body.terrasignal-investor #scene-panel,
+body.terrasignal-investor #global-context-panel,
+body.terrasignal-investor #pp-toggles,
+body.terrasignal-investor #first-run-launcher,
+body.terrasignal-investor #command-dock,
+body.terrasignal-investor #param-slider-panel,
+body.terrasignal-investor #world-overlay-actions,
+body.terrasignal-investor #intel-hud,
+body.terrasignal-investor #traffic-sync-chip,
+body.terrasignal-investor #cctv-sync-chip,
+body.terrasignal-investor #global-loading-status,
+body.terrasignal-investor #scope-mask,
+body.terrasignal-investor #world-overlay-root,
+body.terrasignal-investor #celestial-ring-overlay,
+body.terrasignal-investor .celestial-ring-overlay,
+body.terrasignal-investor #safe-frame-overlay,
+body.terrasignal-investor #cockpit-hud,
+body.terrasignal-investor .hud-classification,
+body.terrasignal-investor .hud-top-bar-left {
+  display: none !important;
+}
+
+body.terrasignal-investor #key-setup-chip {
+  bottom: 5.4rem;
+  right: 1rem;
+  opacity: 0.55;
+}
+
+#terrasignal-shell {
+  pointer-events: none;
+  position: static;
+  background: none;
+  width: 0;
+  height: 0;
+  overflow: visible;
+}
+
+html.terrasignal-investor #cesiumContainer,
+body.terrasignal-investor #cesiumContainer {
+  z-index: 0;
+  background: transparent;
+}
+
+html.terrasignal-investor #cesiumContainer canvas,
+body.terrasignal-investor #cesiumContainer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#ts-vignette {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: none;
+  box-shadow: inset 0 0 72px 10px rgba(0, 0, 0, 0.22);
+}
+
+#ts-globe-error {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  z-index: 80;
+  width: min(28rem, 90vw);
+  padding: 1.1rem 1.2rem;
+  border-radius: 0.85rem;
+  background: rgba(12, 8, 4, 0.92);
+  border: 1px solid rgba(212, 160, 23, 0.45);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-globe-error[hidden] {
+  display: none;
+}
+
+#ts-globe-error strong {
+  display: block;
+  margin-bottom: 0.45rem;
+}
+
+#ts-globe-error p {
+  margin: 0 0 0.5rem;
+  color: rgba(244, 239, 228, 0.78);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+#ts-basemap-toast,
+#ts-imagery-status {
+  position: fixed;
+  left: 50%;
+  bottom: 6.4rem;
+  transform: translateX(-50%);
+  z-index: 70;
+  width: min(26rem, 90vw);
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.65rem;
+  background: rgba(12, 8, 4, 0.88);
+  border: 1px solid rgba(212, 160, 23, 0.35);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+
+#ts-basemap-toast[hidden],
+#ts-imagery-status[hidden] {
+  display: none;
+}
+
+#terrasignal-brand,
+#ts-ai-prompt,
+#ts-first-hunt,
+#ts-demo-script,
+#ts-focus-card,
+#ts-saved-sheet,
+#ts-bottom-nav,
+#ts-demo-form,
+#ts-attribution {
+  pointer-events: auto;
+}
+
+#terrasignal-brand {
+  position: fixed;
+  top: 1.1rem;
+  left: 1.2rem;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+.ts-brand-mark {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.45rem;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(160deg, #d4a017, #8a5a10);
+  color: #1a1408;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ts-brand-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.ts-brand-copy strong {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.ts-brand-copy span {
+  font-size: 0.72rem;
+  color: rgba(244, 239, 228, 0.72);
+}
+
+.ts-vision-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.6rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 239, 228, 0.8);
+}
+
+#ts-lod-chip,
+#ts-demo-chip {
+  margin-left: 0.4rem;
+  padding: 0.18rem 0.45rem;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+}
+
+#ts-demo-chip {
+  background: transparent;
+  color: #e0b84a;
+  cursor: pointer;
+  font-family: Inter, sans-serif;
+}
+
+#ts-ai-prompt {
+  position: fixed;
+  top: 4.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: min(42rem, 86vw);
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  background: rgba(10, 8, 4, 0.62);
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+#ts-focus-card,
+#ts-saved-sheet {
+  position: fixed;
+  right: 1.1rem;
+  bottom: 5.6rem;
+  z-index: 42;
+  width: min(22rem, 92vw);
+  padding: 1rem 1.05rem 0.9rem;
+  border-radius: 0.8rem;
+  background: rgba(12, 10, 6, 0.88);
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-focus-card header,
+#ts-saved-sheet header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.7rem;
+}
+
+#ts-saved-sheet header {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ts-kicker {
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #e0b84a;
+}
+
+#ts-focus-card .ts-why {
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.ts-kicker-mock {
+  color: rgba(244, 239, 228, 0.5);
+}
+
+#ts-focus-card .ts-focus-score {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #e0b84a;
+}
+
+.ts-drivers {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgba(244, 239, 228, 0.62);
+}
+
+#ts-focus-card .ts-source {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: rgba(244, 239, 228, 0.45);
+}
+
+.ts-auction {
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border-left: 2px solid rgba(244, 239, 228, 0.25);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: rgba(244, 239, 228, 0.72);
+}
+
+.ts-auction.is-urgent {
+  border-left-color: #e0b84a;
+  color: #e0b84a;
+}
+
+.ts-custom-numbers {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.55rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid rgba(224, 184, 74, 0.4);
+  border-radius: 3px;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e0b84a;
+}
+
+.ts-custom-numbers button {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgba(224, 184, 74, 0.5);
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ts-compare {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  font-size: 0.72rem;
+}
+
+.ts-compare li {
+  display: grid;
+  grid-template-columns: 5.5rem 3.5rem 1fr;
+  gap: 0.4rem;
+  padding: 0.16rem 0;
+  border-bottom: 1px solid rgba(244, 239, 228, 0.08);
+}
+
+.ts-compare .ts-compare-verdict {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(244, 239, 228, 0.55);
+}
+
+.ts-compare .ts-verdict-strong .ts-compare-verdict {
+  color: #9ad07a;
+}
+
+.ts-strategy-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.35rem;
+  margin: 0 0 0.7rem;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  color: rgba(244, 239, 228, 0.45);
+}
+
+.ts-strategy-strip .ts-strategy.is-best {
+  color: #e0b84a;
+  font-weight: 600;
+}
+
+#ts-focus-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem 0.8rem;
+  margin: 0 0 0.7rem;
+}
+
+#ts-focus-card dt {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 239, 228, 0.55);
+}
+
+#ts-focus-card dd {
+  margin: 0.1rem 0 0;
+  font-size: 0.95rem;
+}
+
+.ts-why,
+.ts-deal {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: rgba(244, 239, 228, 0.86);
+}
+
+.ts-deal {
+  padding-left: 1.1rem;
+}
+
+html.terrasignal-investor .ts-deal {
+  list-style: none;
+  padding-left: 0;
+}
+
+html.terrasignal-investor .ts-deal li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.18rem 0;
+}
+
+html.terrasignal-investor .ts-deal .ts-deal-label {
+  color: rgba(244, 239, 228, 0.55);
+}
+
+html.terrasignal-investor .ts-deal .ts-deal-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+html.terrasignal-investor .ts-deal .ts-verdict-line {
+  margin-top: 0.28rem;
+  padding-top: 0.34rem;
+  border-top: 1px solid rgba(244, 239, 228, 0.14);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+html.terrasignal-investor .ts-deal.ts-verdict-strong .ts-verdict-line .ts-deal-value {
+  color: #6fd08c;
+}
+
+html.terrasignal-investor .ts-deal.ts-verdict-thin .ts-verdict-line .ts-deal-value {
+  color: #e0b84a;
+}
+
+html.terrasignal-investor .ts-deal.ts-verdict-pass .ts-verdict-line .ts-deal-value {
+  color: #d98a7b;
+}
+
+#ts-focus-card footer,
+#ts-bottom-nav,
+#ts-demo-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+#ts-focus-card footer button,
+#ts-demo-form button,
+#ts-saved-sheet button,
+#ts-bottom-nav button {
+  font-family: Inter, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: transparent;
+  color: #f4efe4;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+#ts-focus-card footer button,
+#ts-demo-form button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.68rem;
+}
+
+#ts-first-hunt {
+  position: fixed;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  z-index: 46;
+  width: min(28rem, 92vw);
+  padding: 1.45rem 1.4rem 1.1rem;
+  border-radius: 1rem;
+  background: rgba(10, 8, 4, 0.9);
+  border: 1px solid rgba(212, 160, 23, 0.32);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+  text-align: left;
+}
+
+#ts-first-hunt > strong {
+  display: block;
+  margin: 0.4rem 0 0.45rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+#ts-first-hunt > p {
+  margin: 0 0 1rem;
+  color: rgba(244, 239, 228, 0.7);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.ts-hunt-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ts-hunt-choices button {
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.7rem;
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  background: rgba(212, 160, 23, 0.08);
+  color: #f4efe4;
+  text-align: left;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.ts-hunt-choices button:hover,
+.ts-hunt-choices button:focus-visible {
+  border-color: rgba(212, 160, 23, 0.7);
+  background: rgba(212, 160, 23, 0.16);
+}
+
+.ts-hunt-choices strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.ts-hunt-choices small {
+  display: block;
+  margin-top: 0.2rem;
+  color: rgba(244, 239, 228, 0.6);
+  font-size: 0.75rem;
+}
+
+.ts-hunt-explore {
+  background: transparent !important;
+}
+
+#ts-demo-script {
+  position: fixed;
+  left: 1.1rem;
+  top: 5.4rem;
+  z-index: 44;
+  width: min(18.5rem, 42vw);
+  padding: 0.95rem 1rem 0.85rem;
+  border-radius: 0.85rem;
+  background: rgba(10, 8, 4, 0.9);
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-demo-script > strong {
+  display: block;
+  margin: 0.35rem 0 0.4rem;
+  font-size: 1rem;
+}
+
+#ts-demo-script > p {
+  margin: 0 0 0.65rem;
+  color: rgba(244, 239, 228, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+#ts-demo-script code {
+  display: block;
+  margin: 0 0 0.7rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.45rem;
+  background: rgba(212, 160, 23, 0.1);
+  color: #e0b84a;
+  font-size: 0.78rem;
+}
+
+.ts-demo-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+.ts-demo-actions button,
+#ts-demo-chip {
+  text-transform: uppercase;
+}
+
+.ts-demo-actions button {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  background: transparent;
+  color: #f4efe4;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+#ts-demo-script ol {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: rgba(244, 239, 228, 0.55);
+  font-size: 0.7rem;
+}
+
+#ts-demo-script li.is-done {
+  color: rgba(224, 184, 74, 0.7);
+  text-decoration: line-through;
+}
+
+#ts-demo-script li.is-current {
+  color: #f4efe4;
+}
+
+.ts-demo-hint {
+  margin: 0.65rem 0 0 !important;
+  font-size: 0.64rem !important;
+}
+
+.ts-hunt-suppress {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+  color: rgba(244, 239, 228, 0.55);
+  font-size: 0.72rem;
+}
+
+#ts-bottom-nav {
+  position: fixed;
+  left: 50%;
+  bottom: 1.05rem;
+  transform: translateX(-50%);
+  z-index: 45;
+  padding: 0.35rem;
+  border-radius: 999px;
+  background: rgba(10, 8, 4, 0.78);
+  border: 1px solid rgba(212, 160, 23, 0.3);
+  align-items: center;
+}
+
+#ts-bottom-nav button {
+  min-width: 4.6rem;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.68rem;
+}
+
+#ts-ai-slot {
+  position: relative;
+  width: 4.6rem;
+  height: 4.6rem;
+  margin: -1.15rem 0.15rem;
+}
+
+#ts-ai-slot #ts-ai-button,
+#ts-ai-slot #gev-voice-button {
+  width: 4.6rem;
+  height: 4.6rem;
+  min-width: 4.6rem;
+  min-height: 4.6rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(212, 160, 23, 0.7);
+  background: radial-gradient(circle at 40% 30%, rgba(232, 196, 90, 0.28), rgba(18, 14, 6, 0.92));
+  box-shadow: 0 0 0 6px rgba(212, 160, 23, 0.08), 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-weight: 600;
+}
+
+#ts-bottom-nav button.is-active,
+#ts-focus-card footer button:hover,
+#ts-bottom-nav button:hover {
+  background: rgba(212, 160, 23, 0.18);
+}
+
+#ts-ai-slot #gev-voice-control.ts-voice {
+  position: static;
+  display: grid;
+  place-items: center;
+  width: 4.6rem;
+  height: 4.6rem;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-heading,
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-visualizer,
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-readout,
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-help-tray,
+#ts-ai-slot #gev-voice-control.ts-voice .gev-voice-error-tray {
+  display: none;
+}
+
+#ts-ai-slot #gev-voice-control.ts-voice .gev-mic-orbit {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  border: 1px solid rgba(212, 160, 23, 0.55);
+  background: rgba(212, 160, 23, 0.08);
+}
+
+#ts-ai-slot #gev-voice-control.ts-voice .gev-mic-label {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.55rem;
+  letter-spacing: 0.12em;
+  color: #f4efe4;
+}
+
+#ts-ai-slot #gev-voice-control.ts-voice[data-status='listening'] #gev-voice-button {
+  box-shadow: 0 0 0 7px rgba(212, 160, 23, 0.16), 0 0 24px rgba(212, 160, 23, 0.28);
+}
+
+#ts-demo-form {
+  position: fixed;
+  left: 50%;
+  bottom: 4.15rem;
+  transform: translateX(-50%);
+  z-index: 44;
+  width: min(28rem, 90vw);
+}
+
+#ts-demo-form input {
+  flex: 1;
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 160, 23, 0.28);
+  background: rgba(10, 8, 4, 0.72);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+}
+
+#ts-attribution {
+  position: fixed;
+  left: 0.8rem;
+  bottom: 0.45rem;
+  z-index: 40;
+  margin: 0;
+  max-width: 22rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  color: rgba(244, 239, 228, 0.55);
+  font-family: Inter, sans-serif;
+}
+
+#ts-attribution a {
+  color: #e0b84a;
+}
+
+#ts-saved-sheet ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#ts-saved-sheet li button {
+  width: 100%;
+  margin-bottom: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.terrasignal-investor #ts-ai-prompt,
+  body.terrasignal-investor #ts-bottom-nav {
+    transition: none;
+  }
+}

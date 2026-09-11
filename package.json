@@ -2,7 +2,7 @@
   "name": "gods-eye-view",
   "private": true,
   "version": "0.1.1",
-  "description": "A real-time intelligence console for planet Earth — photorealistic 3D globe, live aircraft/ships/satellites/earthquakes/CCTV, and hands-free voice control. Runs in a browser.",
+  "description": "A real-time intelligence console for planet Earth \u2014 photorealistic 3D globe, live aircraft/ships/satellites/earthquakes/CCTV, and hands-free voice control. Runs in a browser.",
   "type": "module",
   "license": "MIT",
   "author": "Bilawal Sidhu",
@@ -40,7 +40,11 @@
     "preview": "vite preview",
     "test": "node scripts/run-unit-tests.mjs",
     "test:track": "node scripts/track-regression.mjs",
-    "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs"
+    "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs",
+    "smoke:investor": "node scripts/investor-probe.mjs --url \"http://localhost:4173/?demo=1&welcome=1\" --label investor",
+    "smoke:classic": "node scripts/investor-probe.mjs --url \"http://localhost:4173/?product=classic\" --label classic",
+    "smoke:investor-keyless": "node scripts/investor-probe.mjs --spawn-keyless",
+    "smoke:demo": "node scripts/investor-probe.mjs --play --url \"http://localhost:4173/?demo=1&welcome=1\" --label demo"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",
@@ -51,6 +55,7 @@
     "satellite.js": "^6.0.2"
   },
   "devDependencies": {
+    "playwright": "^1.49.0",
     "puppeteer": "^24.37.5",
     "sharp": "^0.34.5",
     "vite": "^6.0.0",

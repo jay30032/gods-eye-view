@@ -1,6 +1,26 @@
 <div align="center">
 
-# 🌐 God's Eye View
+# TerraSignal Investor
+
+### See what others miss.
+
+One world. One AI. Almost no menus. A mock-first investor globe on the existing Cesium / Vite / vanilla JS stack — **not** a React, Next, or Three.js rewrite.
+
+**Phase 1 demo:** `npm run dev` → [http://localhost:4173/?demo=1&welcome=1](http://localhost:4173/?demo=1&welcome=1) → Atlanta / Decatur → `Find me money` → `Why?` → `Show me the deal` → `Assume rehab is twenty thousand higher` → `Save it`. No mic or API keys required.
+
+[Start here — 5-minute script](docs/terrasignal/START_HERE.md) · [Product brief](docs/terrasignal/PRODUCT_BRIEF.md) · [Phase 1 notes](docs/terrasignal/PHASE_1.md)
+
+This repository is a product fork of **[God's Eye View](https://github.com/bilawalsidhu/gods-eye-view)** by [Bilawal Sidhu](https://github.com/bilawalsidhu) (MIT). Attribution and the upstream license are kept. Investor listings are invented mock data — not a live property feed, not investment advice.
+
+Classic GEV chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.
+
+</div>
+
+---
+
+<div align="center">
+
+# 🌐 God's Eye View (upstream)
 
 ### A spy-satellite simulator in your browser — then you realize the sources are public and the data is real.
 
@@ -111,15 +131,16 @@ Use **Node.js 24.x (24.14.0 or later) or 26.x**. The setup doctor warns about
 Node 25, which is end-of-life.
 
 ```bash
-git clone https://github.com/bilawalsidhu/gods-eye-view.git
+git clone https://github.com/jay30032/gods-eye-view.git
 cd gods-eye-view
 npm ci
 npm run doctor
 npm run dev
 ```
 
-Open **`http://localhost:4173`**. Choose **Live Contacts**, **Space Missions**,
-**Environmental**, or **Explore Manually** from the first-run panel.
+This fork defaults to **TerraSignal Investor** (`TERRASIGNAL_PRODUCT=investor`, `PROPERTY_PROVIDER=mock`, Atlanta). **5-minute demo:** open **`http://localhost:4173/?demo=1&welcome=1`** and follow the on-screen rail (or type the phrases). No OpenAI key. See [docs/terrasignal/START_HERE.md](docs/terrasignal/START_HERE.md). For the original first-run missions, set `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.
+
+Open **`http://localhost:4173`**. In investor mode the hunt card asks *Where are we hunting today?* Classic GEV still offers **Live Contacts**, **Space Missions**, **Environmental**, or **Explore Manually**.
 
 <details>
 <summary>Startup performance</summary>
@@ -348,12 +369,13 @@ How the globe handles live data:
 
 ```
 src/
-├── main.js                 # Bootstrap: Google 3D tiles, layer registration
+├── main.js                 # Bootstrap: Google 3D tiles, layer registration, investor path
+├── investor/               # TerraSignal Investor Phase 1 (mock data, deals, visuals, voice)
 ├── ui.js                   # Runtime UI — panels, HUD, styles, control facade
 ├── hud.js                  # Intelligence HUD + AI scene summary
 ├── keySetup.js             # POWER UP panel — in-app provider keys (dev server only)
 ├── mapStackController.js   # Basemap switching — Google 3D / Esri / OSM / ion stacks
-├── voice/                  # OpenAI Realtime session + 28 voice tools
+├── voice/                  # OpenAI Realtime session + GEV tools + investor tools
 ├── data/                   # One module per layer + orchestration + context store
 │   ├── iconOrientation.js  # Screen-projected headings + horizon cull
 │   └── local_data/         # Bundled datasets (per-folder provenance)
@@ -474,7 +496,7 @@ God's Eye View runs on **public data, clear sources, and local-first execution.*
 
 **Status:** An evolving open-source client for exploration and learning — a fast, hackable foundation, not a hardened production service. Released under the **[MIT License](LICENSE)**. Bundled and live datasets carry their own terms — see **[DATA_SOURCES.md](DATA_SOURCES.md)**. Security model: **[SECURITY.md](SECURITY.md)**. Want to contribute? **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-**Maintainers:** [Bilawal Sidhu](https://github.com/bilawalsidhu) and [Sameh Khamis](https://github.com/samehkhamis) at [Halfpixel](https://halfpixel.ai).
+**Upstream maintainers:** [Bilawal Sidhu](https://github.com/bilawalsidhu) and [Sameh Khamis](https://github.com/samehkhamis) at [Halfpixel](https://halfpixel.ai). This fork adds TerraSignal Investor Phase 1; keep the MIT notice and God's Eye View attribution.
 
 <sub>Media note: the capture GIFs on this page show Google Photorealistic 3D Tiles and live data layers, used promotionally with in-frame attribution; they aren't licensed for standalone reuse. See [media provenance and permissions](docs/media/README.md); full source terms in [DATA_SOURCES.md](DATA_SOURCES.md).</sub>
 

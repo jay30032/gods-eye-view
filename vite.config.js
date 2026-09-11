@@ -5222,6 +5222,12 @@ export function openAiRealtimeProxy() {
           },
           instructions: [
             "You are GEV Voice Control, a concise voice controller for a Cesium geospatial app called God's Eye View.",
+            'When TerraSignal Investor is running (the default product on this fork), you are also the Investor AI. Tagline: See what others miss. One world. One AI. Almost no menus. All property data is DEMO/MOCK — never claim live listings or a real property provider.',
+            'INVESTOR DEMO CONVERSATION — handle this sequence with tools, then one short spoken beat: "Find me money" → rank_mock_properties{findMoney:true} (focus the top pick); "Why?" → explain_property; "Show me the deal" → show_deal_vision plus the matching run_*_analysis; "Assume rehab is twenty thousand higher" → run_*_analysis{assumeRehabHigher:true}; "Save it" → save_property. Do not open filter dashboards or GEV layer menus for these asks.',
+            'Investor tools you must use when asked: investor_command, set_opportunity_vision, search_mock_properties, focus_property, rank_mock_properties, explain_property, explain_strategy, compare_strategies, show_deal_vision, run_flip_analysis, run_rental_analysis, run_brrrr_analysis, run_wholesale_analysis, save_property, show_saved_properties, start_drive_demo, stop_drive_demo. Drive demo is simulated, not GPS; announce strong signals only; why/save/skip/next stay live.',
+            'PREFER investor_command for anything an investor says — it runs the same parser as the typed command bar, so filters, what-ifs, and navigation behave identically whether typed or spoken. Pass their words through unchanged; do not pre-translate into narrower tools. Ten it handles: "find foreclosures under 250k in dekalb" · "top 3 rentals in decatur" · "best brrrr" · "show me 214 sycamore" · "next" · "why not wholesale" · "run it as a rental" · "what if i pay 110" · "rate 6.5" · "compare". Then speak one short beat with the number that changed and the verdict.',
+            'Signals are Georgia-real: FORECLOSURE is a Notice of Sale Under Power advertised four weeks in the county legal organ and sold the first Tuesday of the month; TAX_SALE is a fi. fa. execution on the same calendar and buys a deed redeemable for 12 months at a 20% premium; PREFORECLOSURE is servicer delinquency, NOT a court filing — Georgia is non-judicial and records no Notice of Default. Never call a delinquency a filing or invent an auction date.',
+            'On Investor startup the globe descends to Atlanta/Decatur and you should greet with "Where are we hunting today?" if the user has not already asked something else.',
             'Have a natural spoken conversation with the user while the mic session is active.',
             'Do not require a wake phrase. Treat direct commands like "zoom into London" or "open datacenters" as GEV control requests.',
             'Only control the app by calling the provided tools. Never invent tool names or arguments.',
@@ -6280,6 +6286,321 @@ const GEV_REALTIME_TOOLS = [
         latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Optional observer latitude. Omit to use the current camera position.' },
         longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Optional observer longitude. Omit to use the current camera position.' },
         minElevationDeg: { type: 'number', minimum: 5, maximum: 60, description: 'Minimum peak elevation (deg) to count as a pass. Default 10.' },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'investor_command',
+    description: 'TerraSignal Investor: PREFERRED tool for any investor request. Pass the user\'s words through verbatim and it parses filters, focus, what-ifs, comparisons, and navigation the same way the typed command bar does. Examples: "find foreclosures under 250k in dekalb", "show me the deal as a rental", "why not wholesale", "what if i pay 110", "rate 6.5", "compare", "next", "save it with note call the agent tuesday". Use the narrower tools below only when this one cannot express the ask.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        text: { type: 'string', description: "The user's request in their own words." },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'compare_strategies',
+    description: 'TerraSignal Investor: underwrite all four strategies on the focused mock property and report each verdict side by side.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'explain_strategy',
+    description: 'TerraSignal Investor: explain why one strategy landed strong, thin, or pass on the focused mock property — the deciding numbers and the threshold they cleared or missed. Use for "why not wholesale" or "why is rental thin".',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+        strategy: { type: 'string', enum: ['flip', 'rental', 'rent', 'brrrr', 'wholesale'] },
+      },
+      required: ['strategy'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'set_opportunity_vision',
+    description: 'TerraSignal Investor: turn Opportunity Vision pulses, parcel glow, and gold halos on or off. Does not open a filter dashboard.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        enabled: { type: 'boolean', description: 'true to show signal visuals, false to hide them.' },
+      },
+      required: ['enabled'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'search_mock_properties',
+    description: 'TerraSignal Investor: search the DEMO/MOCK Atlanta-Decatur inventory. Never claim these are live listings.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: { type: 'string', description: 'Address, neighborhood, or signal words such as foreclosure.' },
+        signalType: {
+          type: 'string',
+          enum: ['FORECLOSURE', 'PREFORECLOSURE', 'TAX_SALE', 'DISTRESS', 'LISTED_OPPORTUNITY'],
+        },
+        county: { type: 'string', enum: ['dekalb', 'fulton'], description: 'Georgia county the property sells in.' },
+        maxPurchase: { type: 'number', minimum: 0, description: 'Cap on contract price, in dollars.' },
+        minScore: { type: 'number', minimum: 0, maximum: 100 },
+        strategy: { type: 'string', enum: ['composite', 'flip', 'rental', 'brrrr', 'wholesale'] },
+        limit: { type: 'number', minimum: 1, maximum: 25 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'focus_property',
+    description: 'TerraSignal Investor: fly to a mock property, highlight it, and open the focus card. Voice stays available.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string', description: 'Mock id such as DEMO-ATL-001.' },
+      },
+      required: ['propertyId'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'rank_mock_properties',
+    description: 'TerraSignal Investor: rank mock properties. Use this for "Find me money" — then focus the top pick.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        strategy: { type: 'string', enum: ['composite', 'flip', 'rental', 'brrrr', 'wholesale'] },
+        limit: { type: 'number', minimum: 1, maximum: 10 },
+        findMoney: { type: 'boolean', description: 'true when the user asked to find money or hunt.' },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'explain_property',
+    description: 'TerraSignal Investor: explain why the focused (or named) mock property matters — scores, signals, value, equity.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'show_deal_vision',
+    description: 'TerraSignal Investor: color the globe by FLIP, RENT/RENTAL, BRRRR, or WHOLESALE scores.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        strategy: { type: 'string', enum: ['flip', 'rental', 'rent', 'brrrr', 'wholesale'] },
+      },
+      required: ['strategy'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'run_flip_analysis',
+    description: 'TerraSignal Investor: deterministic flip underwrite on the focused mock property. Use assumeRehabHigher for "rehab is twenty thousand higher".',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+        assumeRehabHigher: { type: 'boolean' },
+        rehabDelta: { type: 'number' },
+        dealOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Replace listed deal figures for this run, in dollars.',
+          properties: {
+            purchase: { type: 'number' },
+            arv: { type: 'number' },
+            rent: { type: 'number' },
+            rehab: { type: 'number' },
+          },
+        },
+        assumptionOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Financing terms as ratios (0.065 for 6.5%), except flipHoldMonths.',
+          properties: {
+            mortgageAnnualRate: { type: 'number' },
+            brrrrLtv: { type: 'number' },
+            flipHoldMonths: { type: 'number' },
+            downPaymentRate: { type: 'number' },
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'run_rental_analysis',
+    description: 'TerraSignal Investor: deterministic rental underwrite on the focused mock property.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+        assumeRehabHigher: { type: 'boolean' },
+        rehabDelta: { type: 'number' },
+        dealOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Replace listed deal figures for this run, in dollars.',
+          properties: {
+            purchase: { type: 'number' },
+            arv: { type: 'number' },
+            rent: { type: 'number' },
+            rehab: { type: 'number' },
+          },
+        },
+        assumptionOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Financing terms as ratios (0.065 for 6.5%), except flipHoldMonths.',
+          properties: {
+            mortgageAnnualRate: { type: 'number' },
+            brrrrLtv: { type: 'number' },
+            flipHoldMonths: { type: 'number' },
+            downPaymentRate: { type: 'number' },
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'run_brrrr_analysis',
+    description: 'TerraSignal Investor: deterministic BRRRR underwrite on the focused mock property.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+        assumeRehabHigher: { type: 'boolean' },
+        rehabDelta: { type: 'number' },
+        dealOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Replace listed deal figures for this run, in dollars.',
+          properties: {
+            purchase: { type: 'number' },
+            arv: { type: 'number' },
+            rent: { type: 'number' },
+            rehab: { type: 'number' },
+          },
+        },
+        assumptionOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Financing terms as ratios (0.065 for 6.5%), except flipHoldMonths.',
+          properties: {
+            mortgageAnnualRate: { type: 'number' },
+            brrrrLtv: { type: 'number' },
+            flipHoldMonths: { type: 'number' },
+            downPaymentRate: { type: 'number' },
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'run_wholesale_analysis',
+    description: 'TerraSignal Investor: deterministic wholesale underwrite on the focused mock property.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+        assumeRehabHigher: { type: 'boolean' },
+        rehabDelta: { type: 'number' },
+        dealOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Replace listed deal figures for this run, in dollars.',
+          properties: {
+            purchase: { type: 'number' },
+            arv: { type: 'number' },
+            rent: { type: 'number' },
+            rehab: { type: 'number' },
+          },
+        },
+        assumptionOverrides: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Financing terms as ratios (0.065 for 6.5%), except flipHoldMonths.',
+          properties: {
+            mortgageAnnualRate: { type: 'number' },
+            brrrrLtv: { type: 'number' },
+            flipHoldMonths: { type: 'number' },
+            downPaymentRate: { type: 'number' },
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'save_property',
+    description: 'TerraSignal Investor: save the focused or named mock property to localStorage.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string' },
+        note: { type: 'string' },
+        strategy: { type: 'string', enum: ['flip', 'rental', 'brrrr', 'wholesale'] },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'show_saved_properties',
+    description: 'TerraSignal Investor: open the saved sheet from localStorage.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    type: 'function',
+    name: 'start_drive_demo',
+    description: 'TerraSignal Investor: start the simulated (not GPS) drive demo. Announces strong signals only. why/save/skip/next stay available.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    type: 'function',
+    name: 'stop_drive_demo',
+    description: 'TerraSignal Investor: stop the drive demo, or pass command next/skip/why while it is running.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        command: { type: 'string', enum: ['stop', 'next', 'skip', 'why'] },
       },
     },
   },
@@ -7788,6 +8109,12 @@ export default defineConfig(({ mode }) => {
     define: {
       'import.meta.env.GOOGLE_MAPS_API_KEY': JSON.stringify(env.GOOGLE_MAPS_API_KEY),
       'import.meta.env.CESIUM_ION_TOKEN': JSON.stringify(env.CESIUM_ION_TOKEN),
+      'import.meta.env.TERRASIGNAL_PRODUCT': JSON.stringify(env.TERRASIGNAL_PRODUCT || 'investor'),
+      'import.meta.env.TERRASIGNAL_DEMO_MODE': JSON.stringify(env.TERRASIGNAL_DEMO_MODE || 'true'),
+      'import.meta.env.TERRASIGNAL_DEFAULT_MARKET': JSON.stringify(env.TERRASIGNAL_DEFAULT_MARKET || 'atlanta'),
+      'import.meta.env.PROPERTY_PROVIDER': JSON.stringify(env.PROPERTY_PROVIDER || 'mock'),
+      'import.meta.env.TERRASIGNAL_OPPORTUNITY_VISION': JSON.stringify(env.TERRASIGNAL_OPPORTUNITY_VISION || 'true'),
+      'import.meta.env.TERRASIGNAL_DISABLE_LIVE_FEEDS': JSON.stringify(env.TERRASIGNAL_DISABLE_LIVE_FEEDS || 'true'),
     },
     build: {
       // The Cesium engine bundle is inherently large; raise the warning ceiling

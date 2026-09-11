@@ -30,10 +30,23 @@ import {
   holdContinuousRender,
   releaseContinuousRender,
 } from './renderGovernor.js';
-import { installScopeMask } from './scopeMask.js';
+import { installScopeMask, setScopeMaskEnabled } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { initKeySetup } from './keySetup.js';
 import { loadPhotorealisticTileset } from './mapStartup.js';
+import { isInvestorProduct, readInvestorConfig } from './investor/config.js';
+import { startInvestorSession } from './investor/session.js';
+import { applyInvestorChrome } from './investor/ui/chrome.js';
+import { showInvestorGlobeError } from './investor/globeReveal.js';
+import {
+  ensureKeylessVisibleBasemap,
+  INVESTOR_PAINT_HOLD,
+  kickRenderBurst,
+  releaseInvestorBootHolds,
+  scheduleInvestorImageryWatchdog,
+  waitForFirstInvestorFrame,
+} from './investor/ensureBasemap.js';
+import { applyInvestorFrameBudgetFromNavigator } from './investor/frameBudget.js';
 
 initLogoGaze();
 
@@ -71,9 +84,24 @@ function describeError(error) {
 async function init() {
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
+  const investorMode = isInvestorProduct();
+  if (!investorMode) {
+    document.documentElement.classList.remove('terrasignal-investor');
+    document.documentElement.classList.add('terrasignal-classic');
+    document.getElementById('terrasignal-shell')?.remove();
+  }
+  if (investorMode) {
+    applyInvestorChrome(readInvestorConfig());
+    if (loaderStatus) loaderStatus.textContent = 'Opening one world…';
+    loadingScreen?.classList.add('hidden');
+    await new Promise((resolve) => {
+      const raf = globalThis.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
+      raf(() => raf(resolve));
+    });
+  }
 
   try {
-    loaderStatus.textContent = 'Configuring viewer...';
+    loaderStatus.textContent = investorMode ? 'Opening one world…' : 'Configuring viewer...';
 
     // A direct Google key provides Google 3D plus GEV place search. Cesium ion
     // can host the same 3D tiles and also powers Bing/world-terrain stacks.
@@ -108,7 +136,7 @@ async function init() {
         document.body.appendChild(el);
         return el;
       })(),
-      msaaSamples: 4,
+      msaaSamples: investorMode ? 1 : 4,
       contextOptions: {
         webgl: {
           preserveDrawingBuffer: true,
@@ -123,7 +151,8 @@ async function init() {
     // designed against wall-clock time, not frame count. Measured on the
     // 2026-08-05 perf investigation as a strict halving of idle burn on
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
-    viewer.targetFrameRate = 60;
+    viewer.targetFrameRate = investorMode ? 30 : 60;
+    if (investorMode) void applyInvestorFrameBudgetFromNavigator(viewer);
 
     // Register per-layer data attribution into the "Data attribution" popover.
     // Required by each source's license (ODbL, CC BY-NC-SA, NASA FIRMS, etc.);
@@ -132,10 +161,11 @@ async function init() {
     // clutter the on-globe line. See docs/pre-ship-audit-2026-07-01.md H11.
     registerDataCredits(viewer);
 
-    // Hide Cesium's default globe — Google Photorealistic 3D Tiles provide their own
-    // globe at all LODs (street level → orbital). The default globe's 2D imagery
-    // clips through 3D tile buildings at close range.
-    viewer.scene.globe.show = false;
+    // Photoreal tiles replace the ellipsoid globe. Keyless investor (and any
+    // boot without Google/ion) must keep the Esri/OSM globe visible from the
+    // first frame — hiding it here is what left a black void behind the HUD.
+    const expectPhotoreal = Boolean(googleApiKey || cesiumToken);
+    viewer.scene.globe.show = !expectPhotoreal;
 
     // Keep a sky behind Google 3D Tiles, but soften Cesium's high-intensity
     // default atmosphere. With the globe hidden its bright limb otherwise
@@ -186,6 +216,20 @@ async function init() {
       onError: (message) => console.warn('[MapStack]', message),
     });
     await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', { silent: true });
+    if (investorMode && !tileset) {
+      // Keep the governor from going idle before Esri tiles are requested.
+      // Released on first tile progress or 4s inside renderUntilGlobePaints.
+      holdContinuousRender(INVESTOR_PAINT_HOLD);
+      kickRenderBurst(viewer);
+      scheduleInvestorImageryWatchdog({ viewer, mapStackController });
+      await ensureKeylessVisibleBasemap({
+        viewer,
+        mapStackController,
+        tileset,
+        phase: 'boot',
+      });
+      await waitForFirstInvestorFrame(viewer);
+    }
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
@@ -195,10 +239,13 @@ async function init() {
     const weatherEffects = null;
     const cockpitCloudEffects = initCockpitCloudEffects(viewer);
 
-    // If no share link state, do default fly-to Austin
-    if (!styleManager.hasShareState) {
+    // Classic GEV flies to Austin. Investor mode starts on the globe and
+    // descends into the Atlanta/Decatur mock market after layers are sealed.
+    if (!investorMode && !styleManager.hasShareState) {
       loaderStatus.textContent = 'Flying to Austin, TX...';
       flyToAustin(viewer);
+    } else if (investorMode) {
+      loaderStatus.textContent = 'Opening TerraSignal Investor…';
     } else {
       loaderStatus.textContent = 'Restoring shared view...';
     }
@@ -236,7 +283,9 @@ async function init() {
         return dataManager.unregisterForQa(layerId);
       };
     }
-    dataManager.buildTogglePanel(document.getElementById('data-toggles'));
+    if (!investorMode) {
+      dataManager.buildTogglePanel(document.getElementById('data-toggles'));
+    }
     styleManager.attachDataManager(dataManager);
 
     // Initialize deterministic scene playback for social clip capture
@@ -261,7 +310,7 @@ async function init() {
         // dataManager is passed explicitly: the globe missions enable bundled
         // keyless layers through it, and reaching for styleManager._dataManager
         // would make a private field part of this feature's contract.
-        initFirstRunExperience({ styleManager, dataManager });
+        if (!investorMode) initFirstRunExperience({ styleManager, dataManager });
       };
       loadingScreen.addEventListener('transitionend', revealFirstRun, { once: true });
       setTimeout(revealFirstRun, 900);
@@ -276,12 +325,15 @@ async function init() {
     // Idle render governor: flips the scene into requestRenderMode whenever
     // nothing animates per frame. Installed AFTER every module above has had
     // its chance to register pre-install holds. (perf wave 2)
+    // Investor keyless: first frames use requestRender bursts, not a
+    // continuous hold. A long hold on a laptop GPU freezes the HUD.
     installRenderGovernor(viewer);
 
     // The explicit scope mask replaces the emergent six-pass artifact —
     // see src/scopeMask.js. Installed before the UI so the DISPLAY-rail
     // toggle finds it live.
     installScopeMask(viewer);
+    if (investorMode) setScopeMaskEnabled(false);
 
     // The follow camera recomputes the tracked target's dead-reckon position
     // every frame — tracking anything is a per-frame animation. (perf wave 2)
@@ -328,10 +380,38 @@ async function init() {
     };
     window.__godsEyeView.voiceCommands = initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
 
+    if (investorMode) {
+      try { await styleManager._layerStateRestorePromise; } catch { /* empty local state is fine */ }
+      try { await styleManager.initialRestorePromise; } catch { /* share restore is optional */ }
+      setScopeMaskEnabled(false);
+      if (!tileset) {
+        kickRenderBurst(viewer);
+        await ensureKeylessVisibleBasemap({
+          viewer,
+          mapStackController,
+          styleManager,
+          tileset,
+          phase: 'after-restore',
+        });
+        await waitForFirstInvestorFrame(viewer);
+      }
+      releaseInvestorBootHolds();
+      window.__terraSignal = await startInvestorSession({ viewer, styleManager, dataManager });
+      window.__godsEyeView.investor = window.__terraSignal;
+    }
+
   } catch (error) {
-    console.error("God's Eye View initialization failed:", error);
-    loaderStatus.textContent = `Error: ${describeError(error)}`;
-    loaderStatus.style.color = '#ff4444';
+    console.error(investorMode ? 'TerraSignal initialization failed:' : "God's Eye View initialization failed:", error);
+    if (investorMode) {
+      loadingScreen?.classList.add('hidden');
+      const detail = describeError(error);
+      showInvestorGlobeError(detail);
+      const prompt = document.getElementById('ts-ai-prompt');
+      if (prompt) prompt.textContent = `Globe could not start — ${detail}`;
+    } else {
+      loaderStatus.textContent = `Error: ${describeError(error)}`;
+      loaderStatus.style.color = '#ff4444';
+    }
   }
 }
 
