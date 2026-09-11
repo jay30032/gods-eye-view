@@ -34,20 +34,44 @@ export function normalizeStrategy(value) {
   return null;
 }
 
+/** Deal-block fields a what-if may replace outright. */
+export const DEAL_OVERRIDE_FIELDS = Object.freeze(['purchase', 'rehab', 'arv', 'rent']);
+
 /**
  * Run one strategy against a property's deal block.
- * `rehabDelta` is added to listed rehab (demo: "rehab is twenty thousand higher")
- * before the contingency is applied, so a bigger scope also carries a bigger buffer.
+ *
+ * `dealOverrides` replaces listed figures ("what if i pay 110"); `rehabDelta`
+ * is then added on top ("rehab is twenty thousand higher") so the two compose
+ * — a replaced rehab can still be bumped. Both land before the contingency, so
+ * a bigger scope also carries a bigger buffer. Everything else is an
+ * assumption override and goes to `mergeAssumptions`.
  */
 export function analyzePropertyDeal(property, strategy, overrides = {}) {
   const name = normalizeStrategy(strategy);
   if (!name) throw new Error(`Unknown deal strategy: ${strategy || 'missing'}`);
   const base = property?.deal && typeof property.deal === 'object' ? property.deal : {};
   const deal = { ...base, units: unitsFor(property?.propertyType, property?.units) };
+
+  const dealOverrides = overrides.dealOverrides && typeof overrides.dealOverrides === 'object'
+    ? overrides.dealOverrides
+    : null;
+  if (dealOverrides) {
+    for (const field of DEAL_OVERRIDE_FIELDS) {
+      const value = Number(dealOverrides[field]);
+      if (Number.isFinite(value)) deal[field] = value;
+    }
+  }
+
   const rehabDelta = Number(overrides.rehabDelta) || 0;
   if (rehabDelta) deal.rehab = Number(deal.rehab || 0) + rehabDelta;
-  const { rehabDelta: _ignored, ...assumptionOverrides } = overrides;
-  return STRATEGIES[name](deal, assumptionOverrides);
+
+  const {
+    rehabDelta: _ignoredDelta,
+    dealOverrides: _ignoredDeal,
+    assumptionOverrides: nested,
+    ...rest
+  } = overrides;
+  return STRATEGIES[name](deal, { ...rest, ...(nested || {}) });
 }
 
 /**

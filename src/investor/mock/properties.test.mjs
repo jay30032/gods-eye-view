@@ -95,7 +95,7 @@ test('sources read like the feed they would actually come from', () => {
       } else {
         assert.match(
           signal.source,
-          /^MOCK\/(code enforcement — (City of Atlanta|DeKalb County)|water shutoff — (Atlanta|DeKalb) Watershed)$/,
+          /^MOCK\/(code enforcement — (City of Atlanta|DeKalb County)|water shutoff — (Atlanta Watershed|DeKalb Watershed|City of College Park utilities))$/,
           where,
         );
       }

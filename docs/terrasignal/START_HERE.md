@@ -34,6 +34,54 @@ The left **5-minute demo** rail shows the next step. Press **Send this phrase** 
 5. `Assume rehab is twenty thousand higher` — deterministic +$20k; numbers update
 6. `Save it` — `localStorage` + SAVED sheet + saved-ring feedback
 
+## Talk to it
+
+The five phrases above are the scripted demo. The command bar and the mic
+understand a good deal more — same parser either way, so anything typed can be
+spoken. Unrecognised input answers with the nearest phrase it does know.
+
+**Hunt**
+
+- `find me money`
+- `find foreclosures under 250k in dekalb`
+- `show me tax sales`
+- `top 3 rentals in decatur`
+- `best brrrr`
+- `any foreclosures in grant park`
+
+**Focus**
+
+- `show me 214 sycamore`
+- `number two` · `the second one`
+- `next` · `previous`
+- `the gold one`
+
+**Underwrite**
+
+- `show me the deal`
+- `run it as a rental`
+- `what about brrrr`
+- `compare` — all four paths side by side
+- `why not wholesale` — why that path is a pass, with the numbers that decided it
+
+**What-if**
+
+- `assume rehab is twenty thousand higher`
+- `rehab is 60` · `what if i pay 110` · `offer 195,000`
+- `rent 2800` · `rate 6.5` · `hold 9 months`
+- `rehab 20 percent higher`
+- `reset the numbers`
+
+**Save and navigate**
+
+- `save it` · `save it with note call the agent tuesday`
+- `unsave` · `show saved`
+- `zoom out` · `vision off` · `help`
+
+What-ifs change the focused deal and the globe caption only. The score and the
+ranking stay on the listed numbers, so the board keeps meaning the same thing —
+the card shows a **Custom numbers** chip with a Reset while any are in play.
+
 DRIVE is a separate simulated route (not GPS). It must not be required for the sequence above. WORLD recenters the market.
 
 Classic GEV chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.

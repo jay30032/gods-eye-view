@@ -52,6 +52,7 @@ export function createOpportunityVisualManager({
   let enabled = Boolean(startEnabled);
   let dealStrategy = null;
   let dealAnalysis = null;
+  let dealCaption = null;
   let focusedId = null;
   let shortlistIds = null;
   let topPickId = null;
@@ -249,8 +250,9 @@ export function createOpportunityVisualManager({
     }
 
     if (lod.showLabels || focused || (dealStrategy && focused)) {
+      // A compare supplies its own caption — two paths, not one breakdown.
       const dealText = focused && dealStrategy
-        ? `\n${dealVisionCaption(dealStrategy, dealAnalysis)}`
+        ? `\n${dealCaption || dealVisionCaption(dealStrategy, dealAnalysis)}`
         : '';
       const savedText = saved ? '\nSAVED' : '';
       // Only the house in hand carries a countdown; the rest of the board is
@@ -361,9 +363,10 @@ export function createOpportunityVisualManager({
     toggle() {
       return this.setEnabled(!enabled);
     },
-    setDealVision(strategy, analysis = null) {
+    setDealVision(strategy, analysis = null, { caption = null } = {}) {
       dealStrategy = strategy || null;
       dealAnalysis = analysis || null;
+      dealCaption = caption || null;
       rebuild();
       return dealStrategy;
     },

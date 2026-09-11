@@ -22,6 +22,9 @@ export function explainProperty(property) {
 }
 
 export const INVESTOR_VOICE_TOOL_NAMES = Object.freeze([
+  'investor_command',
+  'compare_strategies',
+  'explain_strategy',
   'set_opportunity_vision',
   'search_mock_properties',
   'focus_property',
@@ -62,6 +65,27 @@ export function runInvestorVoiceTool(name, rawArgs = {}, context = {}) {
   }
   const args = rawArgs && typeof rawArgs === 'object' ? rawArgs : {};
 
+  // The preferred path: hand the sentence straight to the same parser the
+  // typed bar uses, so voice and typing can never drift apart.
+  if (name === 'investor_command') {
+    const text = String(args.text || '').trim();
+    if (!text) return { ok: false, action: name, error: 'investor_command needs text' };
+    return session.handleIntent(text);
+  }
+
+  if (name === 'compare_strategies') {
+    const property = resolveProperty(session, args);
+    if (property && property.id !== session.focused?.id) session.focus(property.id, { fly: false });
+    return session.handleIntent('compare');
+  }
+
+  if (name === 'explain_strategy') {
+    const property = resolveProperty(session, args);
+    if (property && property.id !== session.focused?.id) session.focus(property.id, { fly: false });
+    const strategy = normalizeStrategy(args.strategy);
+    return session.handleIntent(strategy ? `why not ${strategy}` : 'why');
+  }
+
   if (name === 'set_opportunity_vision') {
     return session.setOpportunityVision(args.enabled !== false);
   }
@@ -70,6 +94,8 @@ export function runInvestorVoiceTool(name, rawArgs = {}, context = {}) {
     const results = session.search({
       query: args.query,
       signalType: args.signalType,
+      county: args.county,
+      maxPurchase: args.maxPurchase,
       minScore: args.minScore,
       strategy: args.strategy || 'composite',
       limit: args.limit || 8,
@@ -138,7 +164,21 @@ export function runInvestorVoiceTool(name, rawArgs = {}, context = {}) {
     }
     const property = resolveProperty(session, args);
     if (property && property.id !== session.focused?.id) session.focus(property.id, { fly: false });
-    const result = session.analyze(strategy, args);
+    // What-ifs from the model persist on the conversation, exactly as a typed
+    // one would, so a follow-up question re-runs against the same numbers.
+    if (args.dealOverrides && typeof args.dealOverrides === 'object') {
+      session.conversation.dealOverrides = {
+        ...session.conversation.dealOverrides,
+        ...args.dealOverrides,
+      };
+    }
+    if (args.assumptionOverrides && typeof args.assumptionOverrides === 'object') {
+      session.conversation.assumptionOverrides = {
+        ...session.conversation.assumptionOverrides,
+        ...args.assumptionOverrides,
+      };
+    }
+    const result = session.analyze(strategy, {});
     return { ...result, spoken: result.ok ? `${strategy} analysis ready.` : result.error };
   }
 

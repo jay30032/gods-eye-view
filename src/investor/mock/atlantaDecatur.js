@@ -631,7 +631,7 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     estimatedValue: 245000,
     estimatedEquityPct: 0.37,
     signals: [
-      signal('DISTRESS', 0.80, '2026-05-02', 'MOCK/water shutoff — Atlanta Watershed'),
+      signal('DISTRESS', 0.80, '2026-05-02', 'MOCK/water shutoff — City of College Park utilities'),
       signal('PREFORECLOSURE', 0.69, '2026-08-19', 'MOCK/90-day delinquency — servicer feed'),
     ],
     deal: deal(154000, 29000, 245000, 1950),

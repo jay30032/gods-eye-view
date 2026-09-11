@@ -40,8 +40,11 @@ function fakeSession() {
 }
 
 test('all Phase 1 investor voice tools are registered and unique', () => {
-  assert.equal(INVESTOR_VOICE_TOOL_NAMES.length, 14);
-  assert.equal(new Set(INVESTOR_VOICE_TOOL_NAMES).size, 14);
+  assert.equal(INVESTOR_VOICE_TOOL_NAMES.length, 17);
+  assert.equal(new Set(INVESTOR_VOICE_TOOL_NAMES).size, 17);
+  for (const added of ['investor_command', 'compare_strategies', 'explain_strategy']) {
+    assert.ok(INVESTOR_VOICE_TOOL_NAMES.includes(added), added);
+  }
   for (const name of INVESTOR_VOICE_TOOL_NAMES) {
     assert.equal(isInvestorVoiceTool(name), true);
   }

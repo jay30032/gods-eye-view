@@ -655,15 +655,16 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   const end = src.indexOf('\n];\n', start);
   const block = src.slice(start, end + 4);
 
-  // Re-pinned 2026-08-28: the Provider Settings / Esri release DELIBERATELY
-  // extends set_map_stack's enum with 'esri-imagery' (a real new basemap —
-  // exactly the kind of schema change this pin exists to make loud). The
-  // guarded claim is unchanged: first-run missions ride existing tools, and
-  // any NEW drift from this recorded schema still fails here.
-  assert.equal(block.length, 37222, 'tool schema byte length drifted from the pinned investor-extended schema');
+  // Re-pinned 2026-09-10: the natural-language release DELIBERATELY adds
+  // investor_command, compare_strategies and explain_strategy, and extends
+  // search_mock_properties and the run_*_analysis tools with filters and
+  // overrides — exactly the kind of schema change this pin exists to make
+  // loud. The guarded claim is unchanged: first-run missions ride existing
+  // tools, and any NEW drift from this recorded schema still fails here.
+  assert.equal(block.length, 42365, 'tool schema byte length drifted from the pinned investor-extended schema');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '07da0f6de673654b5c4a2044558d0807905859b5329bf2fc745f59460d71cd66',
+    'c26dec2b41dec051e881d4c3562a4519237bab20a9a2fbaa782108bdc585f7a3',
     'first-run missions still ride existing tools; investor tools are an additive schema extension',
   );
 

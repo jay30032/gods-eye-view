@@ -8,15 +8,23 @@ import { createOpportunityVisualManager } from './visuals/opportunityVisualManag
 import { prefersReducedMotion } from './visuals/reducedMotionPolicy.js';
 import { flyGlobeThenMarket, flyToMarket, flyToProperty, whyThisMatters } from './focus.js';
 import { cameraHeightM, lodFromHeight } from './lod.js';
-import { readSavedProperties, saveProperty } from './saved.js';
+import { readSavedProperties, removeSavedProperty, saveProperty } from './saved.js';
 import { createDriveDemo } from './driveDemo.js';
 import {
+  HELP_LINE,
+  applyCompare,
   applyFindMoney,
-  applyRehabDelta,
+  applyFocus,
+  applyReset,
   applySave,
   applyShowDeal,
+  applyUnsave,
+  applyWhatIf,
   applyWhy,
+  applyWhyStrategy,
   createConversationState,
+  hasCustomNumbers,
+  overridesFor,
   parseDemoIntent,
 } from './conversation.js';
 import { governorRequestRender } from '../renderGovernor.js';
@@ -166,7 +174,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const name = normalizeStrategy(strategy) || conversation.lastStrategy || (focused ? bestStrategyFor(focused) : 'flip');
       conversation.lastStrategy = name;
       if (focused) {
-        lastAnalysis = analyzePropertyDeal(focused, name, { rehabDelta: conversation.rehabDelta });
+        lastAnalysis = analyzePropertyDeal(focused, name, overridesFor(conversation));
         lastAnalysisId = focused.id;
         renderFocusCard(focused, { analysis: lastAnalysis, strategy: name, revealDeal: true });
       }
@@ -179,7 +187,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const name = normalizeStrategy(strategy) || bestStrategyFor(focused);
       conversation.lastStrategy = name;
       lastAnalysis = analyzePropertyDeal(focused, name, {
-        rehabDelta: conversation.rehabDelta,
+        ...overridesFor(conversation),
         ...overrides,
       });
       lastAnalysisId = focused.id;
@@ -218,13 +226,30 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       setNavActive('saved');
       return { ok: true, action: 'show_saved_properties', saved: readSavedProperties() };
     },
+    /** Re-paint the focus card from whatever the conversation currently holds. */
+    paintFocus({ compare = null } = {}) {
+      if (!focused) return;
+      renderFocusCard(focused, {
+        analysis: lastAnalysisId === focused.id ? lastAnalysis : null,
+        strategy: conversation.lastStrategy,
+        revealDeal: conversation.dealVisible && lastAnalysisId === focused.id,
+        customNumbers: hasCustomNumbers(conversation),
+        compare,
+      });
+    },
     handleIntent(text) {
       const parsed = parseDemoIntent(text);
       if (!parsed) return { ok: false, spoken: 'Say find me money.' };
+      const slots = parsed.slots || {};
+
       if (parsed.intent === 'find_money') {
         if (this.drive.running) this.drive.stop();
         this.setOpportunityVision(true);
-        const result = applyFindMoney(properties, conversation);
+        const result = applyFindMoney(properties, conversation, slots);
+        if (!result.ok) {
+          setAiPrompt(result.spoken);
+          return result;
+        }
         visuals.setSaved(null);
         visuals.setShortlist(result.candidateIds);
         visuals.setTopPick(result.topPickId);
@@ -233,20 +258,35 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         setAiPrompt(result.spoken);
         return result;
       }
-      if (parsed.intent === 'why') {
-        const result = applyWhy(focused, conversation);
-        if (focused) {
-          renderFocusCard(focused, {
-            analysis: lastAnalysisId === focused.id ? lastAnalysis : null,
-            strategy: conversation.lastStrategy,
-            revealDeal: conversation.dealVisible && lastAnalysisId === focused.id,
-          });
+
+      if (parsed.intent === 'focus') {
+        // While the drive is running, "next" and "skip" belong to the route.
+        if (this.drive.running && (slots.step === 'next' || slots.step === 'previous')) {
+          const moved = slots.step === 'next' ? drive.next() : drive.skip();
+          setAiPrompt(moved.spoken);
+          return moved;
         }
+        const result = applyFocus(properties, conversation, slots);
+        if (result.ok) this.focus(result.id);
         setAiPrompt(result.spoken);
         return result;
       }
+
+      if (parsed.intent === 'why') {
+        const result = slots.strategy
+          ? applyWhyStrategy(focused, conversation, slots.strategy)
+          : applyWhy(focused, conversation);
+        if (result.ok && result.analysis) {
+          lastAnalysis = result.analysis;
+          lastAnalysisId = focused.id;
+        }
+        this.paintFocus();
+        setAiPrompt(result.spoken);
+        return result;
+      }
+
       if (parsed.intent === 'show_deal') {
-        const result = applyShowDeal(focused, conversation);
+        const result = applyShowDeal(focused, conversation, slots);
         if (result.ok) {
           lastAnalysis = result.analysis;
           lastAnalysisId = focused.id;
@@ -255,20 +295,77 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         setAiPrompt(result.spoken);
         return result;
       }
-      if (parsed.intent === 'rehab_plus_20k') {
-        const result = applyRehabDelta(focused, conversation, 20000);
+
+      if (parsed.intent === 'compare') {
+        const result = applyCompare(focused, conversation);
+        if (result.ok) {
+          lastAnalysis = result.analyses[result.best];
+          lastAnalysisId = focused.id;
+          this.paintFocus({ compare: result.rows });
+          // The globe caption carries the two paths worth arguing about.
+          const runnerUp = result.rows
+            .filter((row) => row.strategy !== result.best && row.verdict !== 'pass')
+            .sort((a, b) => (Number(focused.opportunityScore?.[b.strategy]) || 0)
+              - (Number(focused.opportunityScore?.[a.strategy]) || 0))[0];
+          visuals.setDealVision(result.best, lastAnalysis, {
+            caption: compareCaption(result, runnerUp),
+          });
+        }
+        setAiPrompt(result.spoken);
+        return result;
+      }
+
+      if (parsed.intent === 'what_if') {
+        const result = applyWhatIf(focused, conversation, slots);
         if (result.ok) {
           lastAnalysis = result.analysis;
           lastAnalysisId = focused.id;
-          renderFocusCard(focused, { analysis: lastAnalysis, strategy: result.strategy, revealDeal: true });
+          this.paintFocus();
           visuals.setDealVision(result.strategy, lastAnalysis);
         }
         setAiPrompt(result.spoken);
         return result;
       }
-      if (parsed.intent === 'save') {
-        return this.save(focused?.id);
+
+      if (parsed.intent === 'reset_assumptions') {
+        const result = applyReset(conversation);
+        if (focused) {
+          const strategy = conversation.lastStrategy || bestStrategyFor(focused);
+          lastAnalysis = analyzePropertyDeal(focused, strategy, overridesFor(conversation));
+          lastAnalysisId = focused.id;
+          this.paintFocus();
+          visuals.setDealVision(strategy, lastAnalysis);
+        }
+        setAiPrompt(result.spoken);
+        return result;
       }
+
+      if (parsed.intent === 'save') {
+        return this.save(focused?.id, { note: slots.note || '' });
+      }
+
+      if (parsed.intent === 'unsave') {
+        const result = applyUnsave(focused, conversation, (id) => removeSavedProperty(id));
+        if (result.ok) {
+          visuals.setSaved(null);
+          this.paintFocus();
+          this.showSaved();
+        }
+        setAiPrompt(result.spoken);
+        return result;
+      }
+
+      if (parsed.intent === 'show_saved') return this.showSaved();
+
+      if (parsed.intent === 'vision_on' || parsed.intent === 'vision_off') {
+        return this.setOpportunityVision(parsed.intent === 'vision_on');
+      }
+
+      if (parsed.intent === 'world') {
+        this.world();
+        return { ok: true, action: 'world', spoken: market.greeting };
+      }
+
       if (parsed.intent === 'start_drive') {
         setNavActive('drive');
         const result = drive.start();
@@ -280,7 +377,33 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         setAiPrompt(result.spoken);
         return result;
       }
-      return { ok: false, spoken: 'Try: Find me money. Why? Show me the deal. Save it.' };
+      if (parsed.intent === 'drive_next') {
+        const result = drive.running ? drive.next() : drive.start();
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'drive_skip') {
+        const result = drive.skip();
+        setAiPrompt(result.spoken);
+        return result;
+      }
+
+      if (parsed.intent === 'help') {
+        setAiPrompt(HELP_LINE);
+        // The rail is the written version of the same cheat sheet.
+        const rail = document.getElementById('ts-demo-script');
+        if (rail) {
+          rail.hidden = false;
+          rail.classList.add('visible');
+          session.demoScript?.paint?.();
+        }
+        return { ok: true, action: 'help', spoken: HELP_LINE };
+      }
+
+      const suggestion = slots.suggestion || 'find me money';
+      const spoken = `Didn't catch that. Try: ${suggestion}`;
+      setAiPrompt(spoken);
+      return { ok: false, action: 'unknown', suggestion, spoken };
     },
     world() {
       hideSavedSheet();
@@ -374,6 +497,15 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   return session;
 }
 
+/** Globe caption for a compare: the winner, then the best path that also works. */
+function compareCaption(result, runnerUp) {
+  return result.rows
+    .filter((row) => row.strategy === result.best || row === runnerUp)
+    .map((row) => `${row.strategy.toUpperCase()} ${row.verdict.toUpperCase()}`
+      + `${row.headline ? ` ${row.headline}` : ''}`)
+    .join('\n');
+}
+
 function bindUi(session) {
   document.getElementById('ts-opportunity-vision')?.addEventListener('change', (event) => {
     session.setOpportunityVision(event.target.checked);
@@ -412,6 +544,8 @@ function bindUi(session) {
     const action = event.target.closest('[data-ts-focus-action]')?.getAttribute('data-ts-focus-action');
     if (action === 'save') session.save(session.focused?.id);
     if (action === 'deal') session.handleIntent('Show me the deal');
+    if (action === 'reset') session.handleIntent('reset the numbers');
+    if (action === 'compare') session.handleIntent('compare');
   });
 
   document.getElementById('ts-saved-sheet')?.addEventListener('click', (event) => {

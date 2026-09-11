@@ -33,17 +33,25 @@ function scoreForStrategy(property, strategy) {
 export function searchMockProperties(properties, {
   query = '',
   signalType = null,
+  county = null,
+  maxPurchase = null,
   minScore = 0,
   strategy = 'composite',
   limit = 25,
 } = {}) {
   const wantedSignal = signalType ? String(signalType).trim().toUpperCase() : null;
+  const wantedCounty = county ? String(county).trim().toLowerCase() : null;
+  const cap = maxPurchase == null || !Number.isFinite(Number(maxPurchase))
+    ? null
+    : Number(maxPurchase);
   const ranked = properties
     .filter((property) => matchesQuery(property, query))
     .filter((property) => {
       if (!wantedSignal) return true;
       return (property.signals || []).some((signal) => signal.type === wantedSignal);
     })
+    .filter((property) => !wantedCounty || property.county === wantedCounty)
+    .filter((property) => cap == null || Number(property.deal?.purchase || 0) <= cap)
     .filter((property) => scoreForStrategy(property, strategy) >= Number(minScore || 0))
     .map((property) => ({
       property,

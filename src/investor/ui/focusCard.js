@@ -29,6 +29,7 @@ export function renderFocusCard(property, options = {}) {
       <span class="ts-focus-score">Score ${model.score}</span>
     </header>
     ${renderAuctionTimeline(model)}
+    ${renderCustomNumbers(options)}
     ${renderDrivers(model)}
     ${renderStrategyStrip(model)}
     <p class="ts-why">${escapeHtml(model.why)}</p>
@@ -40,12 +41,37 @@ export function renderFocusCard(property, options = {}) {
       <div><dt>Equity</dt><dd>${model.estimatedEquityPct}</dd></div>
       ` : ''}
     </dl>
+    ${renderCompare(options)}
     ${options.revealDeal ? renderAnalysis(model) : ''}
     <footer>
       <button type="button" data-ts-focus-action="save">Save</button>
       <button type="button" data-ts-focus-action="deal">Show deal</button>
     </footer>
   `;
+}
+
+/**
+ * A running what-if changes this card and the globe caption, but never the
+ * score or the ranking — those stay on listed numbers so the board keeps
+ * meaning the same thing. The chip says so and offers the way back.
+ */
+function renderCustomNumbers(options) {
+  if (!options.customNumbers) return '';
+  return '<p class="ts-custom-numbers" '
+    + 'title="Score and ranking still use the listed numbers — only this deal is re-run.">'
+    + '<span>Custom numbers</span>'
+    + '<button type="button" data-ts-focus-action="reset">Reset</button></p>';
+}
+
+/** All four paths, verdict and headline, when the user asked to compare. */
+function renderCompare(options) {
+  const rows = Array.isArray(options.compare) ? options.compare : null;
+  if (!rows || !rows.length) return '';
+  const cells = rows.map((row) => `<li class="ts-verdict-${escapeHtml(row.verdict)}">`
+    + `<span class="ts-deal-label">${escapeHtml(STRATEGY_LABELS[row.strategy] || row.strategy)}</span>`
+    + `<span class="ts-compare-verdict">${escapeHtml(row.verdict)}</span>`
+    + `<span class="ts-deal-value">${escapeHtml(row.headline || '—')}</span></li>`).join('');
+  return `<ul class="ts-compare">${cells}</ul>`;
 }
 
 /** Who published it and where — a Georgia notice is only real in a legal organ. */
