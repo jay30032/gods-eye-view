@@ -11,6 +11,11 @@ export function goldHaloAlpha(nowMs, reduced) {
   return 0.38 + 0.28 * breathe(nowMs, 3000, 0.15);
 }
 
+/** The single radius both halo ellipse axes use. */
+export function goldHaloRadiusM(nowMs, reduced) {
+  return 26 + 6 * (reduced ? 0 : goldHaloAlpha(nowMs, reduced));
+}
+
 export function goldColumnHeight(nowMs, reduced) {
   if (reduced) return 90;
   return 70 + 40 * breathe(nowMs, 3000, 0.4);

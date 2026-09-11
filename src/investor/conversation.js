@@ -736,6 +736,9 @@ export function speakAnalysis(property, strategy, analysis) {
   return whyThisMatters(property, analysis);
 }
 
+/** What the prompt says once the descent lands — the next thing to try. */
+export const FIRST_HINT = 'Try: Find me money';
+
 /** One line the AI prompt can show when someone asks what they can say. */
 export const HELP_LINE = 'Try: find foreclosures under 250k in dekalb · show me the deal · '
   + 'why not wholesale · what if i pay 110 · compare · save it';

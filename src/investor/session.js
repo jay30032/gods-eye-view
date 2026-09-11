@@ -11,6 +11,7 @@ import { cameraHeightM, lodFromHeight } from './lod.js';
 import { readSavedProperties, removeSavedProperty, saveProperty } from './saved.js';
 import { createDriveDemo } from './driveDemo.js';
 import {
+  FIRST_HINT,
   HELP_LINE,
   applyCompare,
   applyFindMoney,
@@ -452,6 +453,74 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     visuals.setEnabled(readVisionPref(config.opportunityVisionDefault));
   };
 
+  /**
+   * Safety net, not a fix.
+   *
+   * Measured on Cesium 1.124: an illegal geometry value thrown while the entity
+   * layer updates does NOT raise `scene.renderError`. What actually happens is
+   * that CesiumWidget catches it in the render loop, shows its error panel, and
+   * sets `viewer.useDefaultRenderLoop = false` — rendering stops and the user is
+   * left on a frozen globe behind a modal. So a renderError listener alone would
+   * never fire for the bug this was written for; the loop flag is the real
+   * signal, and it has to be polled.
+   *
+   * Recovery is capped: if the offending value is still there, re-arming just
+   * reproduces the error, and burning CPU on that loop is worse than showing the
+   * dialog. Either way the smoke checks still fail on any of this — getting here
+   * means something handed Cesium an illegal value, which is a bug to go find.
+   */
+  const RENDER_RECOVERY_LIMIT = 3;
+  const RENDER_WATCHDOG_MS = 2000;
+  let renderRecoveries = 0;
+
+  const noteRenderFailure = (message, error) => {
+    console.error('[TerraSignal] render failure — recovering:', message, error?.stack || '');
+    const seen = globalThis.__terraSignalRenderErrors || [];
+    seen.push({ message, at: Date.now() });
+    globalThis.__terraSignalRenderErrors = seen;
+  };
+
+  const armRenderErrorRecovery = () => {
+    const scene = viewer?.scene;
+    // Genuine in-render errors do raise this; keep it even though the entity
+    // path does not come through here.
+    scene?.renderError?.addEventListener?.((_scene, error) => {
+      noteRenderFailure(String(error?.message || error), error);
+      try {
+        scene.rethrowRenderErrors = false;
+        governorRequestRender('investor-render-error');
+        scene.requestRender();
+      } catch (recoveryError) {
+        console.error('[TerraSignal] render recovery failed:', recoveryError);
+      }
+    });
+
+    const watchdog = globalThis.setInterval(() => {
+      if (!viewer || viewer.isDestroyed?.()) {
+        globalThis.clearInterval(watchdog);
+        return;
+      }
+      if (viewer.useDefaultRenderLoop !== false) return;
+      if (renderRecoveries >= RENDER_RECOVERY_LIMIT) {
+        globalThis.clearInterval(watchdog);
+        return;
+      }
+      renderRecoveries += 1;
+      const panel = document.querySelector('.cesium-widget-errorPanel');
+      const text = (panel?.textContent || 'render loop stopped').trim().slice(0, 300);
+      noteRenderFailure(text, null);
+      try {
+        panel?.remove();
+        viewer.useDefaultRenderLoop = true;
+        governorRequestRender('investor-render-recovery');
+        viewer.scene?.requestRender?.();
+      } catch (recoveryError) {
+        console.error('[TerraSignal] render recovery failed:', recoveryError);
+      }
+    }, RENDER_WATCHDOG_MS);
+  };
+  armRenderErrorRecovery();
+
   const startHunt = async () => {
     releaseInvestorBootHolds();
     setAiPrompt('Descending on Atlanta / Decatur…');
@@ -460,6 +529,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       kickRenderBurst(viewer, { times: 6, intervalMs: 200 });
     }
     await flyGlobeThenMarket(viewer, Cesium, market, { reduced: prefersReducedMotion() });
+    // The descent is over; stop telling the user it is still happening.
+    setAiPrompt(FIRST_HINT);
     enableVision();
     if (!tileset) {
       const painted = await ensureKeylessVisibleBasemap({
@@ -476,7 +547,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     visuals.startScan();
     setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
     const banner = document.getElementById('ts-globe-error');
-    if (!banner || banner.hidden) setAiPrompt(market.greeting);
+    if (!banner || banner.hidden) setAiPrompt(FIRST_HINT);
   };
 
   hunt = initFirstHunt({

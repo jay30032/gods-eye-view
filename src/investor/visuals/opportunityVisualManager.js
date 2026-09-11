@@ -7,20 +7,21 @@ import { primarySignal } from '../mock/schema.js';
 import { cameraHeightM, isNearMarket, lodFromHeight } from '../lod.js';
 import { clusterProperties } from './signalClusterer.js';
 import {
+  PULSE_BASE_RADIUS_M,
   lookForSignal,
   pulseAlpha,
   pulseHeight,
-  pulseScale,
+  pulseRadiusM,
   ringRotation,
 } from './propertyPulse.js';
+import { ellipseAxes, staticAxes } from './ellipseAxes.js';
 import { parcelGlowColor, parcelRadiusM } from './parcelGlow.js';
-import { GOLD, goldColumnHeight, goldHaloAlpha, isTopPick } from './goldHalo.js';
+import { GOLD, goldColumnHeight, goldHaloAlpha, goldHaloRadiusM, isTopPick } from './goldHalo.js';
 import { dealVisionCaption } from '../focus.js';
 import { createReducedMotionPolicy } from './reducedMotionPolicy.js';
 import { SCAN_DURATION_MS, scanAlpha, scanIsActive, scanProgress, scanRadiusM } from './scanSweep.js';
 
 const HOLD_ID = 'investor-opportunity';
-const BASE_RADIUS = 14;
 // Inside two weeks the sale is the headline, so the label goes gold with it.
 const AUCTION_LABEL_GOLD_DAYS = 14;
 
@@ -117,8 +118,7 @@ export function createOpportunityVisualManager({
           id: `ts-cluster-${cluster.id}`,
           position: Cesium.Cartesian3.fromDegrees(cluster.lng, cluster.lat, 40),
           ellipse: {
-            semiMajorAxis: 180 + cluster.count * 40,
-            semiMinorAxis: 180 + cluster.count * 40,
+            ...staticAxes(180 + cluster.count * 40),
             material: cesiumColor(Cesium, look.color, 0.28),
             outline: true,
             outlineColor: cesiumColor(Cesium, look.color, 0.7),
@@ -171,14 +171,12 @@ export function createOpportunityVisualManager({
         id: `ts-pulse-${property.id}`,
         position,
         ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => {
-            const scale = pulseScale(nowMs(), look, reduced());
-            return BASE_RADIUS * scale * (focused ? 1.25 : 1) * (1 + dealBoost * 0.2);
-          }, false),
-          semiMinorAxis: new Cesium.CallbackProperty(() => {
-            const scale = pulseScale(nowMs(), look, reduced());
-            return BASE_RADIUS * scale * (focused ? 1.25 : 1) * (1 + dealBoost * 0.2);
-          }, false),
+          // One radius, both axes, once per frame — see ellipseAxes.js.
+          ...ellipseAxes(Cesium, () => pulseRadiusM(nowMs(), look, reduced(), {
+            base: PULSE_BASE_RADIUS_M,
+            focused,
+            dealBoost,
+          })),
           material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
             return cesiumColor(Cesium, look.color, pulseAlpha(nowMs(), look, reduced()) * (focused ? 1 : 0.92));
           }, false)),
@@ -196,8 +194,7 @@ export function createOpportunityVisualManager({
         id: `ts-glow-${property.id}`,
         position,
         ellipse: {
-          semiMajorAxis: radius * 1.8,
-          semiMinorAxis: radius * 1.8,
+          ...staticAxes(radius * 1.8),
           material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
             return parcelGlowColor(Cesium, type, nowMs(), reduced());
           }, false)),
@@ -212,8 +209,7 @@ export function createOpportunityVisualManager({
         id: `ts-halo-${property.id}`,
         position,
         ellipse: {
-          semiMajorAxis: new Cesium.CallbackProperty(() => 26 + 6 * (reduced() ? 0 : goldHaloAlpha(nowMs(), reduced())), false),
-          semiMinorAxis: new Cesium.CallbackProperty(() => 26 + 6 * (reduced() ? 0 : goldHaloAlpha(nowMs(), reduced())), false),
+          ...ellipseAxes(Cesium, () => goldHaloRadiusM(nowMs(), reduced())),
           material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
             return new Cesium.Color(GOLD.r, GOLD.g, GOLD.b, goldHaloAlpha(nowMs(), reduced()) * 0.35);
           }, false)),
@@ -291,12 +287,7 @@ export function createOpportunityVisualManager({
       id: 'ts-scan-sweep',
       position: Cesium.Cartesian3.fromDegrees(market.lng, market.lat, 12),
       ellipse: {
-        semiMajorAxis: new Cesium.CallbackProperty(() => {
-          return scanRadiusM(scanProgress(scanStartedAt, nowMs(), reduced()));
-        }, false),
-        semiMinorAxis: new Cesium.CallbackProperty(() => {
-          return scanRadiusM(scanProgress(scanStartedAt, nowMs(), reduced()));
-        }, false),
+        ...ellipseAxes(Cesium, () => scanRadiusM(scanProgress(scanStartedAt, nowMs(), reduced()))),
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
           const alpha = scanAlpha(scanProgress(scanStartedAt, nowMs(), reduced()), nowMs(), reduced());
           return new Cesium.Color(0.93, 0.74, 0.22, alpha);
