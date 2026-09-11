@@ -113,6 +113,133 @@ too heavy for a render callback. `createMockPropertyProvider` enriches every row
 once at load and hands back the same frozen objects; visuals read
 `property.opportunityScore` and `property.composite` and never re-score.
 
+## Black globe — root cause
+
+For weeks the investor demo rendered its HUD over a black disc with only the
+atmosphere ring, then stopped responding. Several rounds of fixes went into the
+*rendering* path on the theory that the globe was not being asked to paint.
+That was the wrong half of the problem.
+
+**The actual cause was one line of DOM code.** `relocateVoiceControl()` in
+`src/investor/ui/chrome.js` observed `document.body` with
+`{childList: true, subtree: true}`, and its callback ended with an
+unconditional:
+
+```js
+if (label) label.textContent = 'MIC';
+```
+
+Assigning `textContent` **replaces the text node even when the string is
+identical**. That replacement is a childList mutation inside the observed
+subtree, so the observer re-triggered itself — forever.
+
+**Why it read as a hang rather than as burnt CPU.** MutationObserver callbacks
+are *microtasks*. A microtask that queues another microtask drains the
+checkpoint forever and never returns to the task queue. So
+`requestAnimationFrame` never fired (Cesium stopped rendering — the black disc
+is the last frame before the lock), CDP `Runtime.evaluate` never ran,
+`Profiler.stop` never returned, and `PerformanceObserver` never delivered. A
+headed probe recorded 14/14 blocked samples, zero long tasks, and exactly one
+network request to `tile.googleapis.com` — the root `tileset.json`. Child tiles
+are requested from Cesium's update loop, which never ran again.
+
+Three things that look like missing data in those logs are findings: zero long
+tasks, unreadable governor holds, and one tile request are all *starvation
+artifacts*, not evidence that rendering was configured wrong.
+
+**Why classic was unaffected.** `relocateVoiceControl` is only called from
+`startInvestorSession`. Classic never installs the observer, so it painted at
+~1.5s and stayed responsive throughout.
+
+**Why the watchdog could not fire.** `renderUntilGlobePaints` and the
+`#ts-globe-error` assertion in `ensureBasemap.js` are designed to catch exactly
+this symptom. They never ran: their `setTimeout`/`setInterval` callbacks are
+tasks, starved by the same microtask loop. The watchdog and the thing it
+watches shared a thread. A watchdog on the monitored thread can only catch
+slowness, never a starvation lock.
+
+**Why the unit suite was green.** `npm test` is Node-only and drives no WebGL,
+no render loop, and no DOM lifecycle. 2,897 assertions passed while the page
+hard-locked on load.
+
+### The fix
+
+Four independent defences, because one is a single edit away from being undone:
+
+1. the label write is conditional, so a settled label mutates nothing;
+2. an `applying` re-entrancy flag, so the callback cannot react to its own writes;
+3. observation is `childList` **without** subtree, scoped to the slot's parent
+   chain and the voice control's container — a text node deep inside the
+   control is not watched at all;
+4. the observer disconnects once the control is placed, and re-arms only if
+   that node is removed again.
+
+The 800 ms `relocateVoiceControl` retry in `session.js` is gone: it existed
+because the old observer could miss a late-built control, and the placement
+observer now handles arrival deterministically.
+
+`src/investor/ui/chrome.test.mjs` pins all of it without a browser — a fake node
+whose `textContent` setter counts writes, and a fake observer that re-delivers
+the mutations its own callback causes. One case asserts the harness itself still
+reproduces the original loop, because a harness that cannot reproduce the bug
+cannot prove the fix.
+
+### Smoke checks
+
+Unit tests cannot see this class of bug. Three headed checks can:
+
+```bash
+npm run dev                      # 4173
+npm run smoke:investor           # demo URL
+npm run smoke:classic            # classic chrome
+npm run smoke:investor-keyless   # spawns its own :4174 with the Google key
+                                 # blanked in env only — never touches .env
+```
+
+Each launches **real Chrome** (`channel: 'chrome'`, `headless: false` — this
+does not reproduce under SwiftShader) and exits non-zero unless: the canvas
+centre pixel goes non-black within 8s, the page answers a `page.evaluate()`
+within 1s at the 15s mark, and there are no console errors.
+
+| check | first paint | responds @15s | console errors | tiles |
+|---|---|---|---|---|
+| investor | 1,467 ms | 3 ms | 0 | 105 |
+| classic | 1,470 ms | 2 ms | 0 | 689 |
+| investor-keyless | 2,392 ms | 3 ms | 0 | 105 |
+
+Note that "keyless" only blanks the **direct Google key**. `CESIUM_ION_TOKEN`
+is still set, and ion serves Google 3D — which is why that run still loads 105
+tiles and never touches Esri. A genuinely credential-free run needs both
+blanked.
+
+### Probably-redundant black-globe workarounds
+
+These were added while the cause was believed to be in the rendering path. With
+the microtask loop gone, the globe paints at ~1.5s with the governor `idle` and
+**zero holds** in all three smoke runs. **Nothing below has been removed** —
+each needs its own verification against the keyless/no-ion path before deletion:
+
+- **`renderUntilGlobePaints`** (the 4s `investor-first-paint` hold, the 100 ms
+  `requestRender` interval, the 10 s timeout) — the globe now paints without any
+  hold being taken. Strongest candidate for removal.
+- **`INVESTOR_PAINT_HOLD` / `INVESTOR_BASEMAP_HOLD` / `INVESTOR_HUNT_HOLD`** —
+  all three smoke runs end with `holds=[]`, so none is doing load-bearing work
+  at steady state.
+- **The ellipsoid/`globe.show = true` force** in the investor bootstrap — with
+  Google 3D tiles present, classic hides the globe and renders the tileset;
+  investor forcing it visible was compensating for a scene that never painted.
+- **`ensureKeylessVisibleBasemap` retries and `probeEsriWorldImagery`** — Esri
+  was requested **zero** times in every run, including keyless, because ion
+  covers that path. The fallback may be dead code on any machine with an ion
+  token.
+- **`scheduleInvestorImageryWatchdog` / `assertInvestorGlobeReady`** — worth
+  keeping in *some* form, but as written they cannot fire during a starvation
+  lock, which is the failure they were written for.
+
+The honest test for each is the keyless smoke check with `CESIUM_ION_TOKEN`
+blanked as well — that is the only configuration where the Esri/OSM fallback is
+actually exercised.
+
 ## Georgia signal model
 
 The mock feed used to say `lis-pendens` and `court-docket`, which is how

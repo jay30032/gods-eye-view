@@ -426,8 +426,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
 
   bindUi(session);
   bindDemoScript(session);
+  // No retry timer: relocateVoiceControl arms a placement observer when the
+  // voice control does not exist yet, so a late build is handled on arrival.
   relocateVoiceControl();
-  globalThis.setTimeout(relocateVoiceControl, 800);
 
   viewer.camera.changed.addEventListener(() => {
     setLodChip(lodFromHeight(cameraHeightM(viewer)).id);

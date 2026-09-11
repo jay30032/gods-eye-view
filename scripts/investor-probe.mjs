@@ -1,309 +1,219 @@
 #!/usr/bin/env node
 /**
- * Headed diagnostic probe for the TerraSignal investor globe.
+ * Headed smoke check for the TerraSignal globe.
  *
- * Launches REAL Chrome (channel: 'chrome', headless: false) so the page gets a
- * real GPU — the keyless/black-globe symptoms do not reproduce under SwiftShader.
- * For 30 seconds it records tile traffic, whether Earth ever paints, main-thread
- * long tasks, and the render-governor holds, then prints a summary table.
+ * `npm test` is Node-only: it drives no WebGL, no render loop, and no DOM
+ * lifecycle. It stayed fully green while the investor page hard-locked on load
+ * and never painted Earth. This is the check that would have caught that.
  *
- * Read-only: it calls the diagnostics already exposed on window.__godsEyeView
- * and imports nothing into the page. No src/ file is modified.
+ * Launches REAL Chrome (channel: 'chrome', headless: false) — the symptoms do
+ * not reproduce under SwiftShader — and asserts three things:
  *
- *   node scripts/investor-probe.mjs <url> <logPath> <label>
+ *   1. the canvas centre pixel goes non-black within PAINT_DEADLINE_MS;
+ *   2. the page answers a page.evaluate() within RESPOND_BUDGET_MS at the
+ *      RESPOND_AT_MS mark (a microtask loop starves evaluate, which is exactly
+ *      how the hard-lock presented);
+ *   3. no console errors or page errors.
  *
- * Design note — a pegged renderer cannot answer page.evaluate(). Every in-page
- * sample is raced against a short timer and recorded as BLOCKED on timeout;
- * that blocked/answered pattern is itself the signal we are hunting. Network
- * events arrive over CDP from the browser process, so they keep flowing even
- * while the main thread is wedged.
+ * Exit code 0 = pass, 1 = fail. Usage:
+ *
+ *   node scripts/investor-probe.mjs --url <url> [--label x] [--log path]
+ *   node scripts/investor-probe.mjs --spawn-keyless   # own server, no Google key
  */
 import { chromium } from 'playwright';
+import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 
-const URL_ARG = process.argv[2] || 'http://localhost:4173/?demo=1&welcome=1';
-const LOG_PATH = process.argv[3] || '/tmp/investor-probe.log';
-const LABEL = process.argv[4] || 'investor';
-
-const DURATION_MS = 30_000;
-const PIXEL_EVERY_MS = 2_000;
-const STATE_EVERY_MS = 5_000;
-const EVAL_TIMEOUT_MS = 1_500;
-const WINDOW_MS = 5_000;
+const PAINT_DEADLINE_MS = 8_000;
+const RESPOND_AT_MS = 15_000;
+const RESPOND_BUDGET_MS = 1_000;
+const RUN_MS = 18_000;
+const PIXEL_EVERY_MS = 500;
+const KEYLESS_PORT = 4174;
 
 const TILE_HOSTS = ['tile.googleapis.com', 'assets.ion.cesium.com', 'server.arcgisonline.com'];
 
+function arg(name, fallback = null) {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')
+    ? process.argv[i + 1]
+    : fallback;
+}
+const HAS = (name) => process.argv.includes(`--${name}`);
+
+const SPAWN_KEYLESS = HAS('spawn-keyless');
+const URL_ARG = arg('url', SPAWN_KEYLESS
+  ? `http://localhost:${KEYLESS_PORT}/?demo=1&welcome=1`
+  : 'http://localhost:4173/?demo=1&welcome=1');
+const LABEL = arg('label', SPAWN_KEYLESS ? 'investor-keyless' : 'investor');
+const LOG_PATH = arg('log', null);
+
 const log = [];
-function record(line) {
-  const stamped = `[${String(Date.now() - started).padStart(6)}ms] ${line}`;
-  log.push(stamped);
-}
 let started = Date.now();
+const record = (line) => log.push(`[${String(Date.now() - started).padStart(6)}ms] ${line}`);
 
-/** page.evaluate, but a wedged main thread resolves as BLOCKED instead of hanging. */
-async function safeEval(page, fn, timeoutMs = EVAL_TIMEOUT_MS) {
-  let timer;
-  const timeout = new Promise((resolve) => {
-    timer = setTimeout(() => resolve({ __blocked: true }), timeoutMs);
-  });
-  try {
-    return await Promise.race([page.evaluate(fn), timeout]);
-  } catch (error) {
-    return { __error: String(error?.message || error).slice(0, 160) };
-  } finally {
-    clearTimeout(timer);
+async function waitForServer(url, timeoutMs = 40_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) return true;
+    } catch { /* not up yet */ }
+    await new Promise((r) => setTimeout(r, 400));
   }
+  return false;
 }
 
-function host(url) {
-  try { return new global.URL(url).host; } catch { return '?'; }
+/**
+ * A second dev server with the Google key blanked in the environment only.
+ * Vite's config prefers process.env over .env (vite.config.js:8057), so this
+ * never reads, writes, or needs .env changed.
+ */
+async function startKeylessServer() {
+  const child = spawn('npm', ['run', 'dev'], {
+    cwd: process.cwd(),
+    env: { ...process.env, GOOGLE_MAPS_API_KEY: '', PORT: String(KEYLESS_PORT) },
+    stdio: 'ignore',
+    detached: false,
+  });
+  const up = await waitForServer(`http://localhost:${KEYLESS_PORT}/`);
+  if (!up) {
+    child.kill('SIGTERM');
+    throw new Error(`keyless dev server never came up on :${KEYLESS_PORT}`);
+  }
+  return child;
 }
 
 async function main() {
+  let keyless = null;
+  if (SPAWN_KEYLESS) {
+    process.stdout.write(`spawning keyless dev server on :${KEYLESS_PORT} (GOOGLE_MAPS_API_KEY blanked in env only)...\n`);
+    keyless = await startKeylessServer();
+  }
+
   const browser = await chromium.launch({ channel: 'chrome', headless: false });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
 
-  // Installed before any page script so long tasks are counted from the very
-  // first frame, and survive in-page even while we cannot read them out.
-  await page.addInitScript(() => {
-    window.__probe = { longtasks: [], drained: 0 };
+  const tiles = new Map(TILE_HOSTS.map((h) => [h, { n: 0, bytes: 0, statuses: new Map() }]));
+  const errors = [];
+
+  page.on('response', (response) => {
     try {
-      new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          window.__probe.longtasks.push({ start: Math.round(entry.startTime), dur: Math.round(entry.duration) });
-        }
-      }).observe({ entryTypes: ['longtask'] });
-    } catch {
-      window.__probe.unsupported = true;
-    }
-  });
-
-  const requests = [];
-  const consoleMsgs = [];
-
-  page.on('response', async (response) => {
-    const h = host(response.url());
-    if (!TILE_HOSTS.includes(h)) return;
-    let bytes = Number(response.headers()['content-length'] || 0);
-    if (!bytes) {
-      try { bytes = (await response.body()).length; } catch { bytes = -1; }
-    }
-    const row = { t: Date.now() - started, host: h, status: response.status(), bytes, url: response.url() };
-    requests.push(row);
-    record(`NET ${h} ${row.status} ${row.bytes}B ${response.url().slice(0, 120)}`);
-  });
-
-  page.on('requestfailed', (request) => {
-    const h = host(request.url());
-    if (!TILE_HOSTS.includes(h)) return;
-    const row = { t: Date.now() - started, host: h, status: 'FAILED', bytes: 0, failure: request.failure()?.errorText };
-    requests.push(row);
-    record(`NET ${h} FAILED ${row.failure} ${request.url().slice(0, 120)}`);
+      const h = new URL(response.url()).host;
+      const row = tiles.get(h);
+      if (!row) return;
+      row.n += 1;
+      row.bytes += Number(response.headers()['content-length'] || 0);
+      row.statuses.set(response.status(), (row.statuses.get(response.status()) || 0) + 1);
+    } catch { /* opaque url */ }
   });
 
   page.on('console', (msg) => {
-    const type = msg.type();
-    if (type !== 'error' && type !== 'warning') return;
-    const row = { t: Date.now() - started, type, text: msg.text().slice(0, 400) };
-    consoleMsgs.push(row);
-    record(`CONSOLE ${type.toUpperCase()} ${row.text}`);
+    if (msg.type() !== 'error') return;
+    const text = msg.text().slice(0, 300);
+    errors.push({ t: Date.now() - started, kind: 'console', text });
+    record(`CONSOLE ERROR ${text}`);
   });
-
   page.on('pageerror', (error) => {
-    const row = { t: Date.now() - started, type: 'pageerror', text: String(error?.message || error).slice(0, 400) };
-    consoleMsgs.push(row);
-    record(`PAGEERROR ${row.text}`);
+    const text = String(error?.message || error).slice(0, 300);
+    errors.push({ t: Date.now() - started, kind: 'pageerror', text });
+    record(`PAGEERROR ${text}`);
   });
 
   record(`=== ${LABEL} :: ${URL_ARG} ===`);
   started = Date.now();
-  try {
-    await page.goto(URL_ARG, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    record('navigation: domcontentloaded');
-  } catch (error) {
-    record(`navigation FAILED: ${error.message}`);
-  }
+  await page.goto(URL_ARG, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  record('navigation: domcontentloaded');
 
-  const pixels = [];
-  const states = [];
+  const readCentrePixel = () => page.evaluate(() => {
+    const viewer = window.__godsEyeView?.viewer;
+    const canvas = viewer?.scene?.canvas || document.querySelector('#cesiumContainer canvas');
+    const gl = viewer?.scene?.context?._gl
+      || canvas?.getContext?.('webgl2') || canvas?.getContext?.('webgl');
+    if (!gl || !canvas || canvas.width < 2) return null;
+    const px = new Uint8Array(4);
+    try {
+      gl.readPixels(canvas.width >> 1, canvas.height >> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    } catch { return null; }
+    return [px[0], px[1], px[2], px[3]];
+  });
+
+  let firstPaintMs = null;
+  const painted = (rgba) => Boolean(rgba && rgba[3] >= 8 && (rgba[0] + rgba[1] + rgba[2]) > 24);
 
   const pixelTimer = setInterval(async () => {
-    const sample = await safeEval(page, () => {
-      const viewer = window.__godsEyeView?.viewer;
-      const canvas = viewer?.scene?.canvas || document.querySelector('#cesiumContainer canvas');
-      if (!canvas) return { ready: false };
-      const gl = viewer?.scene?.context?._gl
-        || canvas.getContext('webgl2') || canvas.getContext('webgl');
-      if (!gl) return { ready: false };
-      const w = canvas.width; const h = canvas.height;
-      if (w < 2 || h < 2) return { ready: false, w, h };
-      const px = new Uint8Array(4);
-      try {
-        gl.readPixels(Math.floor(w / 2), Math.floor(h / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      } catch (e) {
-        return { ready: false, err: String(e).slice(0, 80) };
-      }
-      return { ready: true, rgba: [px[0], px[1], px[2], px[3]], w, h };
-    });
+    if (firstPaintMs != null) return;
+    let timer;
+    const guard = new Promise((r) => { timer = setTimeout(() => r('blocked'), 900); });
+    const rgba = await Promise.race([readCentrePixel().catch(() => null), guard])
+      .finally(() => clearTimeout(timer));
     const t = Date.now() - started;
-    const row = { t, ...sample };
-    // Same predicate the product uses to decide "the globe painted".
-    row.nonBlack = Boolean(sample.rgba && sample.rgba[3] >= 8
-      && (sample.rgba[0] + sample.rgba[1] + sample.rgba[2]) > 24);
-    pixels.push(row);
-    record(`PIXEL ${sample.__blocked ? 'BLOCKED (main thread busy)'
-      : sample.rgba ? `rgba(${sample.rgba.join(',')}) nonBlack=${row.nonBlack}`
-        : JSON.stringify(sample)}`);
+    if (rgba === 'blocked') { record(`PIXEL ${t}ms BLOCKED`); return; }
+    if (painted(rgba)) {
+      firstPaintMs = t;
+      record(`PIXEL ${t}ms PAINTED rgba(${rgba.join(',')})`);
+    }
   }, PIXEL_EVERY_MS);
 
-  const stateTimer = setInterval(async () => {
-    const sample = await safeEval(page, () => {
-      const gev = window.__godsEyeView;
-      const viewer = gev?.viewer;
-      const scene = viewer?.scene;
-      const drained = window.__probe ? window.__probe.longtasks.splice(0) : [];
-      let diagnostics = null;
-      try { diagnostics = gev?.getRenderGovernorDiagnostics?.() || null; } catch { /* not installed */ }
-      const errEl = document.getElementById('ts-globe-error');
-      return {
-        hasGev: Boolean(gev),
-        hasInvestor: Boolean(window.__terraSignal),
-        requestRenderMode: scene?.requestRenderMode ?? null,
-        globeShow: scene?.globe?.show ?? null,
-        tilesLoaded: scene?.globe?.tilesLoaded ?? null,
-        imageryLayers: viewer?.imageryLayers?.length ?? null,
-        primitives: scene?.primitives?.length ?? null,
-        hasTileset: Boolean(gev?.tileset),
-        targetFrameRate: viewer?.targetFrameRate ?? null,
-        governor: diagnostics,
-        globeError: errEl ? !errEl.hidden : null,
-        longtasks: drained,
-      };
-    });
-    const t = Date.now() - started;
-    states.push({ t, ...sample });
-    if (sample.__blocked) {
-      record('STATE BLOCKED (main thread busy)');
-    } else {
-      record(`STATE rrm=${sample.requestRenderMode} globeShow=${sample.globeShow} `
-        + `tilesLoaded=${sample.tilesLoaded} layers=${sample.imageryLayers} `
-        + `primitives=${sample.primitives} tileset=${sample.hasTileset} `
-        + `fps=${sample.targetFrameRate} mode=${sample.governor?.mode} `
-        + `holds=[${(sample.governor?.holds || []).join(',')}] globeError=${sample.globeError} `
-        + `longtasks=${sample.longtasks?.length ?? 0}`);
-    }
-  }, STATE_EVERY_MS);
+  // Responsiveness is measured at a fixed mark, not opportunistically: the
+  // question is whether the thread is answering once the page should be idle.
+  await new Promise((r) => setTimeout(r, Math.max(0, RESPOND_AT_MS - (Date.now() - started))));
+  const askedAt = Date.now();
+  let respondTimer;
+  const respondGuard = new Promise((r) => {
+    respondTimer = setTimeout(() => r({ blocked: true }), RESPOND_BUDGET_MS);
+  });
+  const state = await Promise.race([
+    page.evaluate(() => ({
+      investor: Boolean(window.__terraSignal),
+      primitives: window.__godsEyeView?.viewer?.scene?.primitives?.length ?? null,
+      holds: window.__godsEyeView?.getRenderGovernorDiagnostics?.()?.holds ?? null,
+      mode: window.__godsEyeView?.getRenderGovernorDiagnostics?.()?.mode ?? null,
+    })).catch((e) => ({ error: String(e.message).slice(0, 120) })),
+    respondGuard,
+  ]).finally(() => clearTimeout(respondTimer));
+  const respondMs = Date.now() - askedAt;
+  record(`RESPOND at ${RESPOND_AT_MS}ms: ${state.blocked ? 'BLOCKED' : `${respondMs}ms ${JSON.stringify(state)}`}`);
 
-  await new Promise((resolve) => setTimeout(resolve, DURATION_MS));
+  await new Promise((r) => setTimeout(r, Math.max(0, RUN_MS - (Date.now() - started))));
   clearInterval(pixelTimer);
-  clearInterval(stateTimer);
-
-  // One last drain — anything the observer buffered while we could not read it.
-  const tail = await safeEval(page, () => ({
-    longtasks: window.__probe ? window.__probe.longtasks.splice(0) : [],
-    responsive: true,
-  }), 4000);
-  if (!tail.__blocked && tail.longtasks?.length) {
-    states.push({ t: DURATION_MS, longtasks: tail.longtasks, tail: true });
-  }
-  record(`FINAL responsive=${!tail.__blocked}`);
 
   await browser.close();
-  writeFileSync(LOG_PATH, log.join('\n') + '\n');
+  if (keyless) { keyless.kill('SIGTERM'); await new Promise((r) => setTimeout(r, 500)); }
 
-  summarize({ requests, pixels, states, consoleMsgs, tail });
-}
+  // ---- verdict ----
+  const paintOk = firstPaintMs != null && firstPaintMs <= PAINT_DEADLINE_MS;
+  const respondOk = !state.blocked && !state.error;
+  const errorsOk = errors.length === 0;
+  const pass = paintOk && respondOk && errorsOk;
 
-function summarize({ requests, pixels, states, consoleMsgs, tail }) {
-  const out = [];
-  const p = (s) => { out.push(s); };
+  const tileSummary = TILE_HOSTS.map((h) => {
+    const row = tiles.get(h);
+    const statuses = [...row.statuses.entries()].map(([code, n]) => `${code}x${n}`).join(' ');
+    return `${h}=${row.n}${row.n ? ` (${statuses})` : ''}`;
+  }).join('  ');
 
-  p(`\n${'='.repeat(78)}`);
-  p(`SUMMARY :: ${LABEL} :: ${URL_ARG}`);
-  p('='.repeat(78));
-
-  p('\n-- TILE REQUESTS ------------------------------------------------------');
-  if (!requests.length) {
-    p('  (none — no request to any tile host in 30s)');
-  } else {
-    for (const h of TILE_HOSTS) {
-      const rows = requests.filter((r) => r.host === h);
-      if (!rows.length) { p(`  ${h.padEnd(26)} 0 requests`); continue; }
-      const byStatus = {};
-      let bytes = 0;
-      for (const r of rows) {
-        byStatus[r.status] = (byStatus[r.status] || 0) + 1;
-        if (r.bytes > 0) bytes += r.bytes;
-      }
-      const statuses = Object.entries(byStatus).map(([s, n]) => `${s}×${n}`).join(' ');
-      p(`  ${h.padEnd(26)} ${String(rows.length).padStart(4)} req  ${statuses.padEnd(22)} ${(bytes / 1024).toFixed(0)} KB  first@${rows[0].t}ms`);
-    }
-  }
-
-  p('\n-- CENTER PIXEL (did Earth paint?) ------------------------------------');
-  const firstPaint = pixels.find((r) => r.nonBlack);
-  const blockedPixels = pixels.filter((r) => r.__blocked).length;
-  p(`  samples=${pixels.length}  blocked=${blockedPixels}  `
-    + `firstNonBlack=${firstPaint ? `${firstPaint.t}ms rgba(${firstPaint.rgba.join(',')})` : 'NEVER'}`);
-  for (const row of pixels) {
-    p(`    ${String(row.t).padStart(6)}ms  ${row.__blocked ? 'BLOCKED'
-      : row.rgba ? `rgba(${row.rgba.join(',').padEnd(15)}) ${row.nonBlack ? 'PAINTED' : 'black'}`
-        : JSON.stringify(row).slice(0, 60)}`);
-  }
-
-  p('\n-- LONG TASKS (main-thread blocking, per 5s window) --------------------');
-  const all = states.flatMap((s) => s.longtasks || []);
-  const windows = new Map();
-  for (const task of all) {
-    const w = Math.floor(task.start / WINDOW_MS) * WINDOW_MS;
-    const cur = windows.get(w) || { count: 0, ms: 0, max: 0 };
-    cur.count += 1; cur.ms += task.dur; cur.max = Math.max(cur.max, task.dur);
-    windows.set(w, cur);
-  }
-  if (!windows.size) {
-    p('  (no long tasks recorded — or the observer could never be drained)');
-  } else {
-    p('  window        count   total ms   longest   % of window');
-    for (const [w, v] of [...windows.entries()].sort((a, b) => a[0] - b[0])) {
-      p(`  ${String(w / 1000).padStart(2)}-${String(w / 1000 + 5).padStart(2)}s     `
-        + `${String(v.count).padStart(5)}   ${String(v.ms).padStart(8)}   ${String(v.max).padStart(7)}   `
-        + `${((v.ms / WINDOW_MS) * 100).toFixed(0)}%`);
-    }
-  }
-
-  p('\n-- SCENE / GOVERNOR STATE ---------------------------------------------');
-  p('  t(ms)  rrm    globe  tiles  layers prim  tileset fps  mode        holds');
-  for (const s of states) {
-    if (s.tail) continue;
-    if (s.__blocked) { p(`  ${String(s.t).padStart(5)}  BLOCKED (main thread busy)`); continue; }
-    p(`  ${String(s.t).padStart(5)}  ${String(s.requestRenderMode).padEnd(6)} `
-      + `${String(s.globeShow).padEnd(6)} ${String(s.tilesLoaded).padEnd(6)} `
-      + `${String(s.imageryLayers).padEnd(6)} ${String(s.primitives).padEnd(5)} `
-      + `${String(s.hasTileset).padEnd(7)} ${String(s.targetFrameRate).padEnd(4)} `
-      + `${String(s.governor?.mode).padEnd(11)} [${(s.governor?.holds || []).join(', ')}]`);
-  }
-
-  p('\n-- CONSOLE ERRORS / WARNINGS ------------------------------------------');
-  if (!consoleMsgs.length) p('  (none)');
-  const seen = new Map();
-  for (const m of consoleMsgs) {
-    const key = m.text.slice(0, 120);
-    if (!seen.has(key)) seen.set(key, { ...m, n: 0 });
-    seen.get(key).n += 1;
-  }
-  for (const m of [...seen.values()].slice(0, 25)) {
-    p(`  [${m.type}] ×${m.n} @${m.t}ms  ${m.text.slice(0, 150)}`);
-  }
-
-  p(`\n  page responsive at 30s: ${!tail.__blocked}`);
-  p(`  full log: ${LOG_PATH}`);
-  p('='.repeat(78));
-
+  const out = [
+    '',
+    '='.repeat(74),
+    `SMOKE ${pass ? 'PASS' : 'FAIL'} :: ${LABEL} :: ${URL_ARG}`,
+    '='.repeat(74),
+    `  ${paintOk ? 'PASS' : 'FAIL'}  first paint        ${firstPaintMs == null ? 'NEVER' : `${firstPaintMs}ms`} (deadline ${PAINT_DEADLINE_MS}ms)`,
+    `  ${respondOk ? 'PASS' : 'FAIL'}  responds @${RESPOND_AT_MS / 1000}s      ${state.blocked ? `no reply in ${RESPOND_BUDGET_MS}ms` : `${respondMs}ms`} (budget ${RESPOND_BUDGET_MS}ms)`,
+    `  ${errorsOk ? 'PASS' : 'FAIL'}  console errors     ${errors.length}`,
+    `        tiles              ${tileSummary}`,
+    `        governor           mode=${state.mode ?? '?'} holds=[${(state.holds || []).join(', ')}]`,
+    '='.repeat(74),
+  ];
+  for (const e of errors.slice(0, 8)) out.push(`  [${e.kind}] @${e.t}ms ${e.text}`);
   console.log(out.join('\n'));
+
+  if (LOG_PATH) writeFileSync(LOG_PATH, log.join('\n') + '\n');
+  process.exit(pass ? 0 : 1);
 }
 
 main().catch((error) => {
-  console.error('probe failed:', error);
+  console.error(`SMOKE FAIL :: ${LABEL} :: ${error.message}`);
   process.exit(1);
 });

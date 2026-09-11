@@ -143,26 +143,127 @@ export function setNavActive(name) {
   }
 }
 
-let voiceObserver = null;
+/**
+ * Moving the GEV voice control into the investor bottom nav.
+ *
+ * This used to observe `document.body` with `{childList, subtree}` and, on
+ * every callback, assign `label.textContent = 'MIC'` unconditionally.
+ * Assigning textContent replaces the text node even when the string is
+ * identical, and that replacement is itself a childList mutation inside the
+ * observed subtree — so the observer re-triggered itself forever. Observer
+ * callbacks are microtasks, so the checkpoint never drained: no
+ * requestAnimationFrame, no Cesium render, no response to anything. The page
+ * hard-locked with a black globe.
+ *
+ * Four independent defences now, because one is a single edit away from being
+ * undone:
+ *   1. the label write is conditional, so a settled label mutates nothing;
+ *   2. `applying` guards re-entrancy, so the callback cannot react to its own
+ *      writes even if something in here starts mutating again;
+ *   3. observation is `childList` WITHOUT subtree, on the slot's parent chain
+ *      and the voice control's container — a text node deep inside the control
+ *      is not watched at all;
+ *   4. the observer disconnects once the control is placed, and re-arms only
+ *      if that node is removed again.
+ */
+let placementObserver = null;
+let removalObserver = null;
+let placedVoiceNode = null;
+let applying = false;
 
+function disconnectVoiceObservers() {
+  placementObserver?.disconnect?.();
+  placementObserver = null;
+  removalObserver?.disconnect?.();
+  removalObserver = null;
+}
+
+/** The slot's ancestors plus wherever the voice control currently lives. */
+function voiceWatchTargets(slot) {
+  const targets = new Set();
+  for (let node = slot; node; node = node.parentElement) targets.add(node);
+  const voice = document.getElementById('gev-voice-control');
+  if (voice?.parentElement) targets.add(voice.parentElement);
+  // gevRealtime appends the control to #command-dock or straight to body.
+  const dock = document.getElementById('command-dock');
+  if (dock) targets.add(dock);
+  if (document.body) targets.add(document.body);
+  return [...targets].filter(Boolean);
+}
+
+/**
+ * @returns {boolean} true once the control is in the slot and the label reads
+ *   MIC — i.e. there is nothing left for an observer to do.
+ */
 function placeVoiceInSlot(slot) {
   const voice = document.getElementById('gev-voice-control');
+  if (!voice) return false;
   const fallback = document.getElementById('ts-ai-button');
-  if (slot && voice && voice.parentElement !== slot) {
+  if (slot && voice.parentElement !== slot) {
     slot.appendChild(voice);
     voice.classList.add('ts-voice');
   }
-  if (voice && fallback) fallback.hidden = true;
-  const label = voice?.querySelector('.gev-mic-label');
-  if (label) label.textContent = 'MIC';
-  return Boolean(voice);
+  if (fallback && !fallback.hidden) fallback.hidden = true;
+  const label = voice.querySelector('.gev-mic-label');
+  // The conditional is load-bearing: an unconditional assignment replaces the
+  // text node and re-triggers any observer watching this subtree.
+  if (label && label.textContent !== 'MIC') label.textContent = 'MIC';
+  return voice.parentElement === slot && (!label || label.textContent === 'MIC');
+}
+
+/** Watch only for this exact node leaving the slot, then start over. */
+function armRemovalWatch(slot) {
+  if (typeof MutationObserver === 'undefined' || !slot) return;
+  removalObserver = new MutationObserver((records) => {
+    if (applying) return;
+    for (const record of records) {
+      for (const node of record.removedNodes || []) {
+        if (node !== placedVoiceNode) continue;
+        disconnectVoiceObservers();
+        placedVoiceNode = null;
+        relocateVoiceControl();
+        return;
+      }
+    }
+  });
+  removalObserver.observe(slot, { childList: true });
+}
+
+function settleVoiceControl(slot) {
+  if (applying) return false;
+  applying = true;
+  try {
+    const settled = placeVoiceInSlot(slot);
+    if (settled) {
+      placedVoiceNode = document.getElementById('gev-voice-control');
+      disconnectVoiceObservers();
+      armRemovalWatch(slot);
+    }
+    return settled;
+  } finally {
+    applying = false;
+  }
 }
 
 export function relocateVoiceControl() {
   const slot = document.getElementById('ts-ai-slot');
   if (!slot) return;
-  placeVoiceInSlot(slot);
-  if (voiceObserver || typeof MutationObserver === 'undefined') return;
-  voiceObserver = new MutationObserver(() => placeVoiceInSlot(slot));
-  voiceObserver.observe(document.body, { childList: true, subtree: true });
+  if (settleVoiceControl(slot)) return;
+  // The control has not been built yet. Watch the few containers it can appear
+  // in — childList only, no subtree — until it does.
+  if (placementObserver || typeof MutationObserver === 'undefined') return;
+  placementObserver = new MutationObserver(() => {
+    if (applying) return;
+    settleVoiceControl(slot);
+  });
+  for (const target of voiceWatchTargets(slot)) {
+    placementObserver.observe(target, { childList: true });
+  }
+}
+
+/** Test seam: module-level observer state would otherwise leak between cases. */
+export function _resetVoiceRelocationForTest() {
+  disconnectVoiceObservers();
+  placedVoiceNode = null;
+  applying = false;
 }

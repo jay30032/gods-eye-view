@@ -1,6 +1,8 @@
 # Investor globe hard-lock — diagnosis (2026-09-11)
 
-**Status: diagnosed and proven. Fix NOT applied — `src/` is untouched.**
+**Status: FIXED.** See "Black globe — root cause" in `../PHASE_1.md` for the
+fix, the four defences, and the redundancy list. The logs here are the original
+diagnosis, kept as the record of how it was found.
 
 ## Symptom
 
@@ -79,12 +81,18 @@ starved thread.
 
 ## Scripts
 
-- `scripts/investor-probe.mjs <url> <log> <label>` — 30s headed probe: tile
-  traffic, centre pixel, long tasks, governor holds, console.
-- `scripts/investor-break-in.mjs` — `Debugger.pause` into a wedged thread.
-- `scripts/investor-mutation-trace.mjs` — reads the MutationRecords at the pause.
-- `scripts/investor-cpu-profile.mjs` — locked-vs-starved test + CPU profile.
-- `scripts/investor-fix-experiment.mjs [on|off]` — A/B the fix in flight.
+`scripts/investor-probe.mjs` is now a pass/fail smoke check —
+`npm run smoke:investor`, `smoke:classic`, `smoke:investor-keyless`.
 
-All require real Chrome (`channel: 'chrome'`, `headless: false`) — this does not
-reproduce headless. Playwright is in `node_modules` but not in `package.json`.
+The four one-off diagnostic scripts (`investor-break-in`,
+`investor-mutation-trace`, `investor-cpu-profile`, `investor-fix-experiment`)
+were deleted once the cause was found. If this ever recurs, the two techniques
+worth rebuilding are: **`Debugger.pause`** (a V8 interrupt honoured at loop
+back-edges — the only CDP call that can enter a starved thread, since
+`Runtime.evaluate` and `Profiler.stop` both queue behind it), and
+**`Debugger.evaluateOnCallFrame`** at that pause to read the live
+MutationRecords, which is what named `SPAN.gev-mic-label`.
+
+Real Chrome is required (`channel: 'chrome'`, `headless: false`) — this does not
+reproduce headless. Playwright is in `node_modules` but still not declared in
+`package.json`.
