@@ -94,7 +94,7 @@ test('STAGING is a nadir hold high enough to stream the whole metro', () => {
 test('CRUISE frames the dense side of the board', () => {
   const shot = cruiseShot();
   assert.equal(shot.heightM, 1_800);
-  assert.equal(shot.pitchDeg, -35);
+  assert.equal(shot.pitchDeg, -25);
   assert.equal(shot.headingDeg, 264);
 
   // The aim point, not the camera, is what sits over the cluster.
@@ -104,7 +104,7 @@ test('CRUISE frames the dense side of the board', () => {
   };
   assert.ok(metresBetween(CRUISE.aim, centroid) < 2_500, 'aim should sit near the property centroid');
   // And the camera is set back behind it, not on top of it.
-  assert.ok(metresBetween(CRUISE.aim, shot) > 2_000, 'camera must be set back at -35');
+  assert.ok(metresBetween(CRUISE.aim, shot) > 2_000, 'camera must be set back at -25');
 });
 
 test('REVEAL fits the shortlist with padding and respects its altitude clamp', () => {
@@ -257,4 +257,15 @@ test('the hero orbit is capped at one revolution', () => {
   assert.equal(HERO.orbitMaxDeg, 360);
   const seconds = HERO.orbitMaxDeg / HERO.orbitDegPerSec;
   assert.equal(seconds, 180, 'one revolution at 2 deg/s is three minutes');
+});
+
+test('CRUISE actually has sky in frame, so the skyline has a horizon', () => {
+  // The top of frame is (half the vertical FOV) above the view centre. With the
+  // centre at CRUISE.pitchDeg, the top must clear horizontal or there is no sky
+  // in shot — which is exactly why -35 could not show a skyline.
+  const halfFovDeg = 30;
+  const topOfFrameDeg = CRUISE.pitchDeg + halfFovDeg;
+  assert.ok(topOfFrameDeg > 0, `top of frame is ${topOfFrameDeg} deg — still below horizontal`);
+  // ...but not so shallow that the board falls out of the bottom of the frame.
+  assert.ok(CRUISE.pitchDeg <= -20, 'too shallow and most pulses leave the screen');
 });

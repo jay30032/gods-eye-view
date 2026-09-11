@@ -39,8 +39,15 @@ import {
 
 const FLIGHT_HOLD = 'investor-camera-flight';
 const ORBIT_HOLD = 'investor-camera-orbit';
-/** Give up waiting on tiles rather than stalling the demo behind a slow network. */
+/**
+ * Tile gates. Waiting for geometry before the two flights people actually watch
+ * trades a short, invisible pause at a stationary camera for tiles popping in
+ * while it moves. Both are hard-capped so a slow network delays the demo rather
+ * than stalling it.
+ */
 const TILE_WAIT_TIMEOUT_MS = 4_000;
+const STAGING_GATE_MS = 2_500;
+const HERO_GATE_MS = 1_500;
 
 export function createCameraDirector({
   viewer,
@@ -57,6 +64,8 @@ export function createCameraDirector({
   let orbitRemove = null;
   let orbitInputRemove = null;
   let destroyed = false;
+  let gateSeq = 0;
+  let heroGated = false;
   const flightListeners = new Set();
 
   /**
@@ -177,30 +186,72 @@ export function createCameraDirector({
   }
 
   /**
-   * Wait for the scene to stop streaming tiles, bounded. This is what STAGING
-   * is for: hold at 40 km until the metro is loaded, so the descent does not
-   * fly through popping tiles.
+   * Wait for the scene to stop streaming, bounded.
+   *
+   * Prefers the tileset's own `allTilesLoaded` event — that is the signal
+   * Cesium raises when the current view is fully resolved — and falls back to
+   * polling `tilesLoaded` on postRender for the keyless globe, which has no
+   * such event. Always resolves: the cap is what keeps a slow network from
+   * turning a gate into a stall.
+   *
+   * @returns {Promise<boolean>} true if tiles settled, false if the cap won
    */
+  /** Is the current view fully resolved right now? */
+  function tilesSettled() {
+    const scene = viewer?.scene;
+    if (!scene) return true;
+    const tileset = globalThis.__godsEyeView?.tileset || null;
+    const globeReady = scene.globe ? scene.globe.tilesLoaded !== false : true;
+    const tilesetReady = tileset ? tileset.tilesLoaded !== false : true;
+    return globeReady && tilesetReady;
+  }
+
   function awaitTiles(timeoutMs = TILE_WAIT_TIMEOUT_MS) {
     const scene = viewer?.scene;
     if (!scene) return Promise.resolve(false);
+    const tileset = globalThis.__godsEyeView?.tileset || null;
+    const settled = () => tilesSettled();
+    if (settled()) return Promise.resolve(true);
+
     return new Promise((resolve) => {
       let done = false;
+      let removeRender = null;
+      let removeTileset = null;
       const finish = (loaded) => {
         if (done) return;
         done = true;
         timers.clearTimeout?.(timer);
-        try { remove?.(); } catch { /* already gone */ }
+        try { removeRender?.(); } catch { /* already gone */ }
+        try { removeTileset?.(); } catch { /* already gone */ }
         resolve(loaded);
       };
       const timer = timers.setTimeout(() => finish(false), timeoutMs);
-      const remove = scene.postRender?.addEventListener?.(() => {
-        const globeReady = scene.globe ? scene.globe.tilesLoaded !== false : true;
-        const tileset = globalThis.__godsEyeView?.tileset;
-        const tilesetReady = tileset ? tileset.tilesLoaded !== false : true;
-        if (globeReady && tilesetReady) finish(true);
-      });
-      if (!remove) finish(false);
+
+      removeTileset = tileset?.allTilesLoaded?.addEventListener?.(() => {
+        if (settled()) finish(true);
+      }) || null;
+      removeRender = scene.postRender?.addEventListener?.(() => {
+        if (settled()) finish(true);
+      }) || null;
+
+      if (!removeRender && !removeTileset) finish(false);
+    });
+  }
+
+  /**
+   * Hold for tiles, then fly — unless a newer gated request arrived while we
+   * were waiting, in which case this one quietly stands down rather than
+   * taking off behind the newer flight.
+   */
+  function gatedFly(build, options, gateMs) {
+    // Nothing to wait for: take off in this tick. Deferring by a microtask
+    // when the gate is a no-op would make every caller's timing subtly
+    // different depending on the network, which is its own bug.
+    if (tilesSettled()) return flyToShot(build(), options);
+    const token = ++gateSeq;
+    return awaitTiles(gateMs).then(() => {
+      if (destroyed || token !== gateSeq) return { cancelled: true, shot: build().name };
+      return flyToShot(build(), options);
     });
   }
 
@@ -307,8 +358,16 @@ export function createCameraDirector({
           return flyToShot(cruiseShot(), options);
         case 'REVEAL':
           return flyToShot(revealShot(target || []), options);
-        case 'HERO':
+        case 'HERO': {
+          // Gate the FIRST descent onto a house — that flight ends on rooftop
+          // geometry that has never been in view at this LOD. Later hops are
+          // already inside loaded tiles and should not pay the wait.
+          if (!heroGated) {
+            heroGated = true;
+            return gatedFly(() => heroShot(target, options), options, HERO_GATE_MS);
+          }
           return flyToShot(heroShot(target, options), options);
+        }
         case 'DRIVE':
           return flyToShot(driveShot(target, options.headingDeg), options);
         default:
@@ -322,8 +381,10 @@ export function createCameraDirector({
      */
     async descend({ onStaged } = {}) {
       await this.fly('STAGING');
-      await awaitTiles();
-      onStaged?.();
+      // Nadir at 40 km with the camera still: the cheapest possible moment to
+      // wait for the metro to stream in.
+      const loaded = await awaitTiles(STAGING_GATE_MS);
+      onStaged?.(loaded);
       return this.fly('CRUISE');
     },
 
@@ -344,6 +405,7 @@ export function createCameraDirector({
     cancel,
     releaseCamera,
     awaitTiles,
+    get gates() { return { stagingMs: STAGING_GATE_MS, heroMs: HERO_GATE_MS, heroUsed: heroGated }; },
 
     /** Heading along a route leg, for the chase camera. */
     routeHeading(from, to) {

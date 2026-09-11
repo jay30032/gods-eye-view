@@ -418,3 +418,45 @@ test('the orbit is still running well before a full revolution', () => {
   director.stopOrbit();
   _resetRenderGovernorForTest();
 });
+
+test('the tile gate does not defer a flight when nothing is streaming', () => {
+  // The fake scene has no globe and no tileset, so the view is trivially
+  // settled. A gate that still deferred by a microtask would make takeoff
+  // timing depend on the network even when there is no network work to do.
+  const { viewer, director } = makeDirector();
+  director.fly('HERO', houses[0]);
+  assert.equal(viewer.inFlight, 1, 'the first HERO flight starts in this tick');
+  assert.equal(director.gates.heroUsed, true, 'the gate was consumed');
+  _resetRenderGovernorForTest();
+});
+
+test('only the FIRST hero flight pays the gate', async () => {
+  const { viewer, director } = makeDirector();
+  const first = director.fly('HERO', houses[0]);
+  viewer.complete();
+  await first;
+  assert.equal(director.gates.heroUsed, true);
+
+  // Later hops are already inside loaded tiles.
+  const second = director.fly('HERO', houses[1]);
+  assert.equal(viewer.inFlight, 1);
+  viewer.complete();
+  await second;
+  _resetRenderGovernorForTest();
+});
+
+test('the gates are capped so a slow network delays rather than stalls', () => {
+  const { director } = makeDirector();
+  assert.equal(director.gates.stagingMs, 2_500);
+  assert.equal(director.gates.heroMs, 1_500);
+  // The staging gate is the longer one: it is spent at a stationary nadir
+  // camera, where waiting costs the viewer nothing.
+  assert.ok(director.gates.stagingMs > director.gates.heroMs);
+  _resetRenderGovernorForTest();
+});
+
+test('awaitTiles resolves even with nothing to listen to', async () => {
+  const { director } = makeDirector();
+  assert.equal(await director.awaitTiles(50), true);
+  _resetRenderGovernorForTest();
+});

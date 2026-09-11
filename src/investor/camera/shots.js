@@ -65,7 +65,10 @@ export const CRUISE = Object.freeze({
   aim: Object.freeze({ lat: 33.7640, lng: -84.3110 }),
   altitudeM: 1_800,
   headingDeg: 264,
-  pitchDeg: -35,
+  // -25 puts the horizon — and the downtown skyline on it — in the top strip
+  // of the frame. At -35 the top of frame sat 5 degrees BELOW horizontal, so
+  // there was no sky in shot at all and nothing for a skyline to sit on.
+  pitchDeg: -25,
 });
 
 /** Fit the shortlist, with room around it. */
