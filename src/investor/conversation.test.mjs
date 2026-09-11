@@ -15,6 +15,8 @@ import {
   parseDemoIntent,
 } from './conversation.js';
 
+const NOW = Date.UTC(2026, 8, 10);
+
 test('acceptance phrases parse case-insensitively with trailing punctuation', () => {
   const expected = ['find_money', 'why', 'show_deal', 'rehab_plus_20k', 'save'];
   ACCEPTANCE_PHRASES.forEach((phrase, index) => {
@@ -29,7 +31,7 @@ test('acceptance phrases parse case-insensitively with trailing punctuation', ()
 });
 
 test('Find me money turns vision on, shortlists four, and golds the best', () => {
-  const properties = createMockPropertyProvider().list();
+  const properties = createMockPropertyProvider({ now: NOW }).list();
   const state = createConversationState();
   const found = applyFindMoney(properties, state);
   assert.equal(found.ok, true);
@@ -42,10 +44,31 @@ test('Find me money turns vision on, shortlists four, and golds the best', () =>
   assert.ok(found.results[0].score >= found.results[3].score);
   assert.match(found.spoken, /Opportunity Vision on/i);
   assert.match(found.spoken, /4 strong/i);
+
+  // The gold pick is the head of the ranking, not a label on a house.
+  const highest = Math.max(...properties.map((row) => row.composite));
+  const gold = properties.find((row) => row.id === found.topPickId);
+  assert.equal(gold.composite, highest);
+  assert.equal(found.results[0].strategy, gold.bestStrategy);
+});
+
+test('Why speaks the generated explanation and the drivers behind the score', () => {
+  const properties = createMockPropertyProvider({ now: NOW }).list();
+  const state = createConversationState();
+  const property = properties.find((row) => row.id === 'DEMO-ATL-001');
+
+  const why = applyWhy(property, state);
+  assert.equal(why.ok, true);
+  assert.equal(why.strategy, property.bestStrategy);
+  assert.equal(why.spoken, why.why);
+  assert.match(why.why, /Foreclosure/);
+  assert.match(why.why, /Best path: FLIP — \$\d+k profit/);
+  assert.deepEqual(why.drivers, [...property.drivers]);
+  assert.deepEqual(why.scores, property.opportunityScore);
 });
 
 test('Find me money → Why → Show the deal → rehab +20k → Save it stays on one property', () => {
-  const properties = createMockPropertyProvider().list();
+  const properties = createMockPropertyProvider({ now: NOW }).list();
   const state = createConversationState();
   const store = {
     data: {},

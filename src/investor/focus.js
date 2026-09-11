@@ -1,19 +1,77 @@
 import { primarySignal, compositeScore } from './mock/schema.js';
 import { analyzePropertyDeal, bestStrategyFor } from './deal/index.js';
+import { signalStrength, strategyHeadline } from './scoring.js';
 
-export function whyThisMatters(property, analysis = null) {
-  if (property?.why) return property.why;
-  const signal = primarySignal(property);
-  const strategy = bestStrategyFor(property);
-  const score = compositeScore(property);
-  const parts = [
-    `${property?.address || 'This property'} scores ${score} on the mock board`,
-    signal ? `with a ${signal.type.replaceAll('_', ' ').toLowerCase()} signal` : null,
-    `Best path looks like ${strategy.toUpperCase()}`,
-  ].filter(Boolean);
-  if (analysis?.profit != null) parts.push(`modeled profit ${formatUsd(analysis.profit)}`);
-  if (analysis?.coc != null) parts.push(`cash-on-cash ${formatPct(analysis.coc)}`);
-  return `${parts.join(' — ')}.`;
+const SIGNAL_DATE = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  timeZone: 'UTC',
+});
+
+function signalWords(type) {
+  const words = String(type || '').replaceAll('_', ' ').toLowerCase();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Signal';
+}
+
+/** `MOCK/county-notice` reads as `county-notice` out loud; the card keeps the kicker. */
+function spokenSource(source) {
+  return String(source || 'mock source').replace(/^MOCK\//i, '');
+}
+
+function filedOn(effectiveDate) {
+  const ms = Date.parse(`${String(effectiveDate || '').slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(ms) ? SIGNAL_DATE.format(ms) : null;
+}
+
+function safeAnalyze(property, strategy) {
+  try {
+    return analyzePropertyDeal(property, strategy);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The explanation is generated, never authored. It reads the same signal, the
+ * same equity, and the same underwriting the score came from, so the sentence
+ * and the number beside it cannot drift apart.
+ *
+ * One headline figure only — the full breakdown waits for "Show me the deal".
+ *
+ * @param {object} property enriched mock row
+ * @param {object|null} [analysis] used only when it is the best strategy's run
+ * @param {{now?:number|Date}} [options]
+ */
+export function whyThisMatters(property, analysis = null, { now = Date.now() } = {}) {
+  if (!property) return '';
+  const best = bestStrategyFor(property);
+  const run = analysis?.strategy === best ? analysis : safeAnalyze(property, best);
+  const signal = signalStrength(property, { now });
+  const sentences = [];
+
+  if (signal.type) {
+    const filed = filedOn(signal.effectiveDate);
+    const when = filed && signal.ageDays != null
+      ? `filed ${filed} (${signal.ageDays} days ago), `
+      : '';
+    sentences.push(
+      `${signalWords(signal.type)} — ${spokenSource(signal.source)}, `
+      + `${when}${Math.round(signal.confidence * 100)}% confidence.`,
+    );
+  }
+
+  const equityPct = Math.round(Number(property.estimatedEquityPct || 0) * 100);
+  const purchase = Number(property.deal?.purchase || 0);
+  const value = Number(property.estimatedValue || 0);
+  const discount = value > 0 ? Math.round((1 - purchase / value) * 100) : 0;
+  sentences.push(
+    `Owner equity ${equityPct}%; entry at ${formatUsd(purchase)} is `
+    + `${discount}% under the ${formatUsd(value)} estimate.`,
+  );
+
+  if (run) sentences.push(`Best path: ${best.toUpperCase()} — ${strategyHeadline(run)}.`);
+  if (property.note) sentences.push(String(property.note));
+  return sentences.join(' ');
 }
 
 export function formatUsd(value) {
@@ -75,22 +133,29 @@ export function dealVisionCaption(strategy, analysis) {
 export function focusCardModel(property, { analysis = null, strategy = null, revealDeal = false } = {}) {
   if (!property) return null;
   const signal = primarySignal(property);
-  const best = strategy || bestStrategyFor(property);
+  const bestStrategy = bestStrategyFor(property);
+  const best = strategy || bestStrategy;
   const run = analysis || analyzePropertyDeal(property, best);
   return {
     id: property.id,
     address: property.address,
     neighborhood: property.neighborhood,
     propertyType: property.propertyType,
+    note: property.note || '',
     estimatedValue: formatUsd(property.estimatedValue),
     estimatedEquityPct: formatPct(property.estimatedEquityPct),
     score: compositeScore(property),
-    scores: property.opportunityScore,
+    scores: property.opportunityScore || {},
+    drivers: Array.isArray(property.drivers) ? property.drivers.slice() : [],
     signalType: signal?.type || 'DISTRESS',
     signalConfidence: signal ? Math.round(signal.confidence * 100) : 0,
+    bestStrategy,
     strategy: best,
     analysis: run,
-    why: whyThisMatters(property, revealDeal ? run : null),
+    // Why never changes when the deal opens — the reveal adds the breakdown,
+    // it does not rewrite the reason.
+    why: whyThisMatters(property),
+    revealDeal: Boolean(revealDeal),
     demo: true,
   };
 }

@@ -36,13 +36,6 @@ export const SIGNAL_LOOK = Object.freeze({
     scaleMax: 1.08,
     kind: 'ring',
   }),
-  TOP_PICK: Object.freeze({
-    color: [0.93, 0.74, 0.22, 0.95],
-    periodMs: 3000,
-    scaleMin: 0.94,
-    scaleMax: 1.10,
-    kind: 'halo',
-  }),
 });
 
 export function lookForSignal(type) {

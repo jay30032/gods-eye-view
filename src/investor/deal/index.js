@@ -4,6 +4,7 @@ import { analyzeBrrrr } from './brrrr.js';
 import { analyzeWholesale } from './wholesale.js';
 import { DEAL_ASSUMPTIONS, mergeAssumptions } from './assumptions.js';
 import { UNITS_BY_PROPERTY_TYPE, unitsFor } from './units.js';
+import { scoreProperty } from '../scoring.js';
 
 export {
   analyzeFlip,
@@ -49,16 +50,15 @@ export function analyzePropertyDeal(property, strategy, overrides = {}) {
   return STRATEGIES[name](deal, assumptionOverrides);
 }
 
+/**
+ * The strategy an enriched row already ranked highest. A bare row is scored on
+ * the spot, which is why scoring.js is imported here even though it underwrites
+ * through this module — the cycle is call-time only, neither side touches the
+ * other while it is evaluating.
+ */
 export function bestStrategyFor(property) {
-  const scores = property?.opportunityScore || {};
-  let best = 'flip';
-  let top = -Infinity;
-  for (const key of ['flip', 'rental', 'brrrr', 'wholesale']) {
-    const value = Number(scores[key]);
-    if (Number.isFinite(value) && value > top) {
-      top = value;
-      best = key;
-    }
-  }
-  return best;
+  const stored = String(property?.bestStrategy || '');
+  if (Object.hasOwn(STRATEGIES, stored)) return stored;
+  if (!property) return 'flip';
+  return scoreProperty(property).bestStrategy;
 }

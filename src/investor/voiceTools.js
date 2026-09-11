@@ -10,10 +10,13 @@ export function explainProperty(property) {
     id: property.id,
     address: property.address,
     scores: property.opportunityScore,
+    composite: property.composite,
+    bestStrategy: property.bestStrategy,
     signals: property.signals,
     value: property.estimatedValue,
     equity: property.estimatedEquityPct,
     why: whyThisMatters(property),
+    drivers: Array.isArray(property.drivers) ? property.drivers.slice() : [],
     saved: isPropertySaved(property.id),
   };
 }

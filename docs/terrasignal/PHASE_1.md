@@ -7,12 +7,12 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 - [x] Rebrand to TerraSignal Investor; MIT + Bilawal Sidhu / God's Eye View attribution kept
 - [x] Investor default: globe-first park → hunt ritual “Where are we hunting today?” → Atlanta/Decatur → ≥25 mock properties animate by signal
 - [x] Bottom nav only: WORLD · DRIVE · MIC · SAVED. Central mic. No filter dashboard
-- [x] Mock dataset ≥25 with schema `{id,address,lat,lng,propertyType,estimatedValue,estimatedEquityPct,opportunityScore,signals,deal}`
+- [x] Mock dataset ≥25 with schema `{id,address,lat,lng,propertyType,estimatedValue,estimatedEquityPct,signals,deal,note}` — scores are derived, never authored
 - [x] Visuals under `src/investor/visuals/` integrated with the render governor (no standalone `requestAnimationFrame`)
-- [x] Signal looks: FORECLOSURE heartbeat, PREFORECLOSURE breathe, TAX_SALE vertical, DISTRESS shimmer, LISTED ring, TOP_PICK gold halo/column
+- [x] Signal looks: FORECLOSURE heartbeat, PREFORECLOSURE breathe, TAX_SALE vertical, DISTRESS shimmer, LISTED ring; gold halo/column is the ranked top pick
 - [x] `prefers-reduced-motion` freezes animation; no strobing (periods ≥ 2.2s)
 - [x] Opportunity Vision toggle + camera-height LOD
-- [x] Property Focus: camera, highlight, score/signal/value/equity/why
+- [x] Property Focus: camera, highlight, composite score, driver strip, four-strategy strip, value/equity, generated why
 - [x] Deterministic deal calculators + unit tests (flip, rental, brrrr, wholesale)
 - [x] Deal Vision on the globe
 - [x] Saved via `localStorage`
@@ -22,6 +22,8 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 - [x] Find me money: vision ON, exactly 4 candidates, gold best, camera focus
 - [x] Drive demo simulation (not GPS): strong signals only; why/save/skip/next
 - [x] Investor path disables OpenSky / FIRMS / cables / news / other GEV live layers
+- [x] Opportunity scores and the Why are derived from underwriting, signals, and equity — never authored
+- [x] Gold pick is the head of the `findMoney` ranking, not a signal on a row
 - [x] Phase 2 not started
 
 ## Architecture
@@ -30,10 +32,11 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 src/investor/
   config.js              product flags (default investor)
   markets.js             Atlanta / Decatur framing
+  scoring.js             derived scores, signal strength, drivers, enrichment
   mock/                  DEMO/MOCK inventory + search
   deal/                  deterministic underwriting
   visuals/               governor-held Cesium entities
-  ui/                    brand, bottom nav, focus, saved
+  ui/                    brand, bottom nav, focus, saved, escapeHtml
   session.js             bootstrap + demo intents
   ensureBasemap.js       keyless Esri → OSM + requestRender bursts + empty-globe assert
   frameBudget.js         30 fps on battery/Air; classic stays 60
@@ -44,6 +47,67 @@ src/investor/
 Keyless boot (`baseLayer: false`) starts with zero ImageryLayers. Esri credits can appear after provider construction without tiles painting. Investor forces Esri World Imagery, falls back to OSM on any failure, then **`renderUntilGlobePaints`**: a 4s `investor-first-paint` hold (released on first `tileLoadProgress`), 100ms `requestRender` ticks, and a 10s timeout that shows `#ts-globe-error` if the center pixel stays black. Attaching an ImageryLayer is not enough — idle `requestRenderMode` before the first paint is a black void.
 
 Investor mode still *registers* GEV layers so `finalizeRegistrations` stays honest, then forces them off after layer-state restore. Opportunity Vision holds `investor-opportunity` only while enabled, near the market, and at pulse LOD — never while the first-hunt modal is parked on the globe. Drive holds `investor-drive` only while running.
+
+## Scoring model
+
+Phase 1 used to ship a hand-typed `opportunityScore` on every mock row next to a
+hand-written `why`. Both were free to disagree with the calculators — a house
+could print 92 beside a wholesale verdict of "pass". Scores and explanations are
+now *derived*, in `src/investor/scoring.js`, from the same three inputs the card
+shows: the underwriting, the signal, and the owner's equity.
+
+**Strategy scores (0–100, one per path).** Each of the four calculators runs,
+then its result is scored on the two numbers that actually decide that path:
+
+| Path | What the score reads |
+|---|---|
+| Flip | margin against a 20% target (60 pts) + profit against $60k (40 pts) |
+| Rental | cash-on-cash against 12% (60 pts) + DSCR headroom over 1.0, full at 1.5 (40 pts) |
+| BRRRR | capital left in, full marks at $0 and none at $50k (50 pts) + cash flow against $400/mo (50 pts) — a true infinite return that also cash flows is 100 |
+| Wholesale | assignment fee against $25k (70 pts) + buyer's discount to ARV against 35% (30 pts) — 0 when there is no viable spread |
+
+Then the verdict wins. A **strong** verdict floors the score at 70, **thin**
+holds it between 40 and 69, and **pass** caps it at 39. The raw formula decides
+*where inside the band* a deal sits; the calculator decides which band it is in.
+That is the whole point: the number and the word beside it can no longer
+contradict each other.
+
+**Signal strength (0–100).** The primary signal is the highest-ranked one on the
+row (FORECLOSURE, then TAX_SALE, PREFORECLOSURE, DISTRESS, LISTED_OPPORTUNITY).
+It is weighted by type — 1.0, 0.95, 0.80, 0.65, 0.50 — multiplied by its own
+confidence, then decayed by age: full credit for the first 90 days, a straight
+line down to a 0.6 floor at one year, and nothing below that floor. A
+foreclosure filed last week is not the same lead as one filed last spring. Every
+*additional* signal on the row adds 8, capped at +16, because a house wearing a
+tax-sale notice *and* a code-enforcement file is a better lead than one wearing
+either alone.
+
+**Equity score (0–100).** Owner equity against a 45% saturation point.
+
+**Composite.** `0.55 × best strategy score + 0.25 × signal strength + 0.20 ×
+equity score`, plus 2 points for each *other* strategy that is not a pass
+(capped at +6, so a house that works three ways beats one that only works once),
+clamped to 0–100. `findMoney` ranks on this, and the row it puts first is the
+gold pick.
+
+**TOP_PICK is an output.** It used to be a signal type stored on four rows,
+which meant the data could paint itself gold regardless of how it underwrote.
+It is gone from the schema, the dataset, and the visuals. The session calls
+`visuals.setTopPick(id)` with the head of the ranking, and `goldHalo.isTopPick`
+compares against that id and nothing else.
+
+**"Why?" is generated.** `whyThisMatters` builds two to three sentences from the
+same numbers — signal type, source, filing date and age, confidence, owner
+equity, entry discount against the estimate, and the best path with **one**
+headline figure. The full breakdown still waits for "Show me the deal". Each
+row's old `why` is now `note`: one line of local color appended at the end, not
+the explanation itself. A row that still carries `opportunityScore`, `composite`,
+or `why` fails `validateProperty`.
+
+**Where it runs.** Scoring executes the four calculators per row, so it is far
+too heavy for a render callback. `createMockPropertyProvider` enriches every row
+once at load and hands back the same frozen objects; visuals read
+`property.opportunityScore` and `property.composite` and never re-score.
 
 ## Underwriting model
 

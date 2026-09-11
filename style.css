@@ -9831,6 +9831,39 @@ body.terrasignal-investor #cesiumContainer canvas {
   line-height: 1.45;
 }
 
+.ts-kicker-mock {
+  color: rgba(244, 239, 228, 0.5);
+}
+
+#ts-focus-card .ts-focus-score {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #e0b84a;
+}
+
+.ts-drivers {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgba(244, 239, 228, 0.62);
+}
+
+.ts-strategy-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.35rem;
+  margin: 0 0 0.7rem;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  color: rgba(244, 239, 228, 0.45);
+}
+
+.ts-strategy-strip .ts-strategy.is-best {
+  color: #e0b84a;
+  font-weight: 600;
+}
+
 #ts-focus-card dl {
   display: grid;
   grid-template-columns: 1fr 1fr;

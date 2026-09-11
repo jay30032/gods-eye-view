@@ -141,12 +141,22 @@ export function applyWhy(property, state) {
     return { ok: false, action: 'explain_property', spoken: 'Nothing is focused yet. Ask me to find the money first.' };
   }
   state.focusedId = property.id;
+  const strategy = bestStrategyFor(property);
+  let analysis = null;
+  try {
+    analysis = analyzePropertyDeal(property, strategy, { rehabDelta: state.rehabDelta });
+  } catch {
+    // Why still reads without a headline rather than failing the turn.
+  }
+  const why = whyThisMatters(property, analysis);
   return {
     ok: true,
     action: 'explain_property',
     id: property.id,
-    spoken: whyThisMatters(property),
-    why: property.why,
+    strategy,
+    spoken: why,
+    why,
+    drivers: Array.isArray(property.drivers) ? property.drivers.slice() : [],
     signal: property.signals,
     scores: property.opportunityScore,
   };

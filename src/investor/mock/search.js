@@ -62,9 +62,33 @@ export function rankMockProperties(properties, { strategy = 'composite', limit =
 
 export const FIND_MONEY_LIMIT = 4;
 
+const FIND_MONEY_MIN_COMPOSITE = 70;
+const URGENT_SIGNALS = new Set(['FORECLOSURE', 'TAX_SALE']);
+
+/**
+ * The shortlist "Find me money" lights up: ranked by composite, qualified by
+ * score or by a clock-running signal. The first row is the gold pick — top
+ * pick is the output of this ranking, never a field on a house.
+ */
 export function findMoney(properties, limit = FIND_MONEY_LIMIT) {
   const cap = Math.max(1, Number(limit) || FIND_MONEY_LIMIT);
-  return rankMockProperties(properties, { strategy: 'composite', limit: Math.max(cap * 4, 16) })
-    .filter((row) => row.score >= 70 || (row.primary && ['FORECLOSURE', 'TAX_SALE', 'TOP_PICK'].includes(row.primary.type)))
-    .slice(0, cap);
+  const ranked = rankMockProperties(properties, {
+    strategy: 'composite',
+    limit: Math.max(cap, properties.length || cap),
+  });
+  const qualified = ranked.filter((row) => row.score >= FIND_MONEY_MIN_COMPOSITE
+    || (row.primary && URGENT_SIGNALS.has(row.primary.type)));
+  if (qualified.length >= cap) return qualified.slice(0, cap);
+
+  // The demo promises exactly four candidates activating, so a thin market
+  // backfills from the ranking rather than lighting up three houses.
+  const picked = new Set(qualified.map((row) => row.property.id));
+  const filled = qualified.slice();
+  for (const row of ranked) {
+    if (filled.length >= cap) break;
+    if (picked.has(row.property.id)) continue;
+    picked.add(row.property.id);
+    filled.push(row);
+  }
+  return filled;
 }

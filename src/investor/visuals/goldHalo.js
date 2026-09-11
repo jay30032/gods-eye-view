@@ -16,6 +16,11 @@ export function goldColumnHeight(nowMs, reduced) {
   return 70 + 40 * breathe(nowMs, 3000, 0.4);
 }
 
-export function isTopPick(property) {
-  return (property?.signals || []).some((signal) => signal.type === 'TOP_PICK');
+/**
+ * Gold is a ranking result, not a property of a house. The session sets the
+ * winner with `setTopPick(id)` after "Find me money"; nothing in the data can
+ * paint itself gold.
+ */
+export function isTopPick(propertyId, topPickId) {
+  return Boolean(topPickId) && String(propertyId) === String(topPickId);
 }

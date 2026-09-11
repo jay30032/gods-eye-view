@@ -7,10 +7,6 @@ function signal(type, confidence, effectiveDate, source) {
   return { type, confidence, effectiveDate, source };
 }
 
-function scores(flip, rental, brrrr, wholesale) {
-  return { flip, rental, brrrr, wholesale };
-}
-
 function deal(purchase, rehab, arv, rent) {
   return { purchase, rehab, arv, rent };
 }
@@ -31,13 +27,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1948,
     estimatedValue: 385000,
     estimatedEquityPct: 0.41,
-    opportunityScore: scores(92, 71, 88, 64),
     signals: [
-      signal('TOP_PICK', 0.94, '2026-08-12', 'MOCK/court-docket'),
       signal('FORECLOSURE', 0.91, '2026-08-12', 'MOCK/county-notice'),
     ],
     deal: deal(228000, 42000, 385000, 2650),
-    why: 'Auction-set foreclosure two blocks from the Square with 41% implied equity and a clean flip spread.',
+    note: 'Auction-set foreclosure two blocks from the Square with 41% implied equity and a clean flip spread.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-002',
@@ -54,13 +48,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1936,
     estimatedValue: 410000,
     estimatedEquityPct: 0.36,
-    opportunityScore: scores(86, 74, 90, 55),
     signals: [
       signal('PREFORECLOSURE', 0.88, '2026-07-28', 'MOCK/lis-pendens'),
-      signal('TOP_PICK', 0.86, '2026-07-28', 'MOCK/ranker'),
     ],
     deal: deal(262000, 38000, 410000, 2850),
-    why: 'Oakhurst preforeclosure — four beds, walkable retail, BRRRR refinance clears most cash.',
+    note: 'Oakhurst preforeclosure — four beds, walkable retail, BRRRR refinance clears most cash.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-003',
@@ -77,13 +69,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1952,
     estimatedValue: 445000,
     estimatedEquityPct: 0.33,
-    opportunityScore: scores(78, 91, 87, 48),
     signals: [
       signal('TAX_SALE', 0.83, '2026-09-02', 'MOCK/tax-commissioner'),
       signal('DISTRESS', 0.70, '2026-08-20', 'MOCK/code-enforcement'),
     ],
     deal: deal(298000, 52000, 445000, 3400),
-    why: 'Kirkwood duplex on a tax-sale clock; both sides rent and the BRRRR path is the money trade.',
+    note: 'Kirkwood duplex on a tax-sale clock; both sides rent and the BRRRR path is the money trade.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-004',
@@ -100,12 +91,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1924,
     estimatedValue: 355000,
     estimatedEquityPct: 0.29,
-    opportunityScore: scores(81, 68, 76, 72),
     signals: [
       signal('FORECLOSURE', 0.79, '2026-08-30', 'MOCK/court-docket'),
     ],
     deal: deal(252000, 31000, 355000, 2400),
-    why: 'Small Decatur bungalow already noticed — wholesale spread is honest if you do not want the rehab.',
+    note: 'Small Decatur bungalow already noticed — wholesale spread is honest if you do not want the rehab.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-005',
@@ -122,13 +112,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1961,
     estimatedValue: 320000,
     estimatedEquityPct: 0.38,
-    opportunityScore: scores(88, 77, 84, 61),
     signals: [
       signal('DISTRESS', 0.81, '2026-06-14', 'MOCK/utility-shutoff'),
       signal('PREFORECLOSURE', 0.74, '2026-08-04', 'MOCK/lis-pendens'),
     ],
     deal: deal(198000, 36000, 320000, 2300),
-    why: 'East Lake distress with a dark meter and a pending notice — classic value-add flip.',
+    note: 'East Lake distress with a dark meter and a pending notice — classic value-add flip.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-006',
@@ -145,12 +134,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 2004,
     estimatedValue: 365000,
     estimatedEquityPct: 0.22,
-    opportunityScore: scores(64, 82, 70, 41),
     signals: [
       signal('LISTED_OPPORTUNITY', 0.77, '2026-09-01', 'MOCK/mls-shadow'),
     ],
     deal: deal(284000, 18000, 365000, 2600),
-    why: 'Quiet Kirkwood listing priced under comps — rental cash-on-cash is the clean read.',
+    note: 'Quiet Kirkwood listing priced under comps — rental cash-on-cash is the clean read.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-007',
@@ -167,12 +155,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1922,
     estimatedValue: 520000,
     estimatedEquityPct: 0.31,
-    opportunityScore: scores(74, 69, 80, 36),
     signals: [
       signal('PREFORECLOSURE', 0.72, '2026-07-11', 'MOCK/lis-pendens'),
     ],
     deal: deal(359000, 48000, 520000, 3200),
-    why: 'Candler Park four-square with a late mortgage — BRRRR works if the ARV holds on the porch addition.',
+    note: 'Candler Park four-square with a late mortgage — BRRRR works if the ARV holds on the porch addition.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-008',
@@ -189,12 +176,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1910,
     estimatedValue: 575000,
     estimatedEquityPct: 0.18,
-    opportunityScore: scores(58, 63, 61, 29),
     signals: [
       signal('LISTED_OPPORTUNITY', 0.69, '2026-08-22', 'MOCK/mls-shadow'),
     ],
     deal: deal(472000, 28000, 575000, 3100),
-    why: 'Inman Park listing — thinner equity, but a cosmetic path if you already hunt this belt.',
+    note: 'Inman Park listing — thinner equity, but a cosmetic path if you already hunt this belt.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-009',
@@ -211,13 +197,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1928,
     estimatedValue: 490000,
     estimatedEquityPct: 0.34,
-    opportunityScore: scores(80, 88, 85, 52),
     signals: [
       signal('TAX_SALE', 0.86, '2026-09-08', 'MOCK/tax-commissioner'),
-      signal('TOP_PICK', 0.84, '2026-09-08', 'MOCK/ranker'),
     ],
     deal: deal(324000, 46000, 490000, 3600),
-    why: 'Grant Park tax sale duplex facing the park — two doors, one refinance.',
+    note: 'Grant Park tax sale duplex facing the park — two doors, one refinance.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-010',
@@ -234,13 +218,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1949,
     estimatedValue: 305000,
     estimatedEquityPct: 0.44,
-    opportunityScore: scores(90, 73, 82, 68),
     signals: [
       signal('FORECLOSURE', 0.90, '2026-08-18', 'MOCK/court-docket'),
       signal('DISTRESS', 0.76, '2026-07-02', 'MOCK/code-enforcement'),
     ],
     deal: deal(171000, 39000, 305000, 2200),
-    why: 'East Atlanta Village foreclosure with a condemned porch — the spread is the story.',
+    note: 'East Atlanta Village foreclosure with a condemned porch — the spread is the story.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-011',
@@ -257,12 +240,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1955,
     estimatedValue: 398000,
     estimatedEquityPct: 0.27,
-    opportunityScore: scores(76, 80, 79, 44),
     signals: [
       signal('PREFORECLOSURE', 0.71, '2026-08-09', 'MOCK/lis-pendens'),
     ],
     deal: deal(291000, 24000, 398000, 2700),
-    why: 'Winnona Park late notice — light rehab, City Schools, rental demand is boring in a good way.',
+    note: 'Winnona Park late notice — light rehab, City Schools, rental demand is boring in a good way.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-012',
@@ -279,13 +261,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1968,
     estimatedValue: 720000,
     estimatedEquityPct: 0.29,
-    opportunityScore: scores(69, 93, 89, 40),
     signals: [
       signal('DISTRESS', 0.84, '2026-05-30', 'MOCK/utility-shutoff'),
       signal('TAX_SALE', 0.67, '2026-09-04', 'MOCK/tax-commissioner'),
     ],
     deal: deal(512000, 88000, 720000, 6200),
-    why: 'Reynoldstown four-plex with two dark units — this is a rental/BRRRR machine, not a flip.',
+    note: 'Reynoldstown four-plex with two dark units — this is a rental/BRRRR machine, not a flip.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-013',
@@ -302,12 +283,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 2001,
     estimatedValue: 340000,
     estimatedEquityPct: 0.21,
-    opportunityScore: scores(61, 75, 66, 38),
     signals: [
       signal('LISTED_OPPORTUNITY', 0.73, '2026-08-27', 'MOCK/mls-shadow'),
     ],
     deal: deal(268000, 16000, 340000, 2300),
-    why: 'Cabbagetown mill-village townhome — listed quiet, rents to the BeltLine crowd.',
+    note: 'Cabbagetown mill-village townhome — listed quiet, rents to the BeltLine crowd.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-014',
@@ -324,12 +304,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 2006,
     estimatedValue: 295000,
     estimatedEquityPct: 0.16,
-    opportunityScore: scores(49, 78, 58, 33),
     signals: [
       signal('LISTED_OPPORTUNITY', 0.66, '2026-09-03', 'MOCK/mls-shadow'),
     ],
     deal: deal(248000, 12000, 295000, 2200),
-    why: 'O4W condo near the BeltLine — thin equity, strong rent, not a smash-and-flip.',
+    note: 'O4W condo near the BeltLine — thin equity, strong rent, not a smash-and-flip.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-015',
@@ -346,12 +325,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1932,
     estimatedValue: 465000,
     estimatedEquityPct: 0.25,
-    opportunityScore: scores(71, 70, 73, 35),
     signals: [
       signal('PREFORECLOSURE', 0.68, '2026-07-19', 'MOCK/lis-pendens'),
     ],
     deal: deal(349000, 32000, 465000, 2900),
-    why: 'Poncey-Highland brick with a late payment — cosmetic kitchen, keep-or-flip either works.',
+    note: 'Poncey-Highland brick with a late payment — cosmetic kitchen, keep-or-flip either works.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-016',
@@ -368,12 +346,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1941,
     estimatedValue: 430000,
     estimatedEquityPct: 0.30,
-    opportunityScore: scores(79, 72, 77, 42),
     signals: [
       signal('DISTRESS', 0.75, '2026-06-22', 'MOCK/code-enforcement'),
     ],
     deal: deal(301000, 35000, 430000, 2750),
-    why: 'Lake Claire code case on a sagging rear deck — neighbors already renovated around it.',
+    note: 'Lake Claire code case on a sagging rear deck — neighbors already renovated around it.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-017',
@@ -390,12 +367,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1929,
     estimatedValue: 780000,
     estimatedEquityPct: 0.24,
-    opportunityScore: scores(67, 60, 72, 28),
     signals: [
       signal('PREFORECLOSURE', 0.64, '2026-08-01', 'MOCK/lis-pendens'),
     ],
     deal: deal(592000, 64000, 780000, 3900),
-    why: 'Druid Hills estate-lite — heavier lift, but the street still sells on first look.',
+    note: 'Druid Hills estate-lite — heavier lift, but the street still sells on first look.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-018',
@@ -412,12 +388,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1938,
     estimatedValue: 375000,
     estimatedEquityPct: 0.35,
-    opportunityScore: scores(84, 76, 81, 57),
     signals: [
       signal('FORECLOSURE', 0.82, '2026-08-25', 'MOCK/court-docket'),
     ],
     deal: deal(244000, 33000, 375000, 2500),
-    why: 'Avondale Tudor under notice — village walkability and a tidy flip budget.',
+    note: 'Avondale Tudor under notice — village walkability and a tidy flip budget.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-019',
@@ -434,13 +409,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1974,
     estimatedValue: 410000,
     estimatedEquityPct: 0.40,
-    opportunityScore: scores(73, 90, 86, 63),
     signals: [
       signal('TAX_SALE', 0.80, '2026-09-06', 'MOCK/tax-commissioner'),
       signal('DISTRESS', 0.69, '2026-04-18', 'MOCK/utility-shutoff'),
     ],
     deal: deal(246000, 54000, 410000, 3900),
-    why: 'Scottdale triplex heading to tax sale — rents already cover a conservative refi.',
+    note: 'Scottdale triplex heading to tax sale — rents already cover a conservative refi.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-020',
@@ -457,13 +431,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1958,
     estimatedValue: 235000,
     estimatedEquityPct: 0.47,
-    opportunityScore: scores(87, 79, 83, 74),
     signals: [
       signal('FORECLOSURE', 0.87, '2026-08-07', 'MOCK/court-docket'),
       signal('DISTRESS', 0.78, '2026-05-11', 'MOCK/code-enforcement'),
     ],
     deal: deal(124000, 28000, 235000, 1850),
-    why: 'Belvedere Park notice-and-vacant — cheapest door on the board and the wholesale number still works.',
+    note: 'Belvedere Park notice-and-vacant — cheapest door on the board and the wholesale number still works.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-021',
@@ -480,12 +453,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1971,
     estimatedValue: 280000,
     estimatedEquityPct: 0.39,
-    opportunityScore: scores(75, 86, 84, 59),
     signals: [
       signal('TAX_SALE', 0.78, '2026-09-01', 'MOCK/tax-commissioner'),
     ],
     deal: deal(171000, 31000, 280000, 2600),
-    why: 'Clarkston duplex on the tax roll — immigrant-renter demand is deep and boringly consistent.',
+    note: 'Clarkston duplex on the tax roll — immigrant-renter demand is deep and boringly consistent.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-022',
@@ -502,12 +474,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1966,
     estimatedValue: 340000,
     estimatedEquityPct: 0.28,
-    opportunityScore: scores(70, 81, 75, 46),
     signals: [
       signal('PREFORECLOSURE', 0.70, '2026-07-30', 'MOCK/lis-pendens'),
     ],
     deal: deal(245000, 27000, 340000, 2450),
-    why: 'Tucker ranch, late mortgage, schools still sell the street — rental is the default.',
+    note: 'Tucker ranch, late mortgage, schools still sell the street — rental is the default.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-023',
@@ -524,12 +495,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1998,
     estimatedValue: 355000,
     estimatedEquityPct: 0.19,
-    opportunityScore: scores(55, 80, 62, 31),
     signals: [
       signal('LISTED_OPPORTUNITY', 0.71, '2026-08-29', 'MOCK/mls-shadow'),
     ],
     deal: deal(287000, 15000, 355000, 2500),
-    why: 'Chamblee townhome listed under the last three sales — cash-flow first, flip second.',
+    note: 'Chamblee townhome listed under the last three sales — cash-flow first, flip second.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-024',
@@ -546,12 +516,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1953,
     estimatedValue: 510000,
     estimatedEquityPct: 0.20,
-    opportunityScore: scores(63, 67, 69, 27),
     signals: [
       signal('DISTRESS', 0.62, '2026-06-08', 'MOCK/utility-shutoff'),
     ],
     deal: deal(408000, 36000, 510000, 3000),
-    why: 'Brookhaven dark house on a tear-down block — only hunt it if you already own the street.',
+    note: 'Brookhaven dark house on a tear-down block — only hunt it if you already own the street.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-025',
@@ -568,12 +537,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 2005,
     estimatedValue: 275000,
     estimatedEquityPct: 0.14,
-    opportunityScore: scores(42, 74, 51, 24),
     signals: [
       signal('LISTED_OPPORTUNITY', 0.64, '2026-09-05', 'MOCK/mls-shadow'),
     ],
     deal: deal(236000, 9000, 275000, 2100),
-    why: 'Midtown one-bed — not a distress hunt, a rent-ready stub if you want a city door.',
+    note: 'Midtown one-bed — not a distress hunt, a rent-ready stub if you want a city door.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-026',
@@ -590,14 +558,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1920,
     estimatedValue: 295000,
     estimatedEquityPct: 0.43,
-    opportunityScore: scores(89, 84, 88, 70),
     signals: [
       signal('FORECLOSURE', 0.89, '2026-08-15', 'MOCK/court-docket'),
-      signal('TOP_PICK', 0.85, '2026-08-15', 'MOCK/ranker'),
       signal('DISTRESS', 0.73, '2026-03-21', 'MOCK/code-enforcement'),
     ],
     deal: deal(168000, 41000, 295000, 2400),
-    why: 'West End foreclosure next to the BeltLine spur — every strategy scores; flip is the fastest.',
+    note: 'West End foreclosure next to the BeltLine spur — every strategy scores; flip is the fastest.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-027',
@@ -614,13 +580,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1950,
     estimatedValue: 250000,
     estimatedEquityPct: 0.46,
-    opportunityScore: scores(83, 88, 86, 71),
     signals: [
       signal('TAX_SALE', 0.85, '2026-09-07', 'MOCK/tax-commissioner'),
       signal('PREFORECLOSURE', 0.66, '2026-07-05', 'MOCK/lis-pendens'),
     ],
     deal: deal(135000, 34000, 250000, 2300),
-    why: 'East Point tax-sale duplex — airport-adjacent rents and a wholesale fallback if you pass.',
+    note: 'East Point tax-sale duplex — airport-adjacent rents and a wholesale fallback if you pass.',
   }),
   Object.freeze({
     id: 'DEMO-ATL-028',
@@ -637,13 +602,12 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1947,
     estimatedValue: 245000,
     estimatedEquityPct: 0.37,
-    opportunityScore: scores(82, 80, 81, 66),
     signals: [
       signal('DISTRESS', 0.80, '2026-05-02', 'MOCK/utility-shutoff'),
       signal('PREFORECLOSURE', 0.69, '2026-08-19', 'MOCK/lis-pendens'),
     ],
     deal: deal(154000, 29000, 245000, 1950),
-    why: 'College Park vacant with a pending notice — Historic District comps already moved.',
+    note: 'College Park vacant with a pending notice — Historic District comps already moved.',
   }),
   Object.freeze({
     id: 'MOCK-ATL-029',
@@ -660,12 +624,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1963,
     estimatedValue: 220000,
     estimatedEquityPct: 0.42,
-    opportunityScore: scores(85, 78, 80, 69),
     signals: [
       signal('FORECLOSURE', 0.84, '2026-08-21', 'MOCK/court-docket'),
     ],
     deal: deal(128000, 26000, 220000, 1800),
-    why: 'Gresham Park noticed ranch — simple paint-and-roof flip with a wholesale out.',
+    note: 'Gresham Park noticed ranch — simple paint-and-roof flip with a wholesale out.',
   }),
   Object.freeze({
     id: 'MOCK-ATL-030',
@@ -682,12 +645,11 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     yearBuilt: 1972,
     estimatedValue: 260000,
     estimatedEquityPct: 0.36,
-    opportunityScore: scores(77, 83, 79, 58),
     signals: [
       signal('PREFORECLOSURE', 0.76, '2026-08-11', 'MOCK/lis-pendens'),
       signal('DISTRESS', 0.61, '2026-06-01', 'MOCK/code-enforcement'),
     ],
     deal: deal(166000, 28000, 260000, 2100),
-    why: 'Panthersville four-bed on a late note — rent it, do not over-improve it.',
+    note: 'Panthersville four-bed on a late note — rent it, do not over-improve it.',
   }),
 ]);

@@ -25,7 +25,7 @@ The left **5-minute demo** rail shows the next step. Press **Send this phrase** 
    - Opportunity Vision ON
    - Ranks the mock neighborhood
    - Exactly **4** strong candidates activate
-   - Best turns **gold** (TOP_PICK)
+   - Best turns **gold** (head of the composite ranking, not a field on the row)
    - Camera focuses that house
 3. `Why?` — why-this-matters for the focused house
 4. `Show me the deal` — Deal Vision on the globe (FLIP / RENT / BRRRR / WHOLESALE)
@@ -41,7 +41,7 @@ Classic GEV chrome: `TERRASIGNAL_PRODUCT=classic` or `?product=classic`.
 This agent VM cannot initialize Cesium WebGL. On a GPU machine, also confirm:
 
 - Globe appears under the calm investor HUD (no TOP SECRET / filter dashboard). Black void + Cesium/Esri credits without Earth is a failure; after Atlanta/Decatur a gray ellipsoid without imagery must show `#ts-globe-error`
-- After Atlanta/Decatur, semantic pulses use the render governor only (FORECLOSURE heartbeat, TAX_SALE vertical, DISTRESS shimmer, LISTED ring, TOP_PICK gold)
+- After Atlanta/Decatur, semantic pulses use the render governor only (FORECLOSURE heartbeat, TAX_SALE vertical, DISTRESS shimmer, LISTED ring, gold halo on the ranked top pick)
 - `prefers-reduced-motion: reduce` freezes motion
 - Clicking a pulse focuses that mock house
 - OpenSky / FIRMS / cables / news stay off

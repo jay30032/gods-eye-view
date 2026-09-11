@@ -3,13 +3,16 @@ import { compositeScore, primarySignal } from './mock/schema.js';
 import { whyThisMatters } from './focus.js';
 
 const HOLD_ID = 'investor-drive';
-const STRONG = new Set(['FORECLOSURE', 'TAX_SALE', 'TOP_PICK']);
+const URGENT_SIGNALS = new Set(['FORECLOSURE', 'TAX_SALE']);
+const DRIVE_MIN_COMPOSITE = 86;
+const DRIVE_MIN_CONFIDENCE = 0.78;
 
+/** Worth a detour: a high composite, or a clock already running on the house. */
 export function isStrongDriveSignal(property) {
   const signal = primarySignal(property);
   return Boolean(
-    (signal && STRONG.has(signal.type) && signal.confidence >= 0.78)
-    || compositeScore(property) >= 86,
+    compositeScore(property) >= DRIVE_MIN_COMPOSITE
+    || (signal && URGENT_SIGNALS.has(signal.type) && signal.confidence >= DRIVE_MIN_CONFIDENCE),
   );
 }
 

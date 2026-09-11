@@ -154,7 +154,7 @@ export function createOpportunityVisualManager({
     const type = signal?.type || 'DISTRESS';
     const look = lookForSignal(type);
     const focused = property.id === focusedId;
-    const top = property.id === topPickId || isTopPick(property);
+    const top = isTopPick(property.id, topPickId);
     const saved = property.id === savedId;
     const dealBoost = dealStrategy
       ? Number(property.opportunityScore?.[dealStrategy] || 0) / 100

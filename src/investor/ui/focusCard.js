@@ -1,4 +1,12 @@
 import { focusCardModel, formatPct, formatUsd, verdictLabel } from '../focus.js';
+import { escapeHtml } from './escapeHtml.js';
+
+const STRATEGY_LABELS = Object.freeze({
+  flip: 'FLIP',
+  rental: 'RENT',
+  brrrr: 'BRRRR',
+  wholesale: 'WHOLESALE',
+});
 
 export function renderFocusCard(property, options = {}) {
   const root = document.getElementById('ts-focus-card');
@@ -12,14 +20,18 @@ export function renderFocusCard(property, options = {}) {
   root.hidden = false;
   root.innerHTML = `
     <header>
-      <span class="ts-kicker">${model.signalType.replaceAll('_', ' ')} · ${model.signalConfidence}%</span>
-      <strong>${model.address}</strong>
-      <span>${model.neighborhood || ''} · ${String(model.propertyType).toUpperCase()}</span>
+      <span class="ts-kicker ts-kicker-mock">MOCK</span>
+      <span class="ts-kicker">${escapeHtml(model.signalType.replaceAll('_', ' '))} · ${model.signalConfidence}%</span>
+      <strong>${escapeHtml(model.address)}</strong>
+      <span>${escapeHtml(model.neighborhood || '')} · ${escapeHtml(String(model.propertyType).toUpperCase())}</span>
+      <span class="ts-focus-score">Score ${model.score}</span>
     </header>
-    <p class="ts-why">${model.why}</p>
+    ${renderDrivers(model)}
+    ${renderStrategyStrip(model)}
+    <p class="ts-why">${escapeHtml(model.why)}</p>
     <dl class="ts-focus-glance">
       <div><dt>Score</dt><dd>${model.score}</dd></div>
-      <div><dt>Path</dt><dd>${String(model.strategy).toUpperCase()}</dd></div>
+      <div><dt>Path</dt><dd>${escapeHtml(String(model.strategy).toUpperCase())}</dd></div>
       ${options.revealDeal ? `
       <div><dt>Value</dt><dd>${model.estimatedValue}</dd></div>
       <div><dt>Equity</dt><dd>${model.estimatedEquityPct}</dd></div>
@@ -31,6 +43,22 @@ export function renderFocusCard(property, options = {}) {
       <button type="button" data-ts-focus-action="deal">Show deal</button>
     </footer>
   `;
+}
+
+/** One line of why the score is what it is, straight from the scorer. */
+function renderDrivers(model) {
+  if (!model.drivers.length) return '';
+  return `<p class="ts-drivers">${model.drivers.map(escapeHtml).join(' · ')}</p>`;
+}
+
+/** All four paths at a glance, so the best one is a comparison and not a claim. */
+function renderStrategyStrip(model) {
+  const cells = Object.entries(STRATEGY_LABELS).map(([key, label]) => {
+    const score = Number(model.scores?.[key]) || 0;
+    const best = key === model.bestStrategy ? ' is-best' : '';
+    return `<span class="ts-strategy${best}">${label} ${score}</span>`;
+  });
+  return `<p class="ts-strategy-strip">${cells.join(' · ')}</p>`;
 }
 
 function line(label, value) {
