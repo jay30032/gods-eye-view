@@ -1,4 +1,5 @@
 import { scoreProperty } from '../scoring.js';
+import { AUCTION_SIGNAL_TYPES, COUNTIES } from '../georgia.js';
 
 export const SIGNAL_TYPES = Object.freeze([
   'FORECLOSURE',
@@ -7,6 +8,26 @@ export const SIGNAL_TYPES = Object.freeze([
   'DISTRESS',
   'LISTED_OPPORTUNITY',
 ]);
+
+/**
+ * What each enum key is actually called in Georgia. The keys stay stable so the
+ * visuals and the LOD logic do not churn; only the words a human reads change.
+ * There is no recorded Notice of Default in a non-judicial state, so
+ * PREFORECLOSURE is a servicer delinquency, not a courthouse filing.
+ */
+export const SIGNAL_LABELS = Object.freeze({
+  FORECLOSURE: 'Notice of Sale Under Power',
+  PREFORECLOSURE: 'Mortgage delinquency',
+  TAX_SALE: 'Tax sale (fi. fa.)',
+  DISTRESS: 'Distress',
+  LISTED_OPPORTUNITY: 'Listed under comps',
+});
+
+export { AUCTION_SIGNAL_TYPES };
+
+export function signalLabel(type) {
+  return SIGNAL_LABELS[type] || SIGNAL_LABELS.DISTRESS;
+}
 
 export const PROPERTY_TYPES = Object.freeze([
   'sfr',
@@ -78,6 +99,8 @@ export function validateProperty(property) {
   if (!Number.isFinite(Number(property.lat))) errors.push('lat');
   if (!Number.isFinite(Number(property.lng))) errors.push('lng');
   if (!property.propertyType) errors.push('propertyType');
+  // A sale date cannot be derived without knowing whose courthouse it is on.
+  if (!Object.hasOwn(COUNTIES, String(property.county || ''))) errors.push('county');
   if (!Number.isFinite(Number(property.estimatedValue))) errors.push('estimatedValue');
   if (!Number.isFinite(Number(property.estimatedEquityPct))) errors.push('estimatedEquityPct');
   for (const [field, message] of Object.entries(DERIVED_FIELDS)) {

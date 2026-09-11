@@ -7,6 +7,7 @@ import { ATLANTA_DECATUR_PROPERTIES } from './atlantaDecatur.js';
 import { createMockPropertyProvider } from './provider.js';
 import { validateProperty, SIGNAL_TYPES } from './schema.js';
 import { STRATEGY_KEYS } from '../scoring.js';
+import { COUNTIES, isAuctionSignal } from '../georgia.js';
 import { findMoney, searchMockProperties } from './search.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,97 @@ test('the validator rejects a row that types its own score, why, or ranking labe
   assert.ok(validateProperty({ ...base, composite: 99 }).some((e) => /composite/.test(e)));
   const labelled = { ...base, signals: [{ type: RANK_LABEL, confidence: 0.9, effectiveDate: '2026-08-12', source: 'MOCK/ranker' }] };
   assert.ok(validateProperty(labelled).some((e) => /signals\[0\]\.type/.test(e)));
+});
+
+test('every row names the county whose courthouse it would sell on', () => {
+  for (const property of ATLANTA_DECATUR_PROPERTIES) {
+    assert.ok(Object.hasOwn(COUNTIES, property.county), `${property.id} county ${property.county}`);
+  }
+  const counties = ATLANTA_DECATUR_PROPERTIES.map((row) => row.county);
+  assert.ok(counties.includes('dekalb') && counties.includes('fulton'));
+});
+
+test('notes are place and condition only — no strategy talk, no numbers', () => {
+  // The note is local colour. Anything that sounds like underwriting belongs
+  // in the generated Why, where it is derived and cannot go stale.
+  const BANNED = /\b(flip|flips|flipping|spread|refi|refinance|wholesale|brrrr|rental|rentals|cash[- ]?flow|clears|works)\b|[$%]|\d+\s*(?:percent|k\b)/i;
+  for (const property of ATLANTA_DECATUR_PROPERTIES) {
+    assert.ok(property.note, `${property.id} has no note`);
+    const hit = property.note.match(BANNED);
+    assert.equal(hit, null, `${property.id} note says "${hit?.[0]}": ${property.note}`);
+    assert.equal(property.note.trim().split(/(?<=\.)\s+/).length, 1, `${property.id} note is more than one sentence`);
+  }
+});
+
+test('sources read like the feed they would actually come from', () => {
+  const ORGAN = { dekalb: 'The Champion', fulton: 'Fulton County Daily Report' };
+  const TAX = { dekalb: 'DeKalb', fulton: 'Fulton' };
+  for (const property of ATLANTA_DECATUR_PROPERTIES) {
+    for (const signal of property.signals) {
+      const where = `${property.id} ${signal.type}`;
+      assert.match(signal.source, /^MOCK\//, where);
+      if (signal.type === 'FORECLOSURE') {
+        assert.equal(signal.source, `MOCK/notice-of-sale — ${ORGAN[property.county]}`, where);
+      } else if (signal.type === 'TAX_SALE') {
+        assert.equal(signal.source, `MOCK/${TAX[property.county]} Tax Commissioner tax sale list`, where);
+      } else if (signal.type === 'PREFORECLOSURE') {
+        // Georgia records no Notice of Default, so this is a servicer feed.
+        assert.equal(signal.source, 'MOCK/90-day delinquency — servicer feed', where);
+      } else if (signal.type === 'LISTED_OPPORTUNITY') {
+        assert.equal(signal.source, 'MOCK/FMLS listing under comps', where);
+      } else {
+        assert.match(
+          signal.source,
+          /^MOCK\/(code enforcement — (City of Atlanta|DeKalb County)|water shutoff — (Atlanta|DeKalb) Watershed)$/,
+          where,
+        );
+      }
+      assert.equal(signal.source.includes('lis-pendens'), false, where);
+      assert.equal(signal.source.includes('mls-shadow'), false, where);
+    }
+  }
+});
+
+test('the board shows two different sale dates at the demo clock', () => {
+  const rows = createMockPropertyProvider({ now: NOW }).list();
+  const auctions = rows.filter((row) => row.auction);
+  assert.ok(auctions.length >= 10);
+
+  const dates = auctions.map((row) => row.auction.date.toISOString().slice(0, 10));
+  assert.ok(dates.includes('2026-10-06'), 'no October sale on the board');
+  assert.ok(dates.includes('2026-11-03'), 'no November sale on the board');
+
+  for (const row of auctions) {
+    const primary = row.signals.find((signal) => isAuctionSignal(signal.type));
+    assert.ok(primary, `${row.id} has an auction with no auction signal`);
+    assert.ok(row.auction.daysUntil > 0, `${row.id} sale already passed at the demo clock`);
+    // Every sale is a Tuesday four weeks clear of its notice.
+    assert.equal(row.auction.date.getUTCDay(), 2, row.id);
+  }
+
+  // Only foreclosures and tax sales get a date; nothing else invents one.
+  for (const row of rows.filter((r) => !r.auction)) {
+    assert.equal(row.signals.some((signal) => isAuctionSignal(signal.type)), false, row.id);
+  }
+});
+
+test('a tax sale row carries the redeemable-deed caveat', () => {
+  const rows = createMockPropertyProvider({ now: NOW }).list();
+  for (const row of rows) {
+    const primary = row.signals.find((signal) => isAuctionSignal(signal.type))
+      || row.signals[0];
+    if (primary?.type === 'TAX_SALE') {
+      assert.deepEqual(row.taxDeed, { redemptionMonths: 12, premiumRate: 0.20 }, row.id);
+    } else {
+      assert.equal(row.taxDeed, null, row.id);
+    }
+  }
+});
+
+test('the validator refuses a row with no county', () => {
+  const { county, ...orphan } = ATLANTA_DECATUR_PROPERTIES[0];
+  assert.ok(validateProperty(orphan).includes('county'));
+  assert.ok(validateProperty({ ...orphan, county: 'cobb' }).includes('county'));
 });
 
 test('the dataset source is free of derived fields', () => {

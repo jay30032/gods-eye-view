@@ -24,6 +24,8 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 - [x] Investor path disables OpenSky / FIRMS / cables / news / other GEV live layers
 - [x] Opportunity scores and the Why are derived from underwriting, signals, and equity — never authored
 - [x] Gold pick is the head of the `findMoney` ranking, not a signal on a row
+- [x] Signals read like Georgia: Notice of Sale Under Power, fi. fa. tax sales, servicer delinquency
+- [x] Every foreclosure and tax sale carries a derived first-Tuesday auction date and countdown
 - [x] Phase 2 not started
 
 ## Architecture
@@ -33,6 +35,8 @@ src/investor/
   config.js              product flags (default investor)
   markets.js             Atlanta / Decatur framing
   scoring.js             derived scores, signal strength, drivers, enrichment
+  georgia.js             first-Tuesday sale calendar, counties, legal organs
+  clock.js               the pinned demo clock behind every relative date
   mock/                  DEMO/MOCK inventory + search
   deal/                  deterministic underwriting
   visuals/               governor-held Cesium entities
@@ -108,6 +112,82 @@ or `why` fails `validateProperty`.
 too heavy for a render callback. `createMockPropertyProvider` enriches every row
 once at load and hands back the same frozen objects; visuals read
 `property.opportunityScore` and `property.composite` and never re-score.
+
+## Georgia signal model
+
+The mock feed used to say `lis-pendens` and `court-docket`, which is how
+foreclosure works in a *judicial* state. Georgia is not one, and an investor
+who hunts Atlanta would notice in about four seconds.
+
+**Non-judicial, first Tuesday.** There is no lawsuit and no court date. The
+lender advertises a **Notice of Sale Under Power** in the county's legal organ
+for **four consecutive weeks**, and the sale happens on the **first Tuesday of
+the month** on the courthouse steps. County tax sales — `fi. fa.` executions
+out of the Tax Commissioner — run on the same calendar. If the first Tuesday is
+a legal holiday, which in practice only ever means **January 1 or July 4**, the
+sale slides to the next day.
+
+**So the sale date is derived, not authored.** `georgia.js` computes it:
+`auctionDateForNotice(effectiveDate)` = the first sale Tuesday **on or after**
+`effectiveDate + 28 days`, because the four weekly publications have to clear
+first. A notice published Aug 12 2026 sells Oct 6; one published a month later
+on Sep 9 misses that window and sells Nov 3. Nothing in the dataset types a sale
+date, so none of them can be wrong.
+
+**There is no pre-foreclosure filing.** `PREFORECLOSURE` is a **servicer
+delinquency**, not a courthouse record — the label is "Mortgage delinquency" and
+the source is a 90-day delinquency feed. It gets no auction date, because no
+sale has been advertised.
+
+| County | Legal organ | Courthouse |
+|---|---|---|
+| DeKalb | The Champion | DeKalb County Courthouse, Decatur |
+| Fulton | Fulton County Daily Report | Fulton County Courthouse, Atlanta |
+
+Every row carries a `county` and `validateProperty` requires it: without one
+there is no legal organ to publish in and no courthouse to sell at.
+
+**Labels.** The enum keys are unchanged so the visuals and LOD logic do not
+churn; `SIGNAL_LABELS` supplies the words a human reads.
+
+| Key | Reads as |
+|---|---|
+| `FORECLOSURE` | Notice of Sale Under Power |
+| `PREFORECLOSURE` | Mortgage delinquency |
+| `TAX_SALE` | Tax sale (fi. fa.) |
+| `DISTRESS` | Distress |
+| `LISTED_OPPORTUNITY` | Listed under comps |
+
+**A tax deed is not a deed yet.** Winning a Georgia tax sale buys a
+*redeemable* tax deed: the owner has **12 months** to redeem at a **20%
+premium**. Any exit that needs clear title waits out that year, so the Why on a
+tax-sale row says so out loud rather than quoting a flip timeline that cannot
+happen. Foreclosure rows carry no such caveat.
+
+**Urgency.** A sale already on the calendar is a deadline, not a lead, so
+`signalStrength` adds **+5** when the auction is within **45 days** (still
+clamped to 100). At the demo clock that separates the Oct 6 board from the
+Nov 3 board. The globe label on the focused or gold house appends
+`AUCTION <N>d`, and goes gold inside 14 days.
+
+**The demo clock.** Every "filed 29 days ago" and "auction in 26 days" is
+relative, so a fixed dataset rots as the real calendar moves. `clock.js`
+resolves the date in this order:
+
+1. `?clock=YYYY-MM-DD`
+2. `TERRASIGNAL_DEMO_CLOCK` (see `.env.example`; empty by default)
+3. `DEMO_CLOCK_DEFAULT` = **2026-09-10**, when demo mode is on (`?demo=1` or
+   `TERRASIGNAL_DEMO_MODE`)
+4. otherwise the real clock
+
+`scoring.js` and `focus.js` default their `now` to `demoNow()`; tests pass an
+explicit `now` and never depend on the wall clock.
+
+**Notes carry no underwriting.** Each row's `note` is one sentence of place and
+condition — what the house and the street look like. No strategy names, no
+dollars, no percentages; a test greps the dataset for them. Everything an
+investor would argue with is generated in the Why, where it is derived from the
+calculators and cannot drift.
 
 ## Underwriting model
 

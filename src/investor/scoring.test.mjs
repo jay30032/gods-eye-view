@@ -4,6 +4,7 @@ import { ATLANTA_DECATUR_PROPERTIES } from './mock/atlantaDecatur.js';
 import { analyzePropertyDeal } from './deal/index.js';
 import {
   STRATEGY_KEYS,
+  auctionFor,
   enrichProperty,
   equityScore,
   recencyFactor,
@@ -11,6 +12,7 @@ import {
   scoreStrategy,
   signalAgeDays,
   signalStrength,
+  taxDeedFor,
 } from './scoring.js';
 
 const NOW = Date.UTC(2026, 8, 10);
@@ -24,6 +26,7 @@ function row(overrides = {}) {
   return {
     id: 'MOCK-FIXTURE',
     address: '1 Fixture Ln, Decatur, GA 30030',
+    county: 'dekalb',
     lat: 33.77,
     lng: -84.29,
     propertyType: 'sfr',
@@ -182,11 +185,74 @@ test('discount to value comes from the contract price, not a typed field', () =>
 
 test('drivers read as plain sentences a human can check', () => {
   const { drivers } = scoreProperty(ROW, { now: NOW });
-  assert.ok(drivers.length >= 3);
+  assert.ok(drivers.length >= 4);
   assert.ok(drivers.every((line) => typeof line === 'string' && line.length > 0));
   assert.match(drivers[0], /FORECLOSURE 91%, filed 29 days ago/);
-  assert.match(drivers[1], /41% owner equity, entry 41% under value/);
-  assert.match(drivers[2], /^FLIP strong — \$\d+k profit$/);
+  assert.match(drivers[1], /^Auction Oct 6 — 26 days$/);
+  assert.match(drivers[2], /41% owner equity, entry 41% under value/);
+  assert.match(drivers[3], /^FLIP strong — \$\d+k profit$/);
+});
+
+test('a signal with no sale date contributes no auction driver', () => {
+  const { drivers, auction } = scoreProperty(
+    row({ signals: [signal('DISTRESS', 0.8, '2026-09-01')] }),
+    { now: NOW },
+  );
+  assert.equal(auction, null);
+  assert.equal(drivers.some((line) => line.startsWith('Auction ')), false);
+});
+
+test('a foreclosure notice derives its own first-Tuesday sale', () => {
+  const scored = scoreProperty(ROW, { now: NOW });
+  assert.equal(scored.auction.date.toISOString().slice(0, 10), '2026-10-06');
+  assert.equal(scored.auction.daysUntil, 26);
+  assert.equal(scored.auction.county, 'DeKalb');
+  assert.equal(scored.auction.legalOrgan, 'The Champion');
+  assert.equal(scored.auction.courthouse, 'DeKalb County Courthouse, Decatur');
+  assert.equal(scored.taxDeed, null);
+});
+
+test('a tax sale carries the redeemable-deed caveat, nothing else does', () => {
+  const taxRow = row({
+    county: 'fulton',
+    signals: [signal('TAX_SALE', 0.85, '2026-08-20')],
+  });
+  const scored = scoreProperty(taxRow, { now: NOW });
+  assert.deepEqual(scored.taxDeed, { redemptionMonths: 12, premiumRate: 0.20 });
+  assert.equal(scored.auction.county, 'Fulton');
+  assert.equal(scored.auction.date.toISOString().slice(0, 10), '2026-10-06');
+
+  assert.equal(taxDeedFor({ type: 'TAX_SALE' }).redemptionMonths, 12);
+  assert.equal(taxDeedFor({ type: 'FORECLOSURE' }), null);
+  assert.equal(taxDeedFor(null), null);
+});
+
+test('a sale inside 45 days adds five points of urgency, and only then', () => {
+  const near = signalStrength(row({ signals: [signal('FORECLOSURE', 0.5, '2026-08-12')] }), { now: NOW });
+  const far = signalStrength(row({ signals: [signal('FORECLOSURE', 0.5, '2026-09-09')] }), { now: NOW });
+  assert.equal(near.auction.daysUntil, 26);
+  assert.equal(far.auction.daysUntil, 54);
+  // Same type, same confidence, same freshness band — only the sale date moves.
+  assert.equal(near.strength - far.strength, 5);
+
+  // A delinquency has no sale date, so it can never collect the bonus.
+  const delinquent = signalStrength(row({ signals: [signal('PREFORECLOSURE', 0.5, '2026-08-12')] }), { now: NOW });
+  assert.equal(delinquent.auction, null);
+  assert.equal(delinquent.strength, 0.80 * 0.5 * 100);
+
+  // A sale already held is a closed door, not an urgent one: age decay only.
+  const past = signalStrength(row({ signals: [signal('FORECLOSURE', 0.5, '2026-01-05')] }), { now: NOW });
+  assert.ok(past.auction.daysUntil < 0);
+  assert.equal(past.strength, 1.0 * 0.5 * 100 * recencyFactor(past.ageDays));
+});
+
+test('auctionFor refuses to guess without a county or a parsable date', () => {
+  const fixture = row();
+  const primary = fixture.signals[0];
+  assert.ok(auctionFor(fixture, primary, { now: NOW }));
+  assert.equal(auctionFor({ ...fixture, county: 'cobb' }, primary, { now: NOW }), null);
+  assert.equal(auctionFor(fixture, { ...primary, effectiveDate: 'soon' }, { now: NOW }), null);
+  assert.equal(auctionFor(fixture, null, { now: NOW }), null);
 });
 
 test('enrichProperty returns a new frozen row and never touches the input', () => {

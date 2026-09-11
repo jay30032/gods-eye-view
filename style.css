@@ -9849,6 +9849,26 @@ body.terrasignal-investor #cesiumContainer canvas {
   color: rgba(244, 239, 228, 0.62);
 }
 
+#ts-focus-card .ts-source {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: rgba(244, 239, 228, 0.45);
+}
+
+.ts-auction {
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border-left: 2px solid rgba(244, 239, 228, 0.25);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: rgba(244, 239, 228, 0.72);
+}
+
+.ts-auction.is-urgent {
+  border-left-color: #e0b84a;
+  color: #e0b84a;
+}
+
 .ts-strategy-strip {
   display: flex;
   flex-wrap: wrap;

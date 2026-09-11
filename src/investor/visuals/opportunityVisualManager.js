@@ -21,6 +21,8 @@ import { SCAN_DURATION_MS, scanAlpha, scanIsActive, scanProgress, scanRadiusM } 
 
 const HOLD_ID = 'investor-opportunity';
 const BASE_RADIUS = 14;
+// Inside two weeks the sale is the headline, so the label goes gold with it.
+const AUCTION_LABEL_GOLD_DAYS = 14;
 
 function cesiumColor(Cesium, rgba, alphaOverride) {
   const [r, g, b, a] = rgba;
@@ -251,13 +253,23 @@ export function createOpportunityVisualManager({
         ? `\n${dealVisionCaption(dealStrategy, dealAnalysis)}`
         : '';
       const savedText = saved ? '\nSAVED' : '';
+      // Only the house in hand carries a countdown; the rest of the board is
+      // already saying enough with colour and pulse.
+      const auction = (focused || top) ? property.auction : null;
+      const auctionDays = Number.isFinite(auction?.daysUntil) && auction.daysUntil >= 0
+        ? auction.daysUntil
+        : null;
+      const auctionText = auctionDays == null ? '' : `\nAUCTION ${auctionDays}d`;
+      const auctionUrgent = auctionDays != null && auctionDays <= AUCTION_LABEL_GOLD_DAYS;
       addOwned(`label:${property.id}`, entities.add({
         id: `ts-label-${property.id}`,
         position,
         label: {
-          text: `${property.address.split(',')[0]}${savedText}${dealText}`,
+          text: `${property.address.split(',')[0]}${savedText}${auctionText}${dealText}`,
           font: '11px Inter, sans-serif',
-          fillColor: Cesium.Color.WHITE,
+          fillColor: auctionUrgent
+            ? new Cesium.Color(GOLD.r, GOLD.g, GOLD.b, 1)
+            : Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 2,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,

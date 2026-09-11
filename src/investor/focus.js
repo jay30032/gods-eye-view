@@ -1,6 +1,8 @@
-import { primarySignal, compositeScore } from './mock/schema.js';
+import { primarySignal, compositeScore, signalLabel } from './mock/schema.js';
 import { analyzePropertyDeal, bestStrategyFor } from './deal/index.js';
 import { signalStrength, strategyHeadline } from './scoring.js';
+import { demoNow } from './clock.js';
+import { countdownWords, formatSaleDate } from './georgia.js';
 
 const SIGNAL_DATE = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -8,14 +10,51 @@ const SIGNAL_DATE = new Intl.DateTimeFormat('en-US', {
   timeZone: 'UTC',
 });
 
-function signalWords(type) {
-  const words = String(type || '').replaceAll('_', ' ').toLowerCase();
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Signal';
+/** `DeKalb County Courthouse, Decatur` is the record; you say the first half. */
+function courthouseWords(courthouse) {
+  return String(courthouse || '').split(',')[0].trim();
 }
 
-/** `MOCK/county-notice` reads as `county-notice` out loud; the card keeps the kicker. */
+/**
+ * The sale a notice is advertising, said the way it would be said out loud.
+ * Georgia sales are always a Tuesday, so naming the day is not decoration.
+ */
+export function auctionSentence(auction) {
+  if (!auction) return null;
+  const when = formatSaleDate(auction.date);
+  const countdown = countdownWords(auction.daysUntil);
+  if (!when || !countdown) return null;
+  return `Auction Tuesday ${when} at the ${courthouseWords(auction.courthouse)} — ${countdown}.`;
+}
+
+/** A redeemable deed means the exit clock does not start at the sale. */
+export function taxDeedSentence(taxDeed) {
+  if (!taxDeed) return null;
+  const premium = Math.round(Number(taxDeed.premiumRate || 0) * 100);
+  return `Tax deed — ${taxDeed.redemptionMonths}-month redemption at a ${premium}% premium `
+    + 'applies, so the flip clock starts after redemption.';
+}
+
+/**
+ * `MOCK/notice-of-sale — The Champion` is said as `The Champion`: the kebab
+ * slug in front is the feed's name for the filing, and the label already said
+ * it. Sources whose lead is real words (`code enforcement — City of Atlanta`)
+ * keep both halves. The card keeps the MOCK kicker either way.
+ */
 function spokenSource(source) {
-  return String(source || 'mock source').replace(/^MOCK\//i, '');
+  const text = String(source || 'mock source').replace(/^MOCK\//i, '');
+  const [lead, ...rest] = text.split(' — ');
+  if (rest.length && /^[a-z0-9]+(-[a-z0-9]+)+$/.test(lead)) return rest.join(' — ');
+  return text;
+}
+
+/** `filed Aug 12 (29 days ago)` — but a filing from this morning says today. */
+function filedWords(effectiveDate, ageDays) {
+  const filed = filedOn(effectiveDate);
+  if (!filed || ageDays == null) return '';
+  if (ageDays === 0) return `filed ${filed} (today), `;
+  if (ageDays === 1) return `filed ${filed} (1 day ago), `;
+  return `filed ${filed} (${ageDays} days ago), `;
 }
 
 function filedOn(effectiveDate) {
@@ -42,7 +81,7 @@ function safeAnalyze(property, strategy) {
  * @param {object|null} [analysis] used only when it is the best strategy's run
  * @param {{now?:number|Date}} [options]
  */
-export function whyThisMatters(property, analysis = null, { now = Date.now() } = {}) {
+export function whyThisMatters(property, analysis = null, { now = demoNow() } = {}) {
   if (!property) return '';
   const best = bestStrategyFor(property);
   const run = analysis?.strategy === best ? analysis : safeAnalyze(property, best);
@@ -50,14 +89,13 @@ export function whyThisMatters(property, analysis = null, { now = Date.now() } =
   const sentences = [];
 
   if (signal.type) {
-    const filed = filedOn(signal.effectiveDate);
-    const when = filed && signal.ageDays != null
-      ? `filed ${filed} (${signal.ageDays} days ago), `
-      : '';
     sentences.push(
-      `${signalWords(signal.type)} — ${spokenSource(signal.source)}, `
-      + `${when}${Math.round(signal.confidence * 100)}% confidence.`,
+      `${signalLabel(signal.type)} — ${spokenSource(signal.source)}, `
+      + `${filedWords(signal.effectiveDate, signal.ageDays)}`
+      + `${Math.round(signal.confidence * 100)}% confidence.`,
     );
+    const auction = auctionSentence(signal.auction);
+    if (auction) sentences.push(auction);
   }
 
   const equityPct = Math.round(Number(property.estimatedEquityPct || 0) * 100);
@@ -70,6 +108,8 @@ export function whyThisMatters(property, analysis = null, { now = Date.now() } =
   );
 
   if (run) sentences.push(`Best path: ${best.toUpperCase()} — ${strategyHeadline(run)}.`);
+  const redemption = taxDeedSentence(signal.taxDeed);
+  if (redemption) sentences.push(redemption);
   if (property.note) sentences.push(String(property.note));
   return sentences.join(' ');
 }
@@ -148,7 +188,12 @@ export function focusCardModel(property, { analysis = null, strategy = null, rev
     scores: property.opportunityScore || {},
     drivers: Array.isArray(property.drivers) ? property.drivers.slice() : [],
     signalType: signal?.type || 'DISTRESS',
+    signalLabel: signalLabel(signal?.type),
+    signalSource: spokenSource(signal?.source),
+    signalDate: filedOn(signal?.effectiveDate),
     signalConfidence: signal ? Math.round(signal.confidence * 100) : 0,
+    auction: property.auction || null,
+    taxDeed: property.taxDeed || null,
     bestStrategy,
     strategy: best,
     analysis: run,

@@ -17,6 +17,16 @@
  */
 import { analyzePropertyDeal } from './deal/index.js';
 import { primarySignal } from './mock/schema.js';
+import { demoNow } from './clock.js';
+import {
+  TAX_DEED,
+  auctionDateForNotice,
+  countdownWords,
+  daysUntil,
+  formatSaleDate,
+  isAuctionSignal,
+  resolveCounty,
+} from './georgia.js';
 
 export const STRATEGY_KEYS = Object.freeze(['flip', 'rental', 'brrrr', 'wholesale']);
 
@@ -38,6 +48,8 @@ const STACK_BONUS_MAX = 16;
 const EQUITY_FULL_PCT = 0.45;
 const SUPPORT_BONUS = 2;
 const SUPPORT_BONUS_MAX = 6;
+const AUCTION_URGENT_DAYS = 45;
+const AUCTION_URGENCY_BONUS = 5;
 
 export function clamp01(value) {
   const n = Number(value);
@@ -70,7 +82,7 @@ export function parseSignalDate(effectiveDate) {
 }
 
 /** Whole days between a signal's effective date and `now`, never negative. */
-export function signalAgeDays(effectiveDate, now = Date.now()) {
+export function signalAgeDays(effectiveDate, now = demoNow()) {
   const filed = parseSignalDate(effectiveDate);
   const today = utcDay(now);
   if (filed == null || today == null) return null;
@@ -125,10 +137,33 @@ export function scoreStrategy(analysis) {
 }
 
 /**
- * 0–100 for the urgency of a property's signal stack, plus the primary
- * signal's age so callers do not have to re-parse the date.
+ * The courthouse-steps sale a foreclosure or tax-sale notice is advertising.
+ * Non-auction signals have no sale date, so they get null rather than a guess.
  */
-export function signalStrength(property, { now = Date.now() } = {}) {
+export function auctionFor(property, signal, { now = demoNow() } = {}) {
+  if (!signal || !isAuctionSignal(signal.type)) return null;
+  const county = resolveCounty(property?.county);
+  const date = auctionDateForNotice(signal.effectiveDate);
+  if (!county || !date) return null;
+  return Object.freeze({
+    date,
+    daysUntil: daysUntil(date, now),
+    county: county.name,
+    legalOrgan: county.legalOrgan,
+    courthouse: county.courthouse,
+  });
+}
+
+/** A Georgia tax deed is redeemable, which delays any exit that needs title. */
+export function taxDeedFor(signal) {
+  return signal?.type === 'TAX_SALE' ? TAX_DEED : null;
+}
+
+/**
+ * 0–100 for the urgency of a property's signal stack, plus the primary
+ * signal's age and sale date so callers do not have to re-derive them.
+ */
+export function signalStrength(property, { now = demoNow() } = {}) {
   const signals = Array.isArray(property?.signals) ? property.signals : [];
   const primary = primarySignal(property);
   if (!primary) {
@@ -139,6 +174,8 @@ export function signalStrength(property, { now = Date.now() } = {}) {
       confidence: 0,
       source: null,
       effectiveDate: null,
+      auction: null,
+      taxDeed: null,
     });
   }
   const weight = SIGNAL_WEIGHTS[primary.type] ?? 0.5;
@@ -146,13 +183,21 @@ export function signalStrength(property, { now = Date.now() } = {}) {
   const ageDays = signalAgeDays(primary.effectiveDate, now);
   const base = weight * confidence * 100 * recencyFactor(ageDays);
   const stacked = Math.min(STACK_BONUS_MAX, Math.max(0, signals.length - 1) * STACK_BONUS);
+  const auction = auctionFor(property, primary, { now });
+  // A sale already on the calendar is a deadline, not a lead.
+  const urgent = auction
+    && Number.isFinite(auction.daysUntil)
+    && auction.daysUntil >= 0
+    && auction.daysUntil <= AUCTION_URGENT_DAYS;
   return Object.freeze({
-    strength: clamp(base + stacked, 0, 100),
+    strength: clamp(base + stacked + (urgent ? AUCTION_URGENCY_BONUS : 0), 0, 100),
     ageDays,
     type: primary.type,
     confidence,
     source: primary.source || null,
     effectiveDate: primary.effectiveDate || null,
+    auction,
+    taxDeed: taxDeedFor(primary),
   });
 }
 
@@ -222,6 +267,9 @@ function buildDrivers(property, { signal, discountToValue, bestStrategy, analyse
     const age = signal.ageDays == null ? 'date unknown' : `filed ${signal.ageDays} days ago`;
     drivers.push(`${signal.type.replaceAll('_', ' ')} ${Math.round(signal.confidence * 100)}%, ${age}`);
   }
+  if (signal.auction && Number.isFinite(signal.auction.daysUntil)) {
+    drivers.push(`Auction ${formatSaleDate(signal.auction.date)} — ${countdownWords(signal.auction.daysUntil)}`);
+  }
   drivers.push(
     `${Math.round(num(property?.estimatedEquityPct) * 100)}% owner equity, `
     + `entry ${Math.round(discountToValue * 100)}% under value`,
@@ -242,7 +290,7 @@ function buildDrivers(property, { signal, discountToValue, bestStrategy, analyse
  * @param {object} property mock property row
  * @param {{now?:number|Date, assumptions?:object}} [options]
  */
-export function scoreProperty(property, { now = Date.now(), assumptions = null } = {}) {
+export function scoreProperty(property, { now = demoNow(), assumptions = null } = {}) {
   const overrides = assumptions && typeof assumptions === 'object' ? assumptions : {};
   const analyses = {};
   const scores = {};
@@ -289,6 +337,8 @@ export function scoreProperty(property, { now = Date.now(), assumptions = null }
     bestScore,
     signalStrength: signal.strength,
     signalAgeDays: signal.ageDays,
+    auction: signal.auction,
+    taxDeed: signal.taxDeed,
     equityScore: equity,
     discountToValue,
     composite,
@@ -314,5 +364,7 @@ export function enrichProperty(property, options = {}) {
     bestStrategy: scored.bestStrategy,
     drivers: scored.drivers,
     analyses: scored.analyses,
+    auction: scored.auction,
+    taxDeed: scored.taxDeed,
   });
 }

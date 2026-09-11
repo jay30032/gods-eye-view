@@ -70,6 +70,8 @@ export function readInvestorConfig() {
     product,
     investor,
     demoMode: readBool('TERRASIGNAL_DEMO_MODE', true),
+    // Empty means "use the real calendar" unless demo mode pins it; see clock.js.
+    demoClock: readEnv('TERRASIGNAL_DEMO_CLOCK', '').trim(),
     defaultMarket: (readEnv('TERRASIGNAL_DEFAULT_MARKET', 'atlanta') || 'atlanta').trim().toLowerCase(),
     propertyProvider: (readEnv('PROPERTY_PROVIDER', 'mock') || 'mock').trim().toLowerCase(),
     opportunityVisionDefault: readBool('TERRASIGNAL_OPPORTUNITY_VISION', true),

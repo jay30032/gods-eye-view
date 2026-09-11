@@ -1,4 +1,5 @@
 import { focusCardModel, formatPct, formatUsd, verdictLabel } from '../focus.js';
+import { countdownWords, formatSaleDate, NOTICE_WEEKS } from '../georgia.js';
 import { escapeHtml } from './escapeHtml.js';
 
 const STRATEGY_LABELS = Object.freeze({
@@ -21,11 +22,13 @@ export function renderFocusCard(property, options = {}) {
   root.innerHTML = `
     <header>
       <span class="ts-kicker ts-kicker-mock">MOCK</span>
-      <span class="ts-kicker">${escapeHtml(model.signalType.replaceAll('_', ' '))} · ${model.signalConfidence}%</span>
+      <span class="ts-kicker">${escapeHtml(model.signalLabel)} · ${model.signalConfidence}%</span>
       <strong>${escapeHtml(model.address)}</strong>
       <span>${escapeHtml(model.neighborhood || '')} · ${escapeHtml(String(model.propertyType).toUpperCase())}</span>
+      ${renderSourceLine(model)}
       <span class="ts-focus-score">Score ${model.score}</span>
     </header>
+    ${renderAuctionTimeline(model)}
     ${renderDrivers(model)}
     ${renderStrategyStrip(model)}
     <p class="ts-why">${escapeHtml(model.why)}</p>
@@ -43,6 +46,31 @@ export function renderFocusCard(property, options = {}) {
       <button type="button" data-ts-focus-action="deal">Show deal</button>
     </footer>
   `;
+}
+
+/** Who published it and where — a Georgia notice is only real in a legal organ. */
+function renderSourceLine(model) {
+  const county = model.auction?.county;
+  const organ = model.auction?.legalOrgan;
+  const where = county && organ ? `${county} County · ${organ}` : model.signalSource;
+  return `<span class="ts-source">${escapeHtml(where)}</span>`;
+}
+
+/**
+ * The whole Georgia clock in one line: when it was published, the four weekly
+ * runs that have to clear, and the first Tuesday it can actually sell.
+ */
+function renderAuctionTimeline(model) {
+  const auction = model.auction;
+  if (!auction) return '';
+  const sale = formatSaleDate(auction.date);
+  if (!model.signalDate || !sale) return '';
+  const days = Number.isFinite(auction.daysUntil) ? auction.daysUntil : null;
+  const urgent = days != null && days >= 0 && days <= 14 ? ' is-urgent' : '';
+  const countdown = days == null ? '' : ` (${days >= 0 ? `${days}d` : countdownWords(days)})`;
+  return `<p class="ts-auction${urgent}">`
+    + `Notice ${escapeHtml(model.signalDate)} → ${NOTICE_WEEKS}-week ad run → `
+    + `Auction ${escapeHtml(sale)}${escapeHtml(countdown)}</p>`;
 }
 
 /** One line of why the score is what it is, straight from the scorer. */

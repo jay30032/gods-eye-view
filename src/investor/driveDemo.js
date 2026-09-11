@@ -1,5 +1,6 @@
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
 import { compositeScore, primarySignal } from './mock/schema.js';
+import { countdownWords } from './georgia.js';
 import { whyThisMatters } from './focus.js';
 
 const HOLD_ID = 'investor-drive';
@@ -14,6 +15,23 @@ export function isStrongDriveSignal(property) {
     compositeScore(property) >= DRIVE_MIN_COMPOSITE
     || (signal && URGENT_SIGNALS.has(signal.type) && signal.confidence >= DRIVE_MIN_CONFIDENCE),
   );
+}
+
+/**
+ * A house with a sale on the calendar gets announced by its deadline; anything
+ * else gets announced by its signal.
+ */
+export function announceLine(property) {
+  const where = String(property?.address || 'this property').split(',')[0];
+  const signal = primarySignal(property);
+  const auction = property?.auction;
+  if (auction && Number.isFinite(auction.daysUntil)) {
+    const lead = signal?.type === 'TAX_SALE' ? 'Tax sale' : 'Notice of sale';
+    const days = auction.daysUntil;
+    if (days > 1) return `${lead} at ${where} — auction in ${days} days.`;
+    return `${lead} at ${where} — auction ${countdownWords(days)}.`;
+  }
+  return `Strong ${String(signal?.type || 'signal').replaceAll('_', ' ').toLowerCase()} at ${where}.`;
 }
 
 export function buildDriveRoute(properties) {
@@ -64,11 +82,10 @@ export function createDriveDemo({
       duration: 2.1,
     });
     if (announce) {
-      const signal = primarySignal(property);
       onAnnounce?.({
         id: property.id,
         address: property.address,
-        spoken: `Strong ${String(signal?.type || 'signal').replaceAll('_', ' ').toLowerCase()} at ${property.address.split(',')[0]}.`,
+        spoken: announceLine(property),
         why: whyThisMatters(property),
         property,
       });

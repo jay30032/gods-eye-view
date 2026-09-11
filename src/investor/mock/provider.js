@@ -1,6 +1,7 @@
 import { ATLANTA_DECATUR_PROPERTIES } from './atlantaDecatur.js';
 import { cloneProperty, isDemoProperty, validateProperty } from './schema.js';
 import { enrichProperty } from '../scoring.js';
+import { demoNow } from '../clock.js';
 import { resolveMarket } from '../markets.js';
 
 const DATASETS = Object.freeze({
@@ -17,7 +18,7 @@ const DATASETS = Object.freeze({
 export function createMockPropertyProvider({
   marketId = 'atlanta',
   provider = 'mock',
-  now = Date.now(),
+  now = demoNow(),
   assumptions = null,
 } = {}) {
   if (provider && provider !== 'mock') {

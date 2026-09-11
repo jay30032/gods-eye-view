@@ -61,7 +61,8 @@ test('Why speaks the generated explanation and the drivers behind the score', ()
   assert.equal(why.ok, true);
   assert.equal(why.strategy, property.bestStrategy);
   assert.equal(why.spoken, why.why);
-  assert.match(why.why, /Foreclosure/);
+  assert.match(why.why, /Notice of Sale Under Power/);
+  assert.match(why.why, /Auction Tuesday Oct 6/);
   assert.match(why.why, /Best path: FLIP — \$\d+k profit/);
   assert.deepEqual(why.drivers, [...property.drivers]);
   assert.deepEqual(why.scores, property.opportunityScore);

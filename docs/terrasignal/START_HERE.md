@@ -14,6 +14,8 @@ Open:
 
 **http://localhost:4173/?demo=1&welcome=1**
 
+Demo mode pins the clock to **2026-09-10** so every "filed N days ago" and "auction in N days" stays put. Override with `?clock=YYYY-MM-DD` or `TERRASIGNAL_DEMO_CLOCK`.
+
 Vite listens on **4173**. No `CESIUM_ION_TOKEN` or `GOOGLE_MAPS_API_KEY` is required: the keyless path tries Esri World Imagery, falls back to OSM on any failure (with a toast), then keeps `requestRender` until the first painted frame (`tilesLoaded` / non-black center pixel / 10s error). A 4s `investor-first-paint` hold prevents idle `requestRenderMode` before tiles are requested — it is not a forever 60 fps loop. Investor demo caps at **30 fps** on battery/unknown power. Classic GEV (`?product=classic`) stays on its 60 fps idle governor.
 
 The left **5-minute demo** rail shows the next step. Press **Send this phrase** (or type it in the command bar and hit SEND). **Play** auto-advances. The **DEMO** chip toggles the rail if you opened the app without `?demo=1`.
@@ -27,7 +29,7 @@ The left **5-minute demo** rail shows the next step. Press **Send this phrase** 
    - Exactly **4** strong candidates activate
    - Best turns **gold** (head of the composite ranking, not a field on the row)
    - Camera focuses that house
-3. `Why?` — why-this-matters for the focused house
+3. `Why?` — why-this-matters for the focused house, including the first-Tuesday auction date and countdown
 4. `Show me the deal` — Deal Vision on the globe (FLIP / RENT / BRRRR / WHOLESALE)
 5. `Assume rehab is twenty thousand higher` — deterministic +$20k; numbers update
 6. `Save it` — `localStorage` + SAVED sheet + saved-ring feedback
