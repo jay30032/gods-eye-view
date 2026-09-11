@@ -207,22 +207,78 @@ export function applySave(property, state, saver) {
 function formatMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 'zero';
-  return `$${Math.round(n).toLocaleString('en-US')}`;
+  const rounded = Math.round(n);
+  return `${rounded < 0 ? '-' : ''}$${Math.abs(rounded).toLocaleString('en-US')}`;
 }
 
+/** Compact spoken money: $61k above ten grand, exact dollars below it. */
+function speakMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '$0';
+  if (Math.abs(n) >= 10000) {
+    const k = Math.round(n / 1000);
+    return `${k < 0 ? '-' : ''}$${Math.abs(k)}k`;
+  }
+  return formatMoney(n);
+}
+
+function speakPct(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0%';
+  const pct = n * 100;
+  // Single-digit yields need the decimal to stay honest; 4.8% is not 5%.
+  return Math.abs(pct) < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`;
+}
+
+function speakDscr(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(2) : '0.00';
+}
+
+function verdictWord(verdict) {
+  const key = String(verdict || '').trim().toLowerCase();
+  if (key === 'strong') return 'Strong';
+  if (key === 'thin') return 'Thin';
+  return 'Pass';
+}
+
+function shortAddress(property) {
+  return String(property?.address || 'this property').split(',')[0];
+}
+
+/**
+ * One sentence per strategy, leading with the verdict and the numbers an
+ * investor decides on — not a recital of every field on the analysis.
+ */
 export function speakAnalysis(property, strategy, analysis) {
   const name = normalizeStrategy(strategy) || strategy;
+  const where = shortAddress(property);
+  const verdict = verdictWord(analysis?.verdict);
+
   if (name === 'flip') {
-    return `${property.address.split(',')[0]} flip: profit ${formatMoney(analysis.profit)}, ROI ${(analysis.roi * 100).toFixed(1)} percent.`;
+    return `${verdict} flip on ${where}: ${speakMoney(analysis.profit)} profit on `
+      + `${speakMoney(analysis.cashIn)} cash in, ${speakPct(analysis.roi)} cash-on-cash `
+      + `over ${analysis.holdMonths} months.`;
   }
   if (name === 'rental') {
-    return `${property.address.split(',')[0]} rental: ${formatMoney(analysis.cashFlowMonthly)} a month, cap ${(analysis.capRate * 100).toFixed(1)} percent.`;
+    return `${verdict} rental on ${where}: ${formatMoney(analysis.cashFlowMonthly)} a month, `
+      + `${speakPct(analysis.coc)} cash-on-cash, ${speakDscr(analysis.dscr)} DSCR.`;
   }
   if (name === 'brrrr') {
-    return `${property.address.split(',')[0]} BRRRR: cash left in ${formatMoney(analysis.cashLeftIn)}, monthly ${formatMoney(analysis.cashFlowMonthly)}.`;
+    const capital = analysis.cashLeftIn > 0
+      ? `${speakMoney(analysis.cashLeftIn)} left in`
+      : `${speakMoney(analysis.cashOut)} back out`;
+    const returnText = analysis.infiniteReturn ? 'infinite cash-on-cash' : `${speakPct(analysis.coc)} cash-on-cash`;
+    return `${verdict} BRRRR on ${where}: ${capital}, ${formatMoney(analysis.cashFlowMonthly)} a month, `
+      + `${returnText}.`;
   }
   if (name === 'wholesale') {
-    return `${property.address.split(',')[0]} wholesale: assignment ${formatMoney(analysis.assignmentFee)}, spread ${formatMoney(analysis.spread)}.`;
+    if (!analysis.viable) {
+      return `${verdict} wholesale on ${where}: no spread — the 70% offer is `
+        + `${speakMoney(analysis.mao)} against a ${speakMoney(analysis.purchase)} contract.`;
+    }
+    return `${verdict} wholesale on ${where}: ${speakMoney(analysis.assignmentFee)} assignment fee `
+      + `on a ${speakMoney(analysis.spread)} spread.`;
   }
   return whyThisMatters(property, analysis);
 }

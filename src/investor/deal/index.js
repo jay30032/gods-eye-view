@@ -3,8 +3,18 @@ import { analyzeRental } from './rental.js';
 import { analyzeBrrrr } from './brrrr.js';
 import { analyzeWholesale } from './wholesale.js';
 import { DEAL_ASSUMPTIONS, mergeAssumptions } from './assumptions.js';
+import { UNITS_BY_PROPERTY_TYPE, unitsFor } from './units.js';
 
-export { analyzeFlip, analyzeRental, analyzeBrrrr, analyzeWholesale, DEAL_ASSUMPTIONS, mergeAssumptions };
+export {
+  analyzeFlip,
+  analyzeRental,
+  analyzeBrrrr,
+  analyzeWholesale,
+  DEAL_ASSUMPTIONS,
+  mergeAssumptions,
+  unitsFor,
+  UNITS_BY_PROPERTY_TYPE,
+};
 
 const STRATEGIES = Object.freeze({
   flip: analyzeFlip,
@@ -12,6 +22,8 @@ const STRATEGIES = Object.freeze({
   brrrr: analyzeBrrrr,
   wholesale: analyzeWholesale,
 });
+
+export const VERDICTS = Object.freeze(['strong', 'thin', 'pass']);
 
 export function normalizeStrategy(value) {
   const key = String(value || '').trim().toLowerCase();
@@ -23,12 +35,14 @@ export function normalizeStrategy(value) {
 
 /**
  * Run one strategy against a property's deal block.
- * `rehabDelta` is added to listed rehab (demo: "rehab is twenty thousand higher").
+ * `rehabDelta` is added to listed rehab (demo: "rehab is twenty thousand higher")
+ * before the contingency is applied, so a bigger scope also carries a bigger buffer.
  */
 export function analyzePropertyDeal(property, strategy, overrides = {}) {
   const name = normalizeStrategy(strategy);
   if (!name) throw new Error(`Unknown deal strategy: ${strategy || 'missing'}`);
-  const deal = property?.deal && typeof property.deal === 'object' ? { ...property.deal } : {};
+  const base = property?.deal && typeof property.deal === 'object' ? property.deal : {};
+  const deal = { ...base, units: unitsFor(property?.propertyType, property?.units) };
   const rehabDelta = Number(overrides.rehabDelta) || 0;
   if (rehabDelta) deal.rehab = Number(deal.rehab || 0) + rehabDelta;
   const { rehabDelta: _ignored, ...assumptionOverrides } = overrides;

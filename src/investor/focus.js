@@ -33,22 +33,43 @@ export function formatPct(value) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+export const VERDICT_LABELS = Object.freeze({
+  strong: 'Strong',
+  thin: 'Thin',
+  pass: 'Pass',
+});
+
+/** Human label for a calculator verdict. */
+export function verdictLabel(verdict) {
+  const key = String(verdict || '').trim().toLowerCase();
+  return VERDICT_LABELS[key] || 'Pass';
+}
+
+/**
+ * Globe caption: strategy, verdict, and the two numbers that decide the deal.
+ */
 export function dealVisionCaption(strategy, analysis) {
   const name = String(strategy || analysis?.strategy || 'flip').toUpperCase();
   if (!analysis) return name;
+  const head = `${name} · ${verdictLabel(analysis.verdict).toUpperCase()}`;
+
   if (analysis.strategy === 'flip' || name === 'FLIP') {
-    return `${name}\nProfit ${formatUsd(analysis.profit)}\nROI ${formatPct(analysis.roi)}`;
+    return `${head}\nProfit ${formatUsd(analysis.profit)}\nCash in ${formatUsd(analysis.cashIn)}`;
   }
   if (analysis.strategy === 'rental' || name === 'RENTAL') {
-    return `${name}\n${formatUsd(analysis.cashFlowMonthly)}/mo\nCap ${formatPct(analysis.capRate)}`;
+    return `${head}\n${formatUsd(analysis.cashFlowMonthly)}/mo\nCoC ${formatPct(analysis.coc)}`;
   }
   if (analysis.strategy === 'brrrr' || name === 'BRRRR') {
-    return `${name}\nLeft in ${formatUsd(analysis.cashLeftIn)}\n${formatUsd(analysis.cashFlowMonthly)}/mo`;
+    const capital = analysis.cashLeftIn > 0
+      ? `Left in ${formatUsd(analysis.cashLeftIn)}`
+      : `Cash out ${formatUsd(analysis.cashOut)}`;
+    return `${head}\n${capital}\n${formatUsd(analysis.cashFlowMonthly)}/mo`;
   }
   if (analysis.strategy === 'wholesale' || name === 'WHOLESALE') {
-    return `${name}\nFee ${formatUsd(analysis.assignmentFee)}\nSpread ${formatUsd(analysis.spread)}`;
+    if (!analysis.viable) return `${head}\nNo spread\nMAO ${formatUsd(analysis.mao)}`;
+    return `${head}\nFee ${formatUsd(analysis.assignmentFee)}\nSpread ${formatUsd(analysis.spread)}`;
   }
-  return name;
+  return head;
 }
 
 export function focusCardModel(property, { analysis = null, strategy = null, revealDeal = false } = {}) {

@@ -9862,6 +9862,48 @@ body.terrasignal-investor #cesiumContainer canvas {
   padding-left: 1.1rem;
 }
 
+html.terrasignal-investor .ts-deal {
+  list-style: none;
+  padding-left: 0;
+}
+
+html.terrasignal-investor .ts-deal li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.18rem 0;
+}
+
+html.terrasignal-investor .ts-deal .ts-deal-label {
+  color: rgba(244, 239, 228, 0.55);
+}
+
+html.terrasignal-investor .ts-deal .ts-deal-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+html.terrasignal-investor .ts-deal .ts-verdict-line {
+  margin-top: 0.28rem;
+  padding-top: 0.34rem;
+  border-top: 1px solid rgba(244, 239, 228, 0.14);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+html.terrasignal-investor .ts-deal.ts-verdict-strong .ts-verdict-line .ts-deal-value {
+  color: #6fd08c;
+}
+
+html.terrasignal-investor .ts-deal.ts-verdict-thin .ts-verdict-line .ts-deal-value {
+  color: #e0b84a;
+}
+
+html.terrasignal-investor .ts-deal.ts-verdict-pass .ts-verdict-line .ts-deal-value {
+  color: #d98a7b;
+}
+
 #ts-focus-card footer,
 #ts-bottom-nav,
 #ts-demo-form {
