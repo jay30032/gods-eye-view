@@ -81,21 +81,20 @@ export const COLUMN_ALPHA_NEAR = 0.015;
 export const COLUMN_ALPHA_FAR = 0.16;
 
 /**
- * Near-field colour per signal.
+ * Near-field colour per signal — the far-field sprite palette with the alpha
+ * dropped, and nothing else.
  *
- * Four of the five are the far-field sprite colours unchanged, so a house does
- * not change identity as the camera drops. LISTED_OPPORTUNITY is the exception:
- * its sprite blue disappears against Google's aerial imagery of a shaded street
- * once it is a thin line on the ground, so the near field uses cyan. The sprite
- * palette is deliberately left alone — `propertyPulse.js` is the far field.
+ * There is deliberately no second palette here. An earlier cut overrode
+ * LISTED_OPPORTUNITY to cyan in the near field only, because sprite blue
+ * disappears against aerial imagery of a shaded street once it is a thin line
+ * on the ground. That fixed the legibility problem and created a worse one: a
+ * house changed colour as the camera dropped through 1,500 m, so the sprite and
+ * the parcel outline underneath it did not obviously belong to each other.
+ * `propertyPulse.js` is now cyan for both, and this derives from it.
  */
-export const EFFECT_COLORS = Object.freeze({
-  FORECLOSURE: Object.freeze(SIGNAL_LOOK.FORECLOSURE.color.slice(0, 3)),
-  PREFORECLOSURE: Object.freeze(SIGNAL_LOOK.PREFORECLOSURE.color.slice(0, 3)),
-  TAX_SALE: Object.freeze(SIGNAL_LOOK.TAX_SALE.color.slice(0, 3)),
-  DISTRESS: Object.freeze(SIGNAL_LOOK.DISTRESS.color.slice(0, 3)),
-  LISTED_OPPORTUNITY: Object.freeze([0.16, 0.86, 0.92]),
-});
+export const EFFECT_COLORS = Object.freeze(Object.fromEntries(
+  Object.entries(SIGNAL_LOOK).map(([type, look]) => [type, Object.freeze(look.color.slice(0, 3))]),
+));
 
 export const EFFECT_GOLD = Object.freeze([GOLD.r, GOLD.g, GOLD.b]);
 

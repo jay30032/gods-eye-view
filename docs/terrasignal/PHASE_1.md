@@ -432,10 +432,17 @@ geometry* something is, never how bright it is allowed to get.
 | `DISTRESS` | amber | restrained uneven shimmer — two incommensurate rates, never a pulse |
 | `LISTED_OPPORTUNITY` | cyan | a thin bright segment travelling around the parcel |
 
-Four of the five colours are the far-field sprite colours unchanged, so a house
-does not change identity as the camera drops. LISTED is the exception: sprite
-blue vanishes against aerial imagery of a shaded street once it is a line on the
-ground, so the near field uses cyan and `propertyPulse.js` is left alone.
+One colour per signal, at every altitude.
+
+`SIGNAL_LOOK` in `propertyPulse.js` is the only palette; `EFFECT_COLORS`
+derives from it with the alpha dropped. LISTED used to be blue and was changed
+to cyan for both layers at once — blue vanishes against aerial imagery of a
+shaded street the moment it is a line on the ground rather than a sprite. An
+earlier cut overrode it in the near field only, which fixed the legibility and
+broke something worse: a house changed colour as the camera dropped through
+1,500 m, and since both layers are visible through the whole handover, the
+sprite and the parcel outline beneath it stopped reading as the same house. A
+test now fails if the two ever disagree again.
 
 Every period is ≥ 2.2 s — the same no-strobe floor Phase 1 has held throughout.
 `prefers-reduced-motion` freezes brightness and width at each type's midpoint
@@ -588,6 +595,19 @@ doing if the result holds 30 fps.
 
 It writes `cruise-six.png`, `hero-six.png` and `hero-six-plus-4s.png` to
 `/tmp/shots/`.
+
+**The budget is relative to the frame cap, not absolute.** 33 ms *is* 30 fps,
+and `frameBudget.js` caps the investor viewer at exactly 30 fps whenever the
+machine is on battery — which is the demo machine. A flat 33 ms budget is
+therefore unachievable by construction on an unplugged laptop: the first run on
+battery failed at 33.4 ms while rendering perfectly, with p50 33.3 and worst
+34.3, the cap held to a tenth of a millisecond. The check now takes the larger
+of 33 ms and the viewer's own frame interval plus 12%, and prints which applied.
+At 60 fps the 33 ms figure binds with two frames of slack; at 30 fps it becomes
+37 ms, which a held cap clears and a real stall does not.
+
+Measured both ways: **17.9 / 18.3 ms** on mains at 60 fps, **33.8 / 33.8 ms** on
+battery at 30 fps.
 
 ## Env
 

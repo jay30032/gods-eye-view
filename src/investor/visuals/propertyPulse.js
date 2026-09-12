@@ -27,7 +27,12 @@ export const SIGNAL_LOOK = Object.freeze({
     kind: 'shimmer',
   }),
   LISTED_OPPORTUNITY: Object.freeze({
-    color: [0.18, 0.48, 0.96, 0.88],
+    // Cyan, not blue. The near-field layer needed cyan because a blue line
+    // draped on aerial imagery of a shaded street is invisible — and having a
+    // sprite be one colour and its own parcel outline another meant a house
+    // changed identity as the camera dropped through 1,500 m. One colour per
+    // signal, at every altitude.
+    color: [0.16, 0.86, 0.92, 0.88],
     periodMs: 4000,
     kind: 'ring',
   }),

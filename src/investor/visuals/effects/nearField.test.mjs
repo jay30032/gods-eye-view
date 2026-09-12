@@ -27,6 +27,8 @@ import {
   outlineStateFor,
   phaseOf,
 } from './signalMotion.js';
+import { colorForSignal } from '../markers.js';
+import { SIGNAL_LOOK } from '../propertyPulse.js';
 
 const TYPES = Object.keys(MOTION);
 
@@ -197,6 +199,26 @@ test('every signal type has a near-field colour and LISTED is cyan, not blue', (
   }
   const [r, g, b] = EFFECT_COLORS.LISTED_OPPORTUNITY;
   assert.ok(g > 0.6 && b > 0.6 && r < 0.4, `LISTED is not cyan: ${[r, g, b]}`);
+});
+
+test('a signal is the same colour in the far field and the near field', () => {
+  // The two layers are visible at once through the whole handover around
+  // 1,500 m. If a sprite and the parcel outline under it are different
+  // colours, they stop reading as the same house — which is exactly what
+  // happened when the near field carried its own LISTED override.
+  for (const type of TYPES) {
+    assert.deepEqual(
+      EFFECT_COLORS[type],
+      colorForSignal(type).slice(0, 3),
+      `${type} is one colour as a sprite and another on the ground`,
+    );
+  }
+  // And the palette is one object, not two that happen to agree today.
+  assert.deepEqual(
+    Object.keys(EFFECT_COLORS).sort(),
+    Object.keys(SIGNAL_LOOK).sort(),
+    'the near field has invented or dropped a signal type',
+  );
 });
 
 // ---------------------------------------------------------------------------
