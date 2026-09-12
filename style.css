@@ -10117,6 +10117,80 @@ html.terrasignal-investor .ts-deal.ts-verdict-pass .ts-verdict-line .ts-deal-val
   border: 1px solid rgba(212, 160, 23, 0.28);
   color: #f4efe4;
   font-family: Inter, sans-serif;
+  transition: width 160ms ease, padding 160ms ease, background 160ms ease;
+}
+
+/* After the first step the rail has done its teaching job, so it collapses to a
+   thin strip of step dots and gets out of the way of the map. Hover brings the
+   whole thing back — nothing is lost, it is just not shouting. */
+#ts-demo-script.is-collapsed {
+  width: auto;
+  padding: 0.45rem 0.55rem;
+  background: rgba(10, 8, 4, 0.66);
+}
+
+#ts-demo-script.is-collapsed > .ts-kicker,
+#ts-demo-script.is-collapsed > strong,
+#ts-demo-script.is-collapsed > p,
+#ts-demo-script.is-collapsed > code,
+#ts-demo-script.is-collapsed > .ts-demo-actions,
+#ts-demo-script.is-collapsed > .ts-demo-note {
+  display: none;
+}
+
+#ts-demo-script.is-collapsed ol {
+  display: flex;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each step becomes a dot; the current one is gold and slightly longer. */
+#ts-demo-script.is-collapsed li {
+  width: 0.9rem;
+  height: 0.25rem;
+  border-radius: 999px;
+  overflow: hidden;
+  text-indent: -999px;
+  background: rgba(244, 239, 228, 0.25);
+}
+
+#ts-demo-script.is-collapsed li.is-done {
+  background: rgba(224, 184, 74, 0.55);
+}
+
+#ts-demo-script.is-collapsed li.is-current {
+  width: 1.6rem;
+  background: #e0b84a;
+}
+
+#ts-demo-script.is-collapsed:hover {
+  width: min(18.5rem, 42vw);
+  padding: 0.95rem 1rem 0.85rem;
+  background: rgba(10, 8, 4, 0.9);
+}
+
+#ts-demo-script.is-collapsed:hover > .ts-kicker,
+#ts-demo-script.is-collapsed:hover > strong,
+#ts-demo-script.is-collapsed:hover > p,
+#ts-demo-script.is-collapsed:hover > .ts-demo-actions,
+#ts-demo-script.is-collapsed:hover > .ts-demo-note {
+  display: block;
+}
+
+#ts-demo-script.is-collapsed:hover ol {
+  display: block;
+  list-style: decimal;
+  padding-left: 1.1rem;
+}
+
+#ts-demo-script.is-collapsed:hover li {
+  width: auto;
+  height: auto;
+  text-indent: 0;
+  border-radius: 0;
+  background: none;
 }
 
 #ts-demo-script > strong {
@@ -10282,23 +10356,55 @@ html.terrasignal-investor .ts-deal.ts-verdict-pass .ts-verdict-line .ts-deal-val
   box-shadow: 0 0 0 7px rgba(212, 160, 23, 0.16), 0 0 24px rgba(212, 160, 23, 0.28);
 }
 
+/* One translucent line. 28rem -> 11.2rem is 60% narrower: the bar was wider
+   than anything ever typed into it and sat on top of the hero subject. */
 #ts-demo-form {
   position: fixed;
   left: 50%;
   bottom: 4.15rem;
   transform: translateX(-50%);
   z-index: 44;
-  width: min(28rem, 90vw);
+  width: min(11.2rem, 62vw);
+  gap: 0.3rem;
+  align-items: center;
+  opacity: 0.72;
+  transition: opacity 140ms ease, width 160ms ease;
+}
+
+#ts-demo-form:hover,
+#ts-demo-form:focus-within {
+  opacity: 1;
+  width: min(24rem, 88vw);
 }
 
 #ts-demo-form input {
   flex: 1;
-  padding: 0.55rem 0.8rem;
+  min-width: 0;
+  padding: 0.3rem 0.6rem;
   border-radius: 999px;
-  border: 1px solid rgba(212, 160, 23, 0.28);
-  background: rgba(10, 8, 4, 0.72);
+  border: 1px solid rgba(212, 160, 23, 0.22);
+  background: rgba(10, 8, 4, 0.5);
   color: #f4efe4;
   font-family: Inter, sans-serif;
+  font-size: 0.72rem;
+}
+
+/* The SEND button is redundant with Enter until the bar is actually in use. */
+#ts-demo-form button {
+  opacity: 0;
+  width: 0;
+  padding: 0;
+  border-width: 0;
+  overflow: hidden;
+  transition: opacity 140ms ease;
+}
+
+#ts-demo-form:hover button,
+#ts-demo-form:focus-within button {
+  opacity: 1;
+  width: auto;
+  padding: 0.3rem 0.6rem;
+  border-width: 1px;
 }
 
 #ts-attribution {

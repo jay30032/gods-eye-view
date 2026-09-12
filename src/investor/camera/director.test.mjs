@@ -460,3 +460,44 @@ test('awaitTiles resolves even with nothing to listen to', async () => {
   assert.equal(await director.awaitTiles(50), true);
   _resetRenderGovernorForTest();
 });
+
+test('an orbit is not a flight — it must not pause the visuals', () => {
+  // The orbit re-poses the camera with setView every frame, never flyTo. If it
+  // went through flyToShot it would hold `flying` true for its whole 72-second
+  // lap, and the visual manager would freeze the markers for all of it.
+  const { viewer, director, clock } = makeDirector();
+  const seen = [];
+  director.onFlight((state) => seen.push(state.flying));
+
+  director.orbit(houses[0]);
+  clock.advance(16);
+  viewer.tick();
+  clock.advance(16);
+  viewer.tick();
+
+  assert.equal(director.orbiting, true);
+  assert.equal(director.flying, false, 'orbiting is not flying');
+  assert.deepEqual(seen, [], 'an orbit emits no flight events at all');
+  assert.equal(viewer.flights.length, 0, 'an orbit starts no flights');
+  assert.ok(viewer.setViews.length >= 2, 'it re-poses instead');
+  _resetRenderGovernorForTest();
+});
+
+test('the orbit laps in 72 seconds at 5 deg/s', () => {
+  const { viewer, director, clock } = makeDirector();
+  director.orbit(houses[0]);
+  // Just under a lap: still going.
+  for (let elapsed = 0; elapsed < 70_000; elapsed += 200) {
+    clock.advance(200);
+    viewer.tick();
+  }
+  assert.equal(director.orbiting, true, 'should not stop before a full lap');
+  // Past it: stopped and the hold released.
+  for (let elapsed = 0; elapsed < 5_000 && director.orbiting; elapsed += 200) {
+    clock.advance(200);
+    viewer.tick();
+  }
+  assert.equal(director.orbiting, false);
+  assert.equal(holds().includes('investor-camera-orbit'), false);
+  _resetRenderGovernorForTest();
+});

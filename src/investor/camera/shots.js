@@ -14,6 +14,8 @@
  * it says.
  */
 
+import { MARKER_HEIGHT_M } from '../visuals/markers.js';
+
 const M_PER_DEG_LAT = 111_320;
 const DEG = Math.PI / 180;
 
@@ -93,13 +95,18 @@ export const REVEAL = Object.freeze({
  * rendered pitch is that plus the framing tilt: -38 + 10 = **-28**.
  */
 export const HERO = Object.freeze({
-  rangeM: 180,
+  rangeM: 150,
   /** Depression from camera to house — sets position, not the rendered pitch. */
-  pitchDeg: -38,
+  pitchDeg: -45,
   headingDeg: 35,
-  /** Fraction of frame height the subject sits below centre (lower third). */
-  lowerThirdFraction: 1 / 6,
-  orbitDegPerSec: 2,
+  /**
+   * Where the subject sits down the frame, 0 = top, 0.5 = centre. 0.55 puts it
+   * just below centre so the command bar along the bottom cannot cover it —
+   * a lower third put the house behind the chrome.
+   */
+  subjectFrameFraction: 0.55,
+  /** 72-second lap: 2 deg/s was too slow to read as motion at all. */
+  orbitDegPerSec: 5,
   /** One revolution, then stop: a parked demo must not hold the GPU forever. */
   orbitMaxDeg: 360,
 });
@@ -267,24 +274,44 @@ export function cameraFromRange(target, { headingDeg, pitchDeg, rangeM }) {
 }
 
 /**
- * Degrees to tilt the lens up so the subject falls `fraction` of the frame
- * below centre. A sixth of a 60 degree frame is 10 degrees.
+ * Degrees to tilt the lens up so the subject falls at `fraction` down the
+ * frame. 0.5 is dead centre and needs no tilt; 0.55 is a twentieth of the frame
+ * below centre, which at a 60 degree FOV is 3 degrees.
  */
-export function lowerThirdTiltDeg(fovRad = 60 * DEG, fraction = HERO.lowerThirdFraction) {
-  return (fovRad / DEG) * fraction;
+export function subjectTiltDeg(fovRad = 60 * DEG, fraction = HERO.subjectFrameFraction) {
+  return (fovRad / DEG) * (fraction - 0.5);
 }
 
-/** The focused house: 180 m out, framed low, never looking up at the sky. */
+/**
+ * How far up the frame the floating marker sits relative to the house it marks.
+ * The marker, not the roof, is what the eye tracks, so the framing has to aim
+ * at the marker or the subject reads as sitting high in frame.
+ */
+export function markerRiseDeg(rangeM = HERO.rangeM, riseM = MARKER_HEIGHT_M) {
+  return Math.atan2(riseM, rangeM) / DEG;
+}
+
+/** The focused house: 150 m out, just below centre, never looking at the sky. */
 export function heroShot(property, { headingDeg = HERO.headingDeg, fovRad = 60 * DEG } = {}) {
-  const pose = cameraFromRange({ lat: property.lat, lng: property.lng }, {
+  const subject = { lat: property.lat, lng: property.lng };
+  const pose = cameraFromRange(subject, {
     headingDeg,
     pitchDeg: HERO.pitchDeg,
     rangeM: HERO.rangeM,
   });
-  // Tilt up off the subject to drop it down the frame, but never past level.
-  const tilt = lowerThirdTiltDeg(fovRad);
-  const framed = Math.min(-1, pose.pitchDeg + tilt);
-  return { name: 'HERO', ...pose, pitchDeg: framed };
+  // Two tilts, both upward. The subject tilt drops the target down the frame;
+  // the marker tilt accounts for the marker floating ABOVE the roof, which makes
+  // it appear HIGHER in frame than the house — so the lens has to come up to
+  // meet it, not go down. Never past level.
+  const framed = Math.min(-1, pose.pitchDeg + subjectTiltDeg(fovRad) + markerRiseDeg());
+  return {
+    name: 'HERO',
+    ...pose,
+    pitchDeg: framed,
+    // Altitude is relative to the SUBJECT's ground, not the camera's. Those
+    // differ by metres across a hillside, and at 150 m range that is visible.
+    groundAnchor: subject,
+  };
 }
 
 /** The apex of a hop: above the midpoint, high enough to read as a rise. */

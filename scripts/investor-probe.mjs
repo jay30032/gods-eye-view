@@ -64,6 +64,10 @@ const PLAY_PHRASES = [
 ];
 const PLAY_GAP_MS = 4_000;
 const SHOT_DIR = arg('shots', '/tmp/shots');
+/** The board has to actually read at market altitude, not just exist. */
+const MIN_MARKERS_IN_VIEW = 20;
+/** The focused house must land near the middle of the frame, not under chrome. */
+const HERO_CENTRE_FRACTION = 0.30;
 /** A dropped frame is anything the eye reads as a stutter on this hardware. */
 const FRAME_P95_BUDGET_MS = 120;
 const URL_ARG = arg('url', SPAWN_KEYLESS
@@ -269,6 +273,27 @@ async function main() {
 
   const playLog = [];
   const windows = {};
+  const checks = { markersInView: null, heroCentred: null };
+
+  /** Markers whose sprite lands inside the viewport. */
+  const markersInView = () => page.evaluate(() => {
+    const visuals = window.__terraSignal?.visuals;
+    const positions = visuals?.screenPositions?.() || [];
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const inside = positions.filter((p) => p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h);
+    return { total: positions.length, inView: inside.length, count: visuals?.markerCount ?? 0 };
+  }).catch(() => ({ total: 0, inView: 0, count: 0 }));
+
+  /** Where the focused marker sits in the frame, 0..1 from the top left. */
+  const focusedMarkerFrame = () => page.evaluate(() => {
+    const session = window.__terraSignal;
+    const id = session?.focused?.id;
+    const positions = session?.visuals?.screenPositions?.() || [];
+    const hit = positions.find((p) => p.id === id);
+    if (!hit) return null;
+    return { id, fx: hit.x / window.innerWidth, fy: hit.y / window.innerHeight };
+  }).catch(() => null);
   if (PLAY) {
     // Descend first — pulses only exist once the camera is in the market.
     await new Promise((r) => setTimeout(r, 5_000));
@@ -288,6 +313,14 @@ async function main() {
     windows.descent = [descentStart, await pageNow()];
     playLog.push(`descent settled on CRUISE: ${cruised}`);
     await new Promise((r) => setTimeout(r, 900));
+    // A settled CRUISE: markers pulsing, camera still. This is the steady state
+    // the demo sits in most, so it gets its own frame window.
+    const cruiseStart = await pageNow();
+    await new Promise((r) => setTimeout(r, 2_500));
+    windows.cruise = [cruiseStart, await pageNow()];
+    checks.markersInView = await markersInView();
+    record(`CHECK markers in view at CRUISE: ${JSON.stringify(checks.markersInView)}`);
+    playLog.push(`markers in view at CRUISE: ${checks.markersInView.inView}/${checks.markersInView.count}`);
     await shot('1-cruise-settled');
 
     // Find me money: REVEAL settles (halo appears), then HERO.
@@ -310,9 +343,13 @@ async function main() {
     const heroed = await waitForShot('HERO');
     windows.hero = [heroStart, await pageNow()];
     playLog.push(`hero settled: ${heroed}`);
+    checks.heroCentred = await focusedMarkerFrame();
+    record(`CHECK focused marker frame position: ${JSON.stringify(checks.heroCentred)}`);
     await shot('3-hero-settled');
 
+    const orbitStart = await pageNow();
     await new Promise((r) => setTimeout(r, 5_000));
+    windows.orbit = [orbitStart, await pageNow()];
     await shot('4-hero-orbit-5s');
 
     // A hop: move to the next house and catch it at the apex.
@@ -407,11 +444,21 @@ async function main() {
   const loopOk = !loopStopped;
   const descentFrames = frameStats(frames, windows.descent);
   const heroFrames = frameStats(frames, windows.hero);
+  const cruiseFrames = frameStats(frames, windows.cruise);
+  const orbitFrames = frameStats(frames, windows.orbit);
   const measured = [descentFrames, heroFrames].filter(Boolean);
   // Only a --play run measures frames; a plain run must not fail on no data.
   const framesOk = !PLAY || (measured.length === 2
     && measured.every((stat) => stat.p95 <= FRAME_P95_BUDGET_MS));
-  const pass = paintOk && respondOk && errorsOk && renderOk && loopOk && framesOk;
+
+  const markersOk = !PLAY || (checks.markersInView?.inView ?? 0) >= MIN_MARKERS_IN_VIEW;
+  const half = HERO_CENTRE_FRACTION / 2;
+  const heroOk = !PLAY || (checks.heroCentred
+    && Math.abs(checks.heroCentred.fx - 0.5) <= half
+    && Math.abs(checks.heroCentred.fy - 0.5) <= half);
+
+  const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
+    && framesOk && markersOk && heroOk;
 
   const tileSummary = TILE_HOSTS.map((h) => {
     const row = tiles.get(h);
@@ -432,6 +479,14 @@ async function main() {
     `  ${renderOk ? 'PASS' : 'FAIL'}  render errors      ${renderErrors.length + recovered.length}`,
     `  ${loopOk ? 'PASS' : 'FAIL'}  render loop alive  ${loopStopped ? 'STOPPED' : 'running'}`,
     ...(PLAY ? [
+      `  ${markersOk ? 'PASS' : 'FAIL'}  markers at CRUISE  `
+        + `${checks.markersInView?.inView ?? 0} of ${checks.markersInView?.count ?? 0} in view `
+        + `(min ${MIN_MARKERS_IN_VIEW})`,
+      `  ${heroOk ? 'PASS' : 'FAIL'}  hero centred       `
+        + (checks.heroCentred
+          ? `x ${(checks.heroCentred.fx * 100).toFixed(0)}% y ${(checks.heroCentred.fy * 100).toFixed(0)}%`
+          : 'focused marker not on screen')
+        + ` (centre ${HERO_CENTRE_FRACTION * 100}%)`,
       `  ${framesOk ? 'PASS' : 'FAIL'}  frame time p95     `
         + `descent ${descentFrames ? `${descentFrames.p95}ms` : 'no data'} · `
         + `hero ${heroFrames ? `${heroFrames.p95}ms` : 'no data'} `
@@ -442,7 +497,12 @@ async function main() {
     '='.repeat(74),
   ];
   if (PLAY) {
-    for (const [label, stat] of [['descent', descentFrames], ['hero flight', heroFrames]]) {
+    for (const [label, stat] of [
+      ['descent', descentFrames],
+      ['cruise settled', cruiseFrames],
+      ['hero flight', heroFrames],
+      ['hero orbit', orbitFrames],
+    ]) {
       if (!stat) { out.push(`  frames ${label}: no data`); continue; }
       out.push(`  frames ${label}: n=${stat.n} over ${stat.seconds}s  `
         + `p50 ${stat.p50}ms  p95 ${stat.p95}ms  worst ${stat.worst}ms`);

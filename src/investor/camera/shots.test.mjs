@@ -19,7 +19,8 @@ import {
   headingBetween,
   heroShot,
   hopApexShot,
-  lowerThirdTiltDeg,
+  markerRiseDeg,
+  subjectTiltDeg,
   offsetByHeading,
   padBounds,
   revealShot,
@@ -146,23 +147,43 @@ test('a degenerate bounding box still produces a usable frame', () => {
   assert.ok(shot.heightM >= REVEAL.minAltitudeM);
 });
 
-test('HERO sits exactly 180m from the house and frames it low', () => {
+test('HERO sits exactly 150m from the house, just below centre frame', () => {
   const house = ATLANTA_DECATUR_PROPERTIES[0];
   const shot = heroShot(house);
   assert.equal(shot.headingDeg, 35);
+  assert.equal(HERO.rangeM, 150);
+  assert.equal(HERO.pitchDeg, -45);
 
   // The stated range is to the HOUSE, so the slant distance must be exactly it.
   const ground = metresBetween(house, shot);
   const slant = Math.hypot(ground, shot.heightM);
-  assert.ok(Math.abs(slant - HERO.rangeM) < 1, `slant range ${slant.toFixed(1)} should be 180`);
-  const expectedAltitude = HERO.rangeM * Math.sin(38 * Math.PI / 180);
+  assert.ok(Math.abs(slant - HERO.rangeM) < 1, `slant range ${slant.toFixed(1)} should be 150`);
+  const expectedAltitude = HERO.rangeM * Math.sin(45 * Math.PI / 180);
   assert.ok(Math.abs(shot.heightM - expectedAltitude) < 0.5);
 
-  // Rendered pitch is the depression tilted up by the lower-third angle.
-  assert.ok(Math.abs(lowerThirdTiltDeg() - 10) < 1e-9, 'a sixth of 60 degrees is 10');
-  assert.ok(Math.abs(shot.pitchDeg - (HERO.pitchDeg + 10)) < 1e-9,
-    `rendered pitch ${shot.pitchDeg} should be -28`);
+  // 0.55 down the frame is a twentieth below centre: 3 degrees of tilt at 60 FOV,
+  // then back down by however far the marker floats above the roof.
+  assert.ok(Math.abs(subjectTiltDeg() - 3) < 1e-9, `tilt is ${subjectTiltDeg()}`);
+  const rise = markerRiseDeg();
+  assert.ok(rise > 4 && rise < 7, `marker rise is ${rise} deg`);
+  assert.ok(Math.abs(shot.pitchDeg - (HERO.pitchDeg + 3 + rise)) < 1e-9,
+    `rendered pitch ${shot.pitchDeg}`);
+  // Both corrections tilt UP: the subject drops down the frame, and the marker
+  // floats above the roof so the lens has to rise to meet it.
+  assert.ok(shot.pitchDeg > HERO.pitchDeg, 'the framed pitch is shallower than the depression');
+  // The framing anchors to the subject's ground, not whatever the camera stands on.
+  assert.equal(shot.groundAnchor.lat, house.lat);
+  assert.equal(shot.groundAnchor.lng, house.lng);
   assert.ok(shot.pitchDeg < 0, 'the camera still looks down, never at the sky');
+  // And it must stay inside the user pitch clamp or the clamp would fight it.
+  assert.ok(shot.pitchDeg >= -70 && shot.pitchDeg <= -20);
+});
+
+test('the subject sits below centre, never above it', () => {
+  assert.ok(HERO.subjectFrameFraction > 0.5, 'above centre would sit under the HUD');
+  assert.ok(HERO.subjectFrameFraction < 0.75, 'too low and the command bar covers it');
+  assert.equal(subjectTiltDeg(60 * Math.PI / 180, 0.5), 0, 'dead centre needs no tilt');
+  assert.ok(subjectTiltDeg(60 * Math.PI / 180, 0.6) > 0, 'lower in frame means tilting up');
 });
 
 test('HOP rises above both ends and lands over the midpoint', () => {
@@ -255,8 +276,9 @@ test('REVEAL dwells long enough to be seen but not long enough to drag', () => {
 
 test('the hero orbit is capped at one revolution', () => {
   assert.equal(HERO.orbitMaxDeg, 360);
+  assert.equal(HERO.orbitDegPerSec, 5);
   const seconds = HERO.orbitMaxDeg / HERO.orbitDegPerSec;
-  assert.equal(seconds, 180, 'one revolution at 2 deg/s is three minutes');
+  assert.equal(seconds, 72, 'one revolution at 5 deg/s is 72 seconds');
 });
 
 test('CRUISE actually has sky in frame, so the skyline has a horizon', () => {

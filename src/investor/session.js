@@ -578,6 +578,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
 
   const startHunt = async () => {
     releaseInvestorBootHolds();
+    session.demoScript?.collapse?.();
     setAiPrompt('Descending on Atlanta / Decatur…');
     if (!tileset) {
       if (viewer?.scene?.globe) viewer.scene.globe.show = true;

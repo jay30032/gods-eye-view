@@ -109,7 +109,10 @@ export function createCameraDirector({
   function destinationOf(shot) {
     // WORLD is a space view; adding a few hundred metres to 18,000 km is noise,
     // but keeping one code path is worth more than the micro-optimisation.
-    const ground = shot.name === 'WORLD' ? 0 : groundHeightM(shot.lat, shot.lng);
+    // A shot may anchor its altitude to a point other than the camera position
+    // — HERO measures from the house's ground, not the ground it stands on.
+    const anchor = shot.groundAnchor || { lat: shot.lat, lng: shot.lng };
+    const ground = shot.name === 'WORLD' ? 0 : groundHeightM(anchor.lat, anchor.lng);
     return Cesium.Cartesian3.fromDegrees(shot.lng, shot.lat, shot.heightM + ground);
   }
 
@@ -300,7 +303,11 @@ export function createCameraDirector({
       const step = degPerSec * delta;
       travelled += step;
       headingDeg = (headingDeg + step) % 360;
-      const shot = heroShot(property, { headingDeg });
+      // Same FOV the flight used, or the framing jumps the instant we take over.
+      const fovy = Number(viewer?.scene?.camera?.frustum?.fovy);
+      const shot = heroShot(property, Number.isFinite(fovy) && fovy > 0
+        ? { headingDeg, fovRad: fovy }
+        : { headingDeg });
       viewer.camera.setView({
         destination: destinationOf(shot),
         orientation: orientationOf(shot),
@@ -359,6 +366,11 @@ export function createCameraDirector({
         case 'REVEAL':
           return flyToShot(revealShot(target || []), options);
         case 'HERO': {
+          // Cesium's frustum.fov is the angle in the WIDER direction; the
+          // framing maths needs the vertical one, which on a 16:10 canvas is
+          // closer to 40 degrees than 60.
+          const fovy = Number(viewer?.scene?.camera?.frustum?.fovy);
+          if (Number.isFinite(fovy) && fovy > 0) options = { ...options, fovRad: fovy };
           // Gate the FIRST descent onto a house — that flight ends on rooftop
           // geometry that has never been in view at this LOD. Later hops are
           // already inside loaded tiles and should not pay the wait.

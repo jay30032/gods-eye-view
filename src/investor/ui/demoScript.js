@@ -12,12 +12,16 @@ export function bindDemoScript(session, { location = globalThis.location } = {})
   let index = 0;
   let autoTimer = null;
   let playing = Boolean(mode.auto);
+  let collapsed = false;
 
   const paint = () => {
     const step = DEMO_STEPS[index] || DEMO_STEPS[DEMO_STEPS.length - 1];
     const done = index >= DEMO_STEPS.length;
     root.hidden = false;
     root.classList.add('visible');
+    // Once the first step has been taken the rail has taught what it needs to;
+    // it collapses to a strip of step dots and expands again on hover.
+    root.classList.toggle('is-collapsed', index > 0 || collapsed);
     root.dataset.step = done ? 'done' : step.id;
     const title = $('[data-ts-demo-step-title]', root);
     const copy = $('[data-ts-demo-step-copy]', root);
@@ -111,6 +115,11 @@ export function bindDemoScript(session, { location = globalThis.location } = {})
     get index() { return index; },
     runCurrent,
     paint,
+    /** Once the hunt has begun the rail has taught what it needed to. */
+    collapse() {
+      collapsed = true;
+      paint();
+    },
   };
   return session.demoScript;
 }

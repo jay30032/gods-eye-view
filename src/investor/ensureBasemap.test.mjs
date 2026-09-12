@@ -462,9 +462,14 @@ test('investor session re-asserts imagery after Atlanta/Decatur descent', () => 
 });
 
 test('Opportunity Vision does not hold continuous render at globe park', () => {
+  // Re-pinned for marker system v2: the ellipse entities and their showPulses
+  // LOD flag are gone, but the guarded claim is unchanged — a parked globe must
+  // not take a 60 fps hold, and the markers must not draw from space either.
   const src = readFileSync(join(here, 'visuals/opportunityVisualManager.js'), 'utf8');
-  assert.match(src, /lod\.id === 'globe' \|\| lod\.id === 'regional'\) return false/);
-  assert.match(src, /lod\.showPulses === true/);
+  assert.match(src, /lod\.id === 'globe' \|\| lod\.id === 'regional'/);
+  assert.match(src, /if \(isSpace\(\)\) return false/, 'needsContinuous must bail in space');
+  assert.match(src, /setEnabled\(enabled && !isSpace\(\)\)/, 'markers must not draw from space');
+  assert.match(src, /releaseContinuousRender\(HOLD_ID\)/);
 });
 
 test('StyleManager refuses a keyless photoreal restore that would hide the globe', () => {
