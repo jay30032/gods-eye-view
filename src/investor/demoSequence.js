@@ -45,7 +45,26 @@ export const DEMO_STEPS = Object.freeze([
     copy: 'Writes localStorage and opens SAVED with a saved-ring on the house.',
     phrase: ACCEPTANCE_PHRASES[4],
   }),
+  /**
+   * Its own entry, and deliberately not an acceptance phrase — this is a
+   * different scene, not another step of the same one. It carries `href`
+   * instead of `phrase` so the rail navigates rather than talks, which also
+   * keeps `DEMO_STEPS.filter(s => s.phrase)` equal to ACCEPTANCE_PHRASES.
+   */
+  Object.freeze({
+    id: 'six',
+    kind: 'scene',
+    title: '7 · Six houses, up close',
+    copy: 'Six Oakhurst houses inside 600 m covering all five signals. Parcel glow, '
+      + 'per-signal motion and columns, on the tiles. Say "show me the best one".',
+    cta: 'Open the six-house scene',
+    href: '?scene=six',
+    phrase: null,
+  }),
 ]);
+
+/** The demo rail entry that switches scenes rather than sending a phrase. */
+export const SIX_HOUSE_STEP_ID = 'six';
 
 export function readDemoMode(location = globalThis.location) {
   let query = '';

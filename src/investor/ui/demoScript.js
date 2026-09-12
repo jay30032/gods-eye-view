@@ -38,7 +38,11 @@ export function bindDemoScript(session, { location = globalThis.location } = {})
       phrase.hidden = done || !step.phrase;
       phrase.textContent = step.phrase || '';
     }
-    if (next) next.textContent = done ? 'Replay' : (step.kind === 'hunt' ? step.cta : 'Send this phrase');
+    if (next) {
+      next.textContent = done
+        ? 'Replay'
+        : (step.kind === 'hunt' || step.kind === 'scene' ? step.cta : 'Send this phrase');
+    }
     if (play) play.textContent = playing ? 'Pause' : 'Play';
     const list = $('[data-ts-demo-list]', root);
     if (list) {
@@ -62,6 +66,18 @@ export function bindDemoScript(session, { location = globalThis.location } = {})
     const step = DEMO_STEPS[index];
     if (step.kind === 'hunt') {
       await session.beginHunt?.();
+    } else if (step.kind === 'scene') {
+      // A scene is a different page, not another phrase: hand the browser the
+      // URL and let the session boot into it. Auto-play stops here rather than
+      // navigating out from under a reviewer who did not ask for it.
+      playing = false;
+      if (autoTimer) globalThis.clearTimeout(autoTimer);
+      try {
+        globalThis.location.assign(step.href);
+      } catch {
+        // A test harness with no real location: nothing to navigate.
+      }
+      return;
     } else if (step.phrase) {
       const input = document.getElementById('ts-demo-input');
       if (input) input.value = step.phrase;
@@ -75,6 +91,8 @@ export function bindDemoScript(session, { location = globalThis.location } = {})
   const playLoop = async () => {
     while (playing && index < DEMO_STEPS.length) {
       const step = DEMO_STEPS[index];
+      // Auto-play runs the conversation; changing scene is an explicit click.
+      if (step.kind === 'scene') break;
       const delay = step.kind === 'hunt' ? 700 : 2200;
       await wait(delay);
       if (!playing) return;

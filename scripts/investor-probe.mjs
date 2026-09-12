@@ -54,6 +54,21 @@ const HAS = (name) => process.argv.includes(`--${name}`);
 
 const SPAWN_KEYLESS = HAS('spawn-keyless');
 const PLAY = HAS('play');
+/**
+ * The six-house scene check. Narrower than --play on purpose: it does not drive
+ * the conversation, it measures the two shots the near-field effects actually
+ * have to hold — a settled CRUISE over the cluster with six parcels glowing,
+ * and HERO on the gold house with its outline breathing.
+ *
+ * The frame budget is 33 ms rather than --play's 120 ms because that is the
+ * whole question being asked. Draped ground polylines and translucent columns
+ * are real GPU work, and the point of building them once and animating them
+ * through uniforms is that the result holds 30 fps. A layer that cannot is not
+ * worth having.
+ */
+const SIX = HAS('six');
+const SIX_FRAME_P95_BUDGET_MS = 33;
+const SIX_RUN_MS = 45_000;
 const PLAY_PHRASES = [
   'Find me money',
   'Why?',
@@ -72,8 +87,10 @@ const HERO_CENTRE_FRACTION = 0.30;
 const FRAME_P95_BUDGET_MS = 120;
 const URL_ARG = arg('url', SPAWN_KEYLESS
   ? `http://localhost:${KEYLESS_PORT}/?demo=1&welcome=1`
-  : 'http://localhost:4173/?demo=1&welcome=1');
-const LABEL = arg('label', SPAWN_KEYLESS ? 'investor-keyless' : (PLAY ? 'demo' : 'investor'));
+  : (SIX ? 'http://localhost:4173/?scene=six' : 'http://localhost:4173/?demo=1&welcome=1'));
+const LABEL = arg('label', SPAWN_KEYLESS
+  ? 'investor-keyless'
+  : (SIX ? 'six' : (PLAY ? 'demo' : 'investor')));
 const LOG_PATH = arg('log', null);
 
 const log = [];
@@ -273,7 +290,14 @@ async function main() {
 
   const playLog = [];
   const windows = {};
-  const checks = { markersInView: null, heroCentred: null };
+  const checks = {
+    markersInView: null,
+    heroCentred: null,
+    scene: null,
+    heroScene: null,
+    cruiseEffects: null,
+    heroEffects: null,
+  };
 
   /** Markers whose sprite lands inside the viewport. */
   const markersInView = () => page.evaluate(() => {
@@ -294,6 +318,91 @@ async function main() {
     if (!hit) return null;
     return { id, fx: hit.x / window.innerWidth, fy: hit.y / window.innerHeight };
   }).catch(() => null);
+  /** What the near-field layer reports about itself right now. */
+  const effectsState = () => page.evaluate(() => {
+    const visuals = window.__terraSignal?.visuals;
+    const effects = visuals?.effects || null;
+    return {
+      supported: effects?.supported ?? null,
+      active: effects?.active ?? null,
+      count: effects?.count ?? 0,
+      surveyed: effects?.surveyed?.length ?? 0,
+      approximate: effects?.approximate?.length ?? 0,
+      // Above ground, the way the layer's own ceiling is defined.
+      cameraAglM: (() => {
+        const h = window.__godsEyeView?.viewer?.camera?.positionCartographic?.height;
+        const ground = window.__terraSignal?.market?.groundElevationM ?? 0;
+        return Number.isFinite(h) ? Math.round(h - ground) : null;
+      })(),
+    };
+  }).catch(() => null);
+
+  const sceneState = () => page.evaluate(() => ({
+    mode: window.__terraSignal?.sceneMode ?? null,
+    rows: window.__terraSignal?.properties?.length ?? 0,
+    goldId: window.__terraSignal?.scene?.goldId ?? null,
+    spanM: window.__terraSignal?.scene?.spanM ?? null,
+    types: window.__terraSignal?.scene?.types ?? [],
+    focusedId: window.__terraSignal?.focused?.id ?? null,
+  })).catch(() => null);
+
+  if (SIX) {
+    // No hunt modal in a scene URL: the session descends on its own, so the
+    // only thing to do is wait for the establishing shot to settle.
+    const cruised = await waitForShot('CRUISE', 40_000);
+    playLog.push(`CRUISE over the cluster settled: ${cruised}`);
+    if (!cruised) errors.push({ t: Date.now() - started, kind: 'six', text: 'CRUISE never settled' });
+
+    // Let the tiles under the parcels resolve before measuring anything: a
+    // p95 that includes tile upload is measuring the network, not the layer.
+    await new Promise((r) => setTimeout(r, 2_000));
+    checks.scene = await sceneState();
+    checks.cruiseEffects = await effectsState();
+    record(`CHECK scene ${JSON.stringify(checks.scene)}`);
+    record(`CHECK effects at CRUISE ${JSON.stringify(checks.cruiseEffects)}`);
+    playLog.push(`effects at CRUISE: active=${checks.cruiseEffects?.active} `
+      + `${checks.cruiseEffects?.surveyed} surveyed / ${checks.cruiseEffects?.count} built`);
+
+    const cruiseStart = await pageNow();
+    await new Promise((r) => setTimeout(r, 4_000));
+    windows.sixCruise = [cruiseStart, await pageNow()];
+    await shot('cruise-six');
+
+    // "show me the best one" — the same words a reviewer says out loud.
+    const heroStart = await pageNow();
+    const sent = await page.evaluate(() => {
+      const input = document.getElementById('ts-demo-input');
+      const form = document.getElementById('ts-demo-form');
+      if (input && form) {
+        input.value = 'show me the best one';
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        return 'typed-bar';
+      }
+      window.__terraSignal?.handleIntent?.('show me the best one');
+      return 'handleIntent';
+    }).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
+    record(`SIX "show me the best one" via ${sent}`);
+    playLog.push(`"show me the best one" → ${sent}`);
+
+    const heroed = await waitForShot('HERO', 30_000);
+    playLog.push(`HERO on the gold house settled: ${heroed}`);
+    if (!heroed) errors.push({ t: Date.now() - started, kind: 'six', text: 'HERO never settled' });
+    // Frames are sampled from the moment the phrase was sent: the flight is
+    // the expensive part and hiding it would make the number meaningless.
+    await new Promise((r) => setTimeout(r, 1_500));
+    windows.sixHero = [heroStart, await pageNow()];
+    checks.heroScene = await sceneState();
+    checks.heroEffects = await effectsState();
+    record(`CHECK effects at HERO ${JSON.stringify(checks.heroEffects)}`);
+    await shot('hero-six');
+
+    // Four more seconds parked on the house: the orbit runs, the gold outline
+    // breathes, and the column fades down. Anything that leaks shows up here.
+    await new Promise((r) => setTimeout(r, 4_000));
+    await shot('hero-six-plus-4s');
+    playLog.push(`gold ${checks.scene?.goldId} · focused ${checks.heroScene?.focusedId}`);
+  }
+
   if (PLAY) {
     // Descend first — pulses only exist once the camera is in the market.
     await new Promise((r) => setTimeout(r, 5_000));
@@ -392,7 +501,7 @@ async function main() {
 
   // Responsiveness is measured at a fixed mark, not opportunistically: the
   // question is whether the thread is answering once the page should be idle.
-  const respondAt = PLAY ? Date.now() - started + 2_000 : RESPOND_AT_MS;
+  const respondAt = (PLAY || SIX) ? Date.now() - started + 2_000 : RESPOND_AT_MS;
   await new Promise((r) => setTimeout(r, Math.max(0, respondAt - (Date.now() - started))));
   const askedAt = Date.now();
   let respondTimer;
@@ -411,7 +520,8 @@ async function main() {
   const respondMs = Date.now() - askedAt;
   record(`RESPOND at ${respondAt}ms: ${state.blocked ? 'BLOCKED' : `${respondMs}ms ${JSON.stringify(state)}`}`);
 
-  await new Promise((r) => setTimeout(r, Math.max(0, (PLAY ? PLAY_RUN_MS : RUN_MS) - (Date.now() - started))));
+  const runMs = PLAY ? PLAY_RUN_MS : (SIX ? SIX_RUN_MS : RUN_MS);
+  await new Promise((r) => setTimeout(r, Math.max(0, runMs - (Date.now() - started))));
   clearInterval(pixelTimer);
 
   // Drain every failure surface. scene.renderError is NOT the one that fires
@@ -451,6 +561,28 @@ async function main() {
   const framesOk = !PLAY || (measured.length === 2
     && measured.every((stat) => stat.p95 <= FRAME_P95_BUDGET_MS));
 
+  const sixCruiseFrames = frameStats(frames, windows.sixCruise);
+  const sixHeroFrames = frameStats(frames, windows.sixHero);
+  const sixMeasured = [sixCruiseFrames, sixHeroFrames].filter(Boolean);
+  const sixFramesOk = !SIX || (sixMeasured.length === 2
+    && sixMeasured.every((stat) => stat.p95 <= SIX_FRAME_P95_BUDGET_MS));
+  // The scene is only proved if all six parcels built, every one of them off a
+  // real footprint, and the layer actually switched on at 900 m.
+  const sixSceneOk = !SIX || Boolean(
+    checks.scene?.mode === 'six'
+    && checks.scene.rows === 6
+    && checks.scene.types?.length === 5
+    && checks.scene.goldId
+    && checks.cruiseEffects?.active === true
+    && checks.cruiseEffects.count === 6
+    && checks.cruiseEffects.surveyed === 6,
+  );
+  // "show me the best one" has to land on the house the ranking chose.
+  const sixGoldOk = !SIX || Boolean(
+    checks.heroScene?.focusedId
+    && checks.heroScene.focusedId === checks.scene?.goldId,
+  );
+
   const markersOk = !PLAY || (checks.markersInView?.inView ?? 0) >= MIN_MARKERS_IN_VIEW;
   const half = HERO_CENTRE_FRACTION / 2;
   const heroOk = !PLAY || (checks.heroCentred
@@ -458,7 +590,8 @@ async function main() {
     && Math.abs(checks.heroCentred.fy - 0.5) <= half);
 
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
-    && framesOk && markersOk && heroOk;
+    && framesOk && markersOk && heroOk
+    && sixFramesOk && sixSceneOk && sixGoldOk;
 
   const tileSummary = TILE_HOSTS.map((h) => {
     const row = tiles.get(h);
@@ -478,6 +611,23 @@ async function main() {
       + `${dialogs.length ? ` (${dialogs.length} Cesium dialog)` : ''}`,
     `  ${renderOk ? 'PASS' : 'FAIL'}  render errors      ${renderErrors.length + recovered.length}`,
     `  ${loopOk ? 'PASS' : 'FAIL'}  render loop alive  ${loopStopped ? 'STOPPED' : 'running'}`,
+    ...(SIX ? [
+      `  ${sixSceneOk ? 'PASS' : 'FAIL'}  six-house scene    `
+        + `${checks.scene?.rows ?? 0} rows · ${checks.scene?.types?.length ?? 0}/5 signals · `
+        + `span ${checks.scene?.spanM == null ? '?' : Math.round(checks.scene.spanM)} m · `
+        + `gold ${checks.scene?.goldId ?? 'NONE'}`,
+      `  ${checks.cruiseEffects?.active ? 'PASS' : 'FAIL'}  near-field layer   `
+        + `active=${checks.cruiseEffects?.active} · ${checks.cruiseEffects?.surveyed ?? 0} surveyed`
+        + ` / ${checks.cruiseEffects?.count ?? 0} built · `
+        + `camera ${checks.cruiseEffects?.cameraAglM ?? '?'} m AGL`,
+      `  ${sixGoldOk ? 'PASS' : 'FAIL'}  best one → HERO    `
+        + `focused ${checks.heroScene?.focusedId ?? 'NONE'}`
+        + ` (gold ${checks.scene?.goldId ?? 'NONE'})`,
+      `  ${sixFramesOk ? 'PASS' : 'FAIL'}  frame time p95     `
+        + `cruise ${sixCruiseFrames ? `${sixCruiseFrames.p95}ms` : 'no data'} · `
+        + `hero ${sixHeroFrames ? `${sixHeroFrames.p95}ms` : 'no data'} `
+        + `(budget ${SIX_FRAME_P95_BUDGET_MS}ms)`,
+    ] : []),
     ...(PLAY ? [
       `  ${markersOk ? 'PASS' : 'FAIL'}  markers at CRUISE  `
         + `${checks.markersInView?.inView ?? 0} of ${checks.markersInView?.count ?? 0} in view `
@@ -496,6 +646,26 @@ async function main() {
     `        governor           mode=${state.mode ?? '?'} holds=[${(state.holds || []).join(', ')}]`,
     '='.repeat(74),
   ];
+  if (SIX) {
+    for (const [label, stat] of [
+      ['cruise over cluster', sixCruiseFrames],
+      ['fly to gold + hero', sixHeroFrames],
+    ]) {
+      if (!stat) { out.push(`  frames ${label}: no data`); continue; }
+      out.push(`  frames ${label}: n=${stat.n} over ${stat.seconds}s  `
+        + `p50 ${stat.p50}ms  p95 ${stat.p95}ms  worst ${stat.worst}ms`);
+    }
+    if (checks.heroEffects) {
+      out.push(`  effects at HERO: active=${checks.heroEffects.active} `
+        + `camera ${checks.heroEffects.cameraAglM ?? '?'} m above ground`);
+    }
+    if (shots.length) {
+      out.push('  screenshots:');
+      for (const file of shots) out.push(`    ${file}`);
+    }
+    out.push('  sequence:');
+    for (const line of playLog) out.push(`    ${line}`);
+  }
   if (PLAY) {
     for (const [label, stat] of [
       ['descent', descentFrames],

@@ -13,6 +13,7 @@ import { clampApplies, clampPitchDeg, pitchNeedsClamp } from './camera/pitchClam
 import { cameraHeightM, lodFromHeight } from './lod.js';
 import { readSavedProperties, removeSavedProperty, saveProperty } from './saved.js';
 import { createDriveDemo } from './driveDemo.js';
+import { buildSixHouseScene, readSceneMode } from './scenes/sixHouse.js';
 import {
   FIRST_HINT,
   HELP_LINE,
@@ -44,6 +45,9 @@ import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
 import { hideFocusCard, renderFocusCard } from './ui/focusCard.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
+
+/** What the six-house scene says instead of the market's opening hint. */
+const SIX_HOUSE_HINT = 'Six houses, five signals. Say "show me the best one".';
 
 function readVisionPref(defaultValue) {
   try {
@@ -77,11 +81,20 @@ async function disableLiveFeeds(dataManager) {
 export async function startInvestorSession({ viewer, styleManager, dataManager }) {
   const config = readInvestorConfig();
   const market = resolveMarket(config.defaultMarket);
+  /**
+   * `?scene=six` swaps the inventory for the tight Oakhurst cluster and nothing
+   * else: same provider, same validator, same derived scores. Everything
+   * downstream — visuals, conversation, focus, saved — reads `properties` and
+   * never learns which block it got.
+   */
+  const sceneMode = readSceneMode();
   const provider = createMockPropertyProvider({
     marketId: market.id,
+    dataset: sceneMode === 'six' ? 'six' : null,
     provider: config.propertyProvider,
   });
   const properties = provider.list();
+  const scene = sceneMode === 'six' ? buildSixHouseScene(properties) : null;
   const conversation = createConversationState();
   let focused = null;
   let lastAnalysis = null;
@@ -167,6 +180,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     config,
     market,
     provider,
+    scene,
+    sceneMode,
     properties,
     conversation,
     visuals,
@@ -481,7 +496,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       // First press comes back to the market; pressing again from the market
       // goes all the way out to the globe.
       const target = worldToggleTarget(camera.shot);
-      camera.fly(target);
+      // In the six-house scene the "market" is the cluster.
+      camera.fly(target, target === 'CRUISE' && scene ? scene.rows : null);
       if (target === 'CRUISE') visuals.startScan();
       setAiPrompt(market.greeting);
     },
@@ -584,10 +600,13 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       if (viewer?.scene?.globe) viewer.scene.globe.show = true;
       kickRenderBurst(viewer, { times: 6, intervalMs: 200 });
     }
-    // WORLD → STAGING (nadir at 40 km, tiles stream) → CRUISE.
-    await camera.descend();
+    // WORLD → STAGING (nadir at 40 km, tiles stream) → CRUISE. In the
+    // six-house scene that last leg aims at the cluster at 900 m instead of
+    // the market at 1,800 m, which is already inside the near-field ceiling —
+    // so the parcel glow and the columns are up when the shot settles.
+    await camera.descend({ cruiseTarget: scene ? scene.rows : null });
     // The descent is over; stop telling the user it is still happening.
-    setAiPrompt(FIRST_HINT);
+    setAiPrompt(scene ? SIX_HOUSE_HINT : FIRST_HINT);
     enableVision();
     if (!tileset) {
       const painted = await ensureKeylessVisibleBasemap({
@@ -602,9 +621,19 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
     }
     visuals.startScan();
+    // The gold house is the head of the ranking, computed from the same
+    // composite `findMoney` uses — the scene does not get to pick a favourite.
+    // Arming it here is what makes "show me the best one" and a tap on the
+    // gold parcel both land on the same house.
+    if (scene?.goldId) {
+      visuals.setTopPick(scene.goldId);
+      conversation.topPickId = scene.goldId;
+    }
     setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
     const banner = document.getElementById('ts-globe-error');
-    if (!banner || banner.hidden) setAiPrompt(FIRST_HINT);
+    if (!banner || banner.hidden) {
+      setAiPrompt(scene ? SIX_HOUSE_HINT : FIRST_HINT);
+    }
   };
 
   hunt = initFirstHunt({
@@ -618,7 +647,10 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   });
   session.beginHunt = startHunt;
   session.firstHunt = hunt;
-  if (!hunt?.show) {
+  // A scene URL has already answered "where are we hunting today?" — asking
+  // again would park a modal over the six houses it was opened to show.
+  if (scene) hunt?.dismiss?.({ persistSession: true });
+  if (scene || !hunt?.show) {
     releaseInvestorBootHolds();
     await startHunt();
   }

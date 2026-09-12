@@ -26,6 +26,7 @@ import { prefersReducedMotion } from '../visuals/reducedMotionPolicy.js';
 import {
   DURATIONS,
   HERO,
+  clusterCruiseShot,
   cruiseShot,
   durationFor,
   headingBetween,
@@ -362,7 +363,11 @@ export function createCameraDirector({
         case 'STAGING':
           return flyToShot(stagingShot(market), options);
         case 'CRUISE':
-          return flyToShot(cruiseShot(), options);
+          // A list of houses re-aims the shot at their centroid; no target is
+          // the market view. Same shot name either way.
+          return Array.isArray(target) && target.length
+            ? flyToShot(clusterCruiseShot(target, options), options)
+            : flyToShot(cruiseShot(), options);
         case 'REVEAL':
           return flyToShot(revealShot(target || []), options);
         case 'HERO': {
@@ -391,13 +396,14 @@ export function createCameraDirector({
      * The opening move: park, stage high while tiles stream, then descend.
      * Returns when the market view has settled.
      */
-    async descend({ onStaged } = {}) {
+    async descend({ onStaged, cruiseTarget = null } = {}) {
       await this.fly('STAGING');
       // Nadir at 40 km with the camera still: the cheapest possible moment to
       // wait for the metro to stream in.
       const loaded = await awaitTiles(STAGING_GATE_MS);
       onStaged?.(loaded);
-      return this.fly('CRUISE');
+      // A cluster re-aims the arrival shot; no target lands on the market view.
+      return this.fly('CRUISE', cruiseTarget);
     },
 
     /** Up over the midpoint, then down into HERO on the target. */

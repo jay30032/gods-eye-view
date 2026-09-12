@@ -5,6 +5,7 @@ import {
 } from '../../renderGovernor.js';
 import { cameraHeightM, isNearMarket, lodFromHeight } from '../lod.js';
 import { createMarkerLayer } from './markers.js';
+import { createNearFieldEffects } from './effects/nearFieldEffects.js';
 import { createReducedMotionPolicy } from './reducedMotionPolicy.js';
 
 const HOLD_ID = 'investor-opportunity';
@@ -19,6 +20,13 @@ const HOLD_ID = 'investor-opportunity';
  * and how hovers and picks reach the session.
  *
  * The public API is unchanged, so `session.js` did not have to move.
+ *
+ * There are two layers under here now and the manager owns both. The markers
+ * are the **far field** — screen-space sprites that hold their size from orbit
+ * down to the street. `effects/` is the **near field**: parcel outlines draped
+ * on Google's tiles and columns standing over real footprints, which only exist
+ * below 1,500 m and cost nothing above it. Every selection call fans out to
+ * both, so a shortlist or a gold pick means the same thing at either altitude.
  */
 export function createOpportunityVisualManager({
   viewer,
@@ -39,6 +47,7 @@ export function createOpportunityVisualManager({
   }
 
   const layer = createMarkerLayer({ viewer, Cesium, market, getProperties, reduced });
+  const effects = createNearFieldEffects({ viewer, Cesium, market, getProperties, reduced });
 
   /** In space the markers are meaningless and must not hold the render loop. */
   function isSpace() {
@@ -75,6 +84,9 @@ export function createOpportunityVisualManager({
       layer.refreshGround();
     }
     layer.setEnabled(enabled && !isSpace());
+    // The effects layer decides for itself whether the camera is low enough;
+    // this only says whether Opportunity Vision is on at all.
+    effects.setEnabled(enabled && !isSpace());
     syncHold();
   }
 
@@ -82,7 +94,8 @@ export function createOpportunityVisualManager({
 
   handler.setInputAction((movement) => {
     if (destroyed) return;
-    const id = layer.idFrom(viewer.scene.pick(movement.endPosition));
+    const hovered = viewer.scene.pick(movement.endPosition);
+    const id = layer.idFrom(hovered) || effects.idFrom(hovered);
     const canvas = viewer.scene.canvas;
     if (canvas?.style) canvas.style.cursor = id ? 'pointer' : '';
     layer.setHovered(id);
@@ -91,7 +104,8 @@ export function createOpportunityVisualManager({
 
   handler.setInputAction((movement) => {
     if (destroyed) return;
-    const id = layer.idFrom(viewer.scene.pick(movement.position));
+    const picked = viewer.scene.pick(movement.position);
+    const id = layer.idFrom(picked) || effects.idFrom(picked);
     if (!id) return;
     viewer.entities._terrasignalLastPick = id;
     globalThis.dispatchEvent(new CustomEvent('terrasignal:pick-property', { detail: { id } }));
@@ -107,6 +121,16 @@ export function createOpportunityVisualManager({
   return {
     get enabled() { return enabled; },
     get markerCount() { return layer.count; },
+    /** The near-field layer, for the headed probes and the six-house check. */
+    get effects() {
+      return {
+        supported: effects.supported,
+        active: effects.active,
+        count: effects.count,
+        surveyed: effects.surveyedIds,
+        approximate: effects.approximateIds,
+      };
+    },
     /** Screen positions of shown markers — used by the headed smoke check. */
     screenPositions() { return layer.screenPositions(); },
 
@@ -127,21 +151,25 @@ export function createOpportunityVisualManager({
     get dealVision() { return { strategy: dealStrategy, caption: dealCaption }; },
     setShortlist(ids) {
       layer.setShortlist(ids);
+      effects.setShortlist(ids);
       governorRequestRender('investor-shortlist');
       return Array.isArray(ids) ? ids.slice() : [];
     },
     setTopPick(id) {
       layer.setTopPick(id);
+      effects.setTopPick(id);
       governorRequestRender('investor-top-pick');
       return id || null;
     },
     setSaved(id) {
       layer.setSaved(id);
+      effects.setSaved(id);
       governorRequestRender('investor-saved');
       return id || null;
     },
     setFocused(id) {
       layer.setFocused(id);
+      effects.setFocused(id);
       governorRequestRender('investor-focus');
     },
     /**
@@ -151,6 +179,7 @@ export function createOpportunityVisualManager({
      */
     setFlightActive(active) {
       layer.freeze(Boolean(active));
+      effects.freeze(Boolean(active));
       syncHold();
       return Boolean(active);
     },
@@ -163,14 +192,16 @@ export function createOpportunityVisualManager({
     },
     rebuild() {
       built = false;
+      effects.rebuild();
       refresh();
     },
-    pickPropertyId(picked) { return layer.idFrom(picked); },
+    pickPropertyId(picked) { return layer.idFrom(picked) || effects.idFrom(picked); },
     destroy() {
       destroyed = true;
       handler.destroy();
       if (typeof removeMove === 'function') removeMove();
       layer.destroy();
+      effects.destroy();
       releaseContinuousRender(HOLD_ID);
       reducedPolicy.destroy();
     },

@@ -1,11 +1,18 @@
 import { ATLANTA_DECATUR_PROPERTIES } from './atlantaDecatur.js';
+import { SIX_HOUSE_PROPERTIES } from './sixHouse.js';
 import { cloneProperty, isDemoProperty, validateProperty } from './schema.js';
 import { enrichProperty } from '../scoring.js';
 import { demoNow } from '../clock.js';
 import { resolveMarket } from '../markets.js';
 
+/**
+ * Authored inventories. `atlanta` is the market board; `six` is the tight
+ * Oakhurst cluster the near-field scene needs and the market board cannot
+ * supply. Both are validated and enriched by exactly the same path.
+ */
 const DATASETS = Object.freeze({
   atlanta: ATLANTA_DECATUR_PROPERTIES,
+  six: SIX_HOUSE_PROPERTIES,
 });
 
 /**
@@ -17,6 +24,7 @@ const DATASETS = Object.freeze({
  */
 export function createMockPropertyProvider({
   marketId = 'atlanta',
+  dataset = null,
   provider = 'mock',
   now = demoNow(),
   assumptions = null,
@@ -25,7 +33,9 @@ export function createMockPropertyProvider({
     throw new Error(`Phase 1 supports PROPERTY_PROVIDER=mock only (got ${provider})`);
   }
   const market = resolveMarket(marketId);
-  const rows = Object.freeze((DATASETS[market.id] || DATASETS.atlanta).map((row) => {
+  const key = dataset || market.id;
+  if (!DATASETS[key]) throw new Error(`Unknown mock dataset: ${key}`);
+  const rows = Object.freeze(DATASETS[key].map((row) => {
     const errors = validateProperty(row);
     if (errors.length) throw new Error(`Invalid mock property ${row?.id}: ${errors.join(', ')}`);
     if (!isDemoProperty(row)) throw new Error(`Mock inventory must be DEMO/MOCK: ${row?.id}`);
@@ -35,6 +45,7 @@ export function createMockPropertyProvider({
 
   return {
     id: 'mock',
+    dataset: key,
     market,
     count: rows.length,
     list() {

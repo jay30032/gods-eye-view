@@ -73,6 +73,26 @@ export const CRUISE = Object.freeze({
   pitchDeg: -25,
 });
 
+/**
+ * CRUISE over a tight cluster rather than over the market.
+ *
+ * The market CRUISE is a fixed aim point at 1,800 m with the downtown skyline
+ * on the horizon — it frames a board of thirty houses spread over eight
+ * kilometres. A six-house scene 400 m across would be six specks in the middle
+ * of it. This is the same shot re-aimed: lower, steeper, and centred on
+ * whatever cluster it is given.
+ *
+ * 900 m is also deliberately below the 1,500 m near-field ceiling, so the
+ * parcel glow and the columns are already up when the shot settles.
+ */
+export const CLUSTER_CRUISE = Object.freeze({
+  altitudeM: 900,
+  headingDeg: 264,
+  // Steeper than the market cruise: there is no skyline to put on the horizon
+  // here, and the subject is the ground.
+  pitchDeg: -38,
+});
+
 /** Fit the shortlist, with room around it. */
 export const REVEAL = Object.freeze({
   paddingPct: 0.25,
@@ -191,6 +211,32 @@ export function cruiseShot() {
       pitchDeg: CRUISE.pitchDeg,
       altitudeM: CRUISE.altitudeM,
     }),
+  };
+}
+
+/**
+ * CRUISE aimed at the centroid of a group of houses.
+ *
+ * Keeps the shot NAME `CRUISE`, so transition durations, the pitch clamp and
+ * every probe that waits on a settled shot go on working unchanged — this is a
+ * different framing of the same shot, not a new one.
+ */
+export function clusterCruiseShot(points, {
+  altitudeM = CLUSTER_CRUISE.altitudeM,
+  headingDeg = CLUSTER_CRUISE.headingDeg,
+  pitchDeg = CLUSTER_CRUISE.pitchDeg,
+} = {}) {
+  const rows = (points || []).filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng));
+  if (!rows.length) return cruiseShot();
+  const aim = {
+    lat: rows.reduce((sum, p) => sum + p.lat, 0) / rows.length,
+    lng: rows.reduce((sum, p) => sum + p.lng, 0) / rows.length,
+  };
+  return {
+    name: 'CRUISE',
+    ...cameraFromAim(aim, { headingDeg, pitchDeg, altitudeM }),
+    // Altitude is above the cluster's ground, not the camera's set-back point.
+    groundAnchor: aim,
   };
 }
 

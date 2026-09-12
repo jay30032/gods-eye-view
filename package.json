@@ -44,7 +44,9 @@
     "smoke:investor": "node scripts/investor-probe.mjs --url \"http://localhost:4173/?demo=1&welcome=1\" --label investor",
     "smoke:classic": "node scripts/investor-probe.mjs --url \"http://localhost:4173/?product=classic\" --label classic",
     "smoke:investor-keyless": "node scripts/investor-probe.mjs --spawn-keyless",
-    "smoke:demo": "node scripts/investor-probe.mjs --play --url \"http://localhost:4173/?demo=1&welcome=1\" --label demo"
+    "smoke:demo": "node scripts/investor-probe.mjs --play --url \"http://localhost:4173/?demo=1&welcome=1\" --label demo",
+    "smoke:six": "node scripts/investor-probe.mjs --six --url \"http://localhost:4173/?scene=six\" --label six",
+    "footprints:fetch": "node scripts/fetch-footprints.mjs"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

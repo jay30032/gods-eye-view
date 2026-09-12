@@ -39,7 +39,10 @@ src/investor/
   clock.js               the pinned demo clock behind every relative date
   mock/                  DEMO/MOCK inventory + search
   deal/                  deterministic underwriting
-  visuals/               governor-held Cesium entities
+  visuals/               governor-held Cesium primitives
+  visuals/effects/       near-field parcel glow, per-signal motion, columns
+  scenes/                ?scene=six — the six-house near-field scene
+  mock/parcel.js         synthetic parcels from real footprints
   ui/                    brand, bottom nav, focus, saved, escapeHtml
   session.js             bootstrap + demo intents
   ensureBasemap.js       keyless Esri → OSM + requestRender bursts + empty-globe assert
@@ -194,6 +197,8 @@ npm run smoke:investor           # demo URL
 npm run smoke:classic            # classic chrome
 npm run smoke:investor-keyless   # spawns its own :4174 with the Google key
                                  # blanked in env only — never touches .env
+npm run smoke:demo               # drives the whole acceptance conversation
+npm run smoke:six                # the six-house near-field scene
 ```
 
 Each launches **real Chrome** (`channel: 'chrome'`, `headless: false` — this
@@ -366,6 +371,223 @@ non-viable deal says "No spread — pass" rather than showing a $0 fee next to a
 
 Every result is frozen, returns its `verdict` and the `assumptions` it ran under, and the card,
 globe caption, and spoken line all lead with that verdict.
+
+## Near-field effects
+
+The sprites in `markers.js` are the **far field**. They hold their size on
+screen from orbit down to the street, which is exactly what you want when the
+question is "where in this metro is there a signal" — and exactly what you do
+not want when the question is "which of these four roofs". A 48-pixel billboard
+floating over a block of Oakhurst cannot point at a house.
+
+So below **1,500 m above ground** a second layer comes up: `visuals/effects/`.
+It draws the parcel each house sits on and a column of light over the
+footprint, and it hands back to the sprites on the way up. The markers are
+untouched and still drawn at every altitude; this layer only adds.
+
+### Four rules
+
+1. **Draped, never drawn over.** Every ground primitive is a
+   `GroundPolylinePrimitive` with `classificationType` CESIUM_3D_TILE, so the
+   outline is projected onto Google's photogrammetry rather than drawn through
+   it. As ordinary geometry a lot line disappears under a street tree and gets
+   sliced by a porch roof. The side effect is that a tree overhanging the lot
+   line wears the line — which is the correct reading, not an artefact.
+2. **One clock, delivered as uniforms.** `createEffectClock` is read once per
+   frame and written to every material as `time`. There is no `CallbackProperty`
+   anywhere in this layer: that machinery makes Cesium re-evaluate a property
+   every frame on the main thread, which is the cost the marker rewrite already
+   established this product will not pay.
+3. **Nothing is rebuilt after `build()`.** Geometry is created once. Motion,
+   selection, dimming and distance fades are all uniform writes — at most seven
+   floats and two booleans per property per frame, with no allocation (the two
+   `Cesium.Color` objects per entry are built once and assigned by reference).
+4. **Never colour the wrong house.** A row whose Overpass lookup missed has no
+   footprint, so it gets no building outline and no column — only a nominal
+   parcel glow at 55% alpha, plus the beacon the far field already draws. An
+   approximate mark is honest. A confident gold outline around the neighbour's
+   house is not.
+
+### Where each animation runs
+
+The split is by whether an effect varies across the *geometry* or only over
+*time*, because the CPU can supply one and not the other:
+
+| | Runs on | Why |
+|---|---|---|
+| brightness, glow width, alpha | CPU, in `signalMotion.js` | pure, bounded, and swept at 1 ms resolution by the tests |
+| travelling segment (LISTED), rising wave (TAX\_SALE) | GLSL, from the shared `time` uniform | needs a value per *fragment*, which no CPU-side scalar can give |
+
+That split is deliberate: anything which must be *proven* bounded is JS, because
+a unit suite cannot compile GLSL. The shaders only decide *where along the
+geometry* something is, never how bright it is allowed to get.
+
+### The motions
+
+| Signal | Colour | Motion |
+|---|---|---|
+| `FORECLOSURE` | deep red | slow heartbeat — a strong beat, a weaker one, a long rest |
+| `PREFORECLOSURE` | red-orange | two gentle pulses, then a pause longer than both |
+| `TAX_SALE` | purple | a wave rising up the column, outline ramping with it |
+| `DISTRESS` | amber | restrained uneven shimmer — two incommensurate rates, never a pulse |
+| `LISTED_OPPORTUNITY` | cyan | a thin bright segment travelling around the parcel |
+
+Four of the five colours are the far-field sprite colours unchanged, so a house
+does not change identity as the camera drops. LISTED is the exception: sprite
+blue vanishes against aerial imagery of a shaded street once it is a line on the
+ground, so the near field uses cyan and `propertyPulse.js` is left alone.
+
+Every period is ≥ 2.2 s — the same no-strobe floor Phase 1 has held throughout.
+`prefers-reduced-motion` freezes brightness and width at each type's midpoint
+and sets `travelPerSec` and `wavePerSec` to zero, so there is a static glow and
+no travelling segment at all.
+
+The top pick and the focused house take a **gold** outline with a wider, softer
+halo, breathing between 0.55 and 1.0 over 3 s. It never reaches zero: a gold
+outline that blinks off reads as a bug, not as emphasis.
+
+### Dim rules
+
+Ordered, and the order is the product decision:
+
+1. a house the shortlist left out is **quiet** — 25% alpha, no motion — even
+   while something else is focused, because "not an answer to the question you
+   asked" outranks "not the one you are looking at";
+2. the focused house and the top pick are never quiet, the same exemption
+   `markerAlphaFor` makes in the far field;
+3. a **saved** house is held at 35% rather than 25%: not the answer to this
+   question, but the user already said they wanted to find it again;
+4. otherwise, focus brightens one parcel and dims every other to **35%**.
+
+### The column
+
+A `WallGeometry` prism over the footprint, 120 m tall, fading upward to nothing
+— a wall rather than an extruded polygon, because a capped box reads as a solid
+object sitting on the roof and the point is a shaft that runs out of substance.
+
+Its alpha runs the *opposite* way to an ordinary distance fade: nearly gone at
+HERO, strongest out near the layer's own ceiling. The column exists to answer
+"which roof?" from across the neighbourhood, and at 150 m the answer is already
+filling the frame — a light shaft in front of the house is then just something
+in the way.
+
+Three numbers in this layer were wrong on the first headed pass and all three
+were invisible to the unit suite:
+
+- **the cull radius.** 1,400 m, against a six-house CRUISE whose *slant* range
+  to its own aim point is 1,462 m — so every parcel was culled in the one shot
+  the layer exists for. Altitude is not range.
+- **the range anchor.** Ranges were measured to `Cartesian3.fromDegrees(lng,
+  lat)` at ellipsoid height, which in Decatur is 310 m below the house. Every
+  distance fade behaved as though the camera were further away than it was.
+- **single-face alpha.** A closed wall shows a near face and a far face at
+  once, and an L-shaped roof shows four or six. At 0.42 each they stacked into
+  a solid gold slab. One face now carries 0.16 at most.
+
+### Camera height means height above ground
+
+`positionCartographic.height` is above the WGS84 ellipsoid, and Decatur's ground
+is ~310 m up — so the six-house establishing shot, 900 m above the houses,
+reports 1,177 m. Comparing that raw number against the ceiling quietly turns a
+1,500 m rule into an 1,190 m one, and gives every market a different rule
+depending on its elevation. The layer subtracts `market.groundElevationM`, the
+same datum `shots.js` measures its altitudes from. The market constant is used
+rather than sampling the surface under the camera because `scene.sampleHeight`
+is a render-thread query and this runs every frame.
+
+## Geometry: real footprints, synthetic parcels
+
+`scripts/fetch-footprints.mjs` asks OpenStreetMap, via Overpass, for the nearest
+residential building within 120 m of each authored row, and writes
+`mock/atlantaDecaturGeometry.js` (and `mock/sixHouseGeometry.js`) keyed by
+property id. Each row's `lat`/`lng` is then snapped to its footprint centroid,
+in place, touching nothing else in the dataset.
+
+It is run by hand and is **not** part of `npm test`: a unit suite that depends
+on a third-party API is a unit suite that fails when someone else's server is
+busy.
+
+**The footprints are real; the parcels are not.** There is no free,
+redistributable parcel polygon for DeKalb or Fulton, so each lot is synthesised
+in `mock/parcel.js` from the footprint's **oriented** bounding box — min-area,
+not north-up, because a house at 40° to north gets an axis-aligned box a third
+larger than itself — pushed out 9 m at the sides and 18 m front and back, capped
+at 0.35 acres. A detached house presents its long wall to the street, so the
+long axis takes the side setbacks and the short axis takes front and back.
+
+The cap scales both setbacks down together and can only reach zero, so a parcel
+is never smaller than the box around the house it belongs to. Expanding a
+typical 12 × 10 m house gives 30 × 46 m — 0.34 acres, a normal Decatur lot.
+`parcel.source` is `'synthetic'` and the generated file says out loud that it
+marks roughly where a lot would be and is not a survey.
+
+**Nothing is derived from Google's 3D tiles.** That tileset is licensed imagery,
+not a data source; vectorising it would be a terms violation and the result
+could not be committed. Overpass or nothing. The generated files carry ODbL
+attribution for the OSM footprints.
+
+Three things the script learned the hard way:
+
+- **Overpass answers undici's default User-Agent with a bare `406 Not
+  Acceptable`.** Not a rate limit, not a bad query — a refusal to serve an
+  unidentified client. The first full run missed all 30 rows for that reason
+  alone and reported them as "no residential building within 120 m", which is a
+  transport failure wearing a data failure's clothes.
+- **A run where every row misses refuses to write anything.** Thirty nulls is a
+  broken client, not a market without houses in it.
+- **A miss may add a row to the degrade list; it may never remove one from the
+  surveyed list.** Overpass is shared and rate-limited, and a run that gets
+  throttled halfway through is normal — without carry-forward one 429 silently
+  replaces a real footprint with a null and a house that was fine yesterday
+  quietly degrades.
+
+The `building=yes` tier is accepted, but only after the obviously
+non-residential tags are excluded: a `building=yes` carrying `amenity=townhall`
+is the Decatur city hall, and the row nearest the Square would otherwise light
+it up. There is a footprint size floor too — it began at 45 m² and let a 46 m²
+outbuilding win a row whose house is 1,740 sqft.
+
+## The six-house scene
+
+`?scene=six` swaps the inventory for six houses in Oakhurst inside about 500 m
+that cover all five signal types, and nothing else: same provider, same
+validator, same derived scores. Everything downstream reads `properties` and
+never learns which block it got.
+
+It needs its own dataset because the market board cannot supply one. The thirty
+rows are spread across the metro on purpose — that is what CRUISE is for — and
+**the tightest 600 m cluster in the whole set holds two houses, which share a
+signal type.** No six of them are ever in frame together.
+
+The scene opens on CRUISE over the cluster at **900 m**, which is deliberately
+inside the 1,500 m near-field ceiling, so the parcel glow and the columns are
+already up when the shot settles. That shot keeps the name `CRUISE` — it is a
+re-aiming of the same shot, not a new one, so transition durations, the pitch
+clamp and every probe that waits on a settled shot go on working unchanged.
+
+"Show me the best one" (typed or spoken) and a tap on the gold parcel both land
+on the same house, because **the scene does not choose it**. `goldPickFor`
+returns the head of the composite ranking — the same ranking `findMoney` uses,
+for the same reason Phase 1 deleted the hand-typed TOP-PICK signal. At the demo
+clock it wins by 13 points, and a test fails if that margin ever drops below 5.
+
+It has its own entry on the demo rail, carrying `href` rather than `phrase`, so
+it navigates instead of talking and `DEMO_STEPS.filter(s => s.phrase)` stays
+equal to `ACCEPTANCE_PHRASES`.
+
+### `npm run smoke:six`
+
+A fourth headed check, narrower than `smoke:demo` on purpose: it does not drive
+the conversation, it measures the two shots the near-field layer has to hold.
+It fails unless all six parcels built off real footprints, the layer is active
+at 900 m, "show me the best one" lands on the gold house, there are no render
+errors, and **p95 frame time is ≤ 33 ms** in both the settled cruise and the
+flight to hero. 33 ms rather than `smoke:demo`'s 120 ms because that budget is
+the whole question: building once and animating through uniforms is only worth
+doing if the result holds 30 fps.
+
+It writes `cruise-six.png`, `hero-six.png` and `hero-six-plus-4s.png` to
+`/tmp/shots/`.
 
 ## Env
 
