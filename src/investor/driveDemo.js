@@ -269,7 +269,7 @@ export function createDriveDemo({
     if (mode === MODES.DRIVE) {
       if (lookActive) {
         const look = camera?.relaxDriveLook?.(dtSeconds);
-        if (look && look.offsetDeg === 0 && look.pitchDeg === -22) lookActive = false;
+        if (look?.settled) lookActive = false;
       }
       camera?.updateDrive?.(fix.position, smoothedHeading);
     }

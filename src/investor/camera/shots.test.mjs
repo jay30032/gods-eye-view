@@ -27,6 +27,8 @@ import {
   stagingShot,
   worldShot,
   worldToggleTarget,
+  DRIVE_CHASE,
+  driveChaseShot,
 } from './shots.js';
 
 const market = resolveMarket('atlanta');
@@ -296,3 +298,78 @@ test('CRUISE actually has sky in frame, so the skyline has a horizon', () => {
   // ...but not so shallow that the board falls out of the bottom of the frame.
   assert.ok(CRUISE.pitchDeg <= -20, 'too shallow and most pulses leave the screen');
 });
+
+// ---------------------------------------------------------------------------
+// Drive Mode's chase camera
+// ---------------------------------------------------------------------------
+
+test('the chase camera clears the Oakhurst canopy', () => {
+  // 38 m at -22 was the first cut. The geometry was right and the
+  // neighbourhood was wrong: Oakhurst's oaks top out around 25-30 m, and a
+  // shallow camera at that height spends a residential block looking through
+  // them. A headed run's gold frame was tree tops.
+  assert.ok(DRIVE_CHASE.heightM >= 45, `${DRIVE_CHASE.heightM} m is back in the canopy`);
+  // And not so high it stops being a drive and starts being a map.
+  assert.ok(DRIVE_CHASE.heightM <= 80, `${DRIVE_CHASE.heightM} m reads as a plan view`);
+});
+
+test('the chase camera keeps the "coming up" feel', () => {
+  const pitch = Math.abs(DRIVE_CHASE.pitchDeg);
+  // Shallow enough that the frame is mostly road ahead with houses arriving
+  // into it. HERO looks down at 45 because it is ABOUT a parcel; a drive is
+  // about what is coming, and at that angle it would be a plan view.
+  assert.ok(pitch < Math.abs(HERO.pitchDeg), 'a drive must be shallower than HERO');
+  assert.ok(pitch <= 40, `${pitch} degrees is looking at the block you are on`);
+  // Steep enough to look OVER a canopy rather than into one.
+  assert.ok(pitch >= 28, `${pitch} degrees looks through the trees, not over them`);
+});
+
+test('the chase pose sits back along the travel bearing, not over the fix', () => {
+  // That set-back is what makes it a chase camera: the tracked position stays
+  // ahead in frame instead of directly underneath.
+  const position = { lat: 33.7582, lng: -84.3074 };
+  const shot = driveChaseShot(position, 90);
+  assert.equal(shot.name, 'DRIVE');
+  assert.equal(shot.heightM, DRIVE_CHASE.heightM);
+  assert.equal(shot.pitchDeg, DRIVE_CHASE.pitchDeg);
+  assert.equal(shot.headingDeg, 90);
+  // Heading east means the camera is to the WEST of the position.
+  assert.ok(shot.lng < position.lng, 'the camera should be behind, not on top');
+  assert.ok(Math.abs(shot.lat - position.lat) < 1e-6, 'and squarely behind');
+  const back = metresBetween(position, shot);
+  assert.ok(Math.abs(back - DRIVE_CHASE.behindM) < 1, `set back ${back.toFixed(1)} m`);
+  // Altitude is measured from the ground under the ROAD, not under the camera.
+  assert.equal(shot.groundAnchor.lat, position.lat);
+  assert.equal(shot.groundAnchor.lng, position.lng);
+});
+
+test('a look offset turns the lens without moving the camera', () => {
+  // "Look left" is a glance out of the side window, not the drive changing
+  // course — so the position is identical and only the heading moves.
+  const position = { lat: 33.7582, lng: -84.3074 };
+  const ahead = driveChaseShot(position, 90);
+  const left = driveChaseShot(position, 90, { lookOffsetDeg: DRIVE_CHASE.lookLeftDeg });
+  assert.equal(left.lat, ahead.lat);
+  assert.equal(left.lng, ahead.lng);
+  assert.notEqual(left.headingDeg, ahead.headingDeg);
+  assert.ok(left.headingDeg >= 0 && left.headingDeg < 360, 'a look must stay a bearing');
+
+  // Left and right are opposite hands.
+  const right = driveChaseShot(position, 90, { lookOffsetDeg: DRIVE_CHASE.lookRightDeg });
+  assert.ok(DRIVE_CHASE.lookLeftDeg < 0 && DRIVE_CHASE.lookRightDeg > 0);
+  assert.notEqual(left.headingDeg, right.headingDeg);
+
+  // Overhead steepens the pitch and never looks past straight down.
+  const overhead = driveChaseShot(position, 90, { pitchDeg: DRIVE_CHASE.overheadPitchDeg });
+  assert.ok(overhead.pitchDeg < DRIVE_CHASE.pitchDeg);
+  assert.ok(overhead.pitchDeg > -90);
+});
+
+test('the chase pose wraps its heading rather than emitting 400 degrees', () => {
+  const position = { lat: 33.7582, lng: -84.3074 };
+  for (const heading of [0, 350, 359.9]) {
+    const shot = driveChaseShot(position, heading, { lookOffsetDeg: DRIVE_CHASE.lookRightDeg });
+    assert.ok(shot.headingDeg >= 0 && shot.headingDeg < 360, `heading ${shot.headingDeg}`);
+  }
+});
+

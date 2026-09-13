@@ -570,7 +570,12 @@ export function createCameraDirector({
     if (Math.abs(driveLook.pitchDeg - DRIVE_CHASE.pitchDeg) < 0.05) {
       driveLook.pitchDeg = DRIVE_CHASE.pitchDeg;
     }
-    return { ...driveLook };
+    // `settled` is reported rather than left for the caller to work out by
+    // comparing against the default pitch. A caller that hardcoded that number
+    // would silently stop settling the moment the camera was retuned — which is
+    // exactly what a literal -22 in driveDemo.js was about to do.
+    const settled = driveLook.offsetDeg === 0 && driveLook.pitchDeg === DRIVE_CHASE.pitchDeg;
+    return { ...driveLook, settled };
   }
 
   /** One frame of the chase. `headingDeg` must already be smoothed. */

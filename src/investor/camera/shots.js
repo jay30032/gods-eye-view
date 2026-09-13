@@ -168,23 +168,35 @@ export const DRIVE = Object.freeze({
 /**
  * Drive Mode v1's chase camera: above the road, looking along it.
  *
- * 38 m is the height at which a residential street reads as a street — low
- * enough that the houses either side have scale and you can see which is which,
- * high enough that the camera is not inside the tree canopy, which at 15 m over
- * Oakhurst it would be for most of the route.
+ * **55 m, pitched 32 degrees down.** Both numbers are the second attempt, and
+ * the first attempt is why they are what they are.
  *
- * -22 degrees is shallow on purpose. The near-field layer's own shots look
- * down at 38-45 degrees because they are *about* a parcel; a drive is about
- * what is coming, so the frame has to be mostly road ahead with the houses
- * arriving into it, not a plan view of the block you are on.
+ * At 38 m and -22 the geometry was right and the neighbourhood was wrong.
+ * Oakhurst is old and heavily canopied, and a shallow camera at that height
+ * spends most of a residential block looking *through* mature oaks: the headed
+ * run's approach frames read beautifully on the open stretches and the gold
+ * frame was tree tops. The trees are real and they are not going to move, so
+ * the camera has to clear them.
  *
- * The camera sits its own height back along the travel bearing rather than
- * directly over the fix, which is what makes it a chase camera: the position
- * being tracked stays ahead in frame instead of underneath.
+ * 55 m is above the canopy — Oakhurst's oaks top out around 25-30 m — while
+ * still low enough that the houses either side have scale and you can tell one
+ * roof from the next. Going higher starts reading as a map rather than a drive.
+ *
+ * -32 is still shallow, and deliberately shallower than the near-field layer's
+ * own shots at 38-45 degrees. Those are *about* a parcel; a drive is about what
+ * is coming, so the frame has to be mostly road ahead with houses arriving into
+ * it rather than a plan view of the block you are already on. The extra ten
+ * degrees over the first cut buys the downward angle that looks over a canopy
+ * instead of into it, and costs some of the horizon — which is the trade, and
+ * the reason it is not steeper still.
+ *
+ * The camera sits back along the travel bearing rather than directly over the
+ * fix, which is what makes it a chase camera: the tracked position stays ahead
+ * in frame instead of underneath.
  */
 export const DRIVE_CHASE = Object.freeze({
-  heightM: 38,
-  pitchDeg: -22,
+  heightM: 55,
+  pitchDeg: -32,
   /** How far behind the tracked position the camera flies, in metres. */
   behindM: 26,
   /** Temporary look offsets — "look left", "look right", "overhead". */

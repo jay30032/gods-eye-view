@@ -953,11 +953,25 @@ the GPS path compiles.
 
 A chase camera on a Catmull-Rom spline — which passes exactly through every
 road vertex, where a B-spline would cut the corner and drive through the garden
-on the inside of it. 38 m up, pitch −22, heading low-pass filtered on the
+on the inside of it. **55 m up, pitch −32**, heading low-pass filtered on the
 *shortest signed delta* so that filtering 359 towards 1 does not spin the camera
 the long way round through south. The filter coefficient comes from elapsed time
 rather than per frame, so a turn takes the same wall-clock time at 30 fps as at
 60.
+
+Those two numbers are the second attempt. **38 m at −22 was right geometry and
+the wrong neighbourhood**: Oakhurst is old and heavily canopied, its oaks top
+out around 25–30 m, and a shallow camera at that height spends most of a
+residential block looking *through* them. The first headed run's approach frames
+read beautifully on the open stretches and its gold frame was tree tops with no
+road visible at all. The trees are real and are not going to move, so the camera
+clears them — 55 m is above the canopy and still low enough that one roof is
+tellable from the next, and −32 is the downward angle that looks *over* a canopy
+rather than into it while staying shallower than HERO's 45, so the frame is
+still mostly road ahead with houses arriving into it. Steeper would buy more
+canopy clearance and start reading as a plan view of the block you are already
+on, which is the trade and the reason it stops at −32. `shots.test.mjs` pins
+both bounds to those reasons.
 
 Playback is 9 m/s, eased in over 2 s. "Slower" / "faster" scale it ×0.6 / ×1.5;
 within 70 m of a house being explained it drops to 40% so the house is still on
@@ -1032,8 +1046,8 @@ viewer's own frame budget, **every property on the route announced**, **exactly
 one** gold call-out, and "look closer" reaching Property Mode. It writes
 `drive-approach.png`, `drive-gold.png` and `drive-property-mode.png`.
 
-Measured: **p95 18.3 ms** against a 37.3 ms budget (30 fps cap on battery),
-6 call-outs covering 6/6 properties, 1 gold call-out.
+Measured at 55 m / −32: **p95 33.9 ms** against a 37.3 ms budget (30 fps cap on
+battery), 6 call-outs covering 6/6 properties, 1 gold call-out.
 
 ### Live GPS
 
