@@ -552,6 +552,7 @@ async function main() {
         lengthM: drive.lengthM,
         goldId: drive.goldId,
         level: drive.level,
+        tileBudget: drive.tileBudget,
         onRoute: (drive.onRoute || []).length,
         callouts: (drive.callouts || []).map((c) => ({
           text: c.text, side: c.side, ids: c.ids, gold: Boolean(c.gold), atM: c.atM,
@@ -952,6 +953,10 @@ async function main() {
         + `${goldCallouts.length} (expected exactly 1 — best match was requested)`,
       `  ${drivePropertyOk ? 'PASS' : 'FAIL'}  look closer        `
         + `mode ${checks.drivePropertyMode?.mode ?? 'NONE'}`,
+      `        motion tiles       `
+        + `sse ${checks.driveState?.tileBudget?.current ?? '?'} `
+        + `(rest ${checks.driveState?.tileBudget?.baseline ?? '?'}, `
+        + `motion ${checks.driveState?.tileBudget?.motionSse ?? '?'})`,
       `  ${driveFramesOk ? 'PASS' : 'FAIL'}  frame time p95     `
         + `drive ${driveFrames ? `${driveFrames.p95}ms` : 'no data'} `
         + `(budget ${driveBudgetMs.toFixed(1)}ms`

@@ -1038,6 +1038,47 @@ Both stopped the render loop; neither could fail a unit test.
    normalised: `normalized result is not a number`, thrown from inside the
    render loop.
 
+### Motion tile budget
+
+A stationary camera and a moving one ask Google's tileset different questions.
+Standing still the view is fixed and the streamer converges. Driving, the
+frustum sweeps a new block every few seconds — four times that in the headed
+check — so the set of tiles satisfying the screen space error never settles.
+
+Measured on the six-house route with `targetFrameRate` lifted so the number is
+the work and not the cap: **stationary p95 33.9 ms, driving p95 66.7 ms**. 66.7
+is exactly two vsync intervals — a *missed* frame, missed while the camera is
+moving, which is when a dropped frame is most visible.
+
+So while the camera moves `maximumScreenSpaceError` goes to **24**, and 500 ms
+after motion stops it goes back to whatever it was (16). Detail at rest is what
+matters, because resting is when you are looking.
+
+It restores on **silence** rather than on an event. There is no "the camera
+stopped" event to subscribe to, and pausing, entering Property Mode and ending
+the drive would each need their own hook. `touch()` is called on every fix and
+re-arms a 500 ms timer, so motion keeps the budget raised simply by continuing
+and *any* reason the fixes stop restores it — including reasons not thought of
+yet. It also never makes the tiles finer than it found them: if something has
+already asked for a coarser budget, motion is not the moment to demand more
+detail than it wanted.
+
+**What it did and did not do.** Mechanically it works — `sse 24` while driving,
+back to 16 the moment the drive pauses. On the machine it was measured on it did
+**not** move driving p95, which stayed pinned at 66.7 ms. That number is two
+vsyncs on a display the OS had throttled to 30 Hz at 18% battery, so the drive
+is consistently a little over a 33.3 ms frame and lands on the next one; the
+budget removes streaming work without removing whatever else crosses that line.
+The tail looked better (worst 633 ms → 233 ms in the paired run) but that is one
+sample each and not evidence.
+
+**It has not been measured at the 60 fps cap.** The cap comes from
+`navigator.getBattery().charging` and cannot be forced from a URL; lifting
+`targetFrameRate` by hand does not help because the 30 Hz ceiling survives
+removing it entirely, which is how we know the ceiling is the OS and not
+`frameBudget.js`. Re-run `smoke:drive` on mains to find out whether the budget
+earns its keep at 60 fps, where the headroom question is sharper.
+
 ### `npm run smoke:drive`
 
 Starts the drive by typed command, asks for the best match, runs the whole loop

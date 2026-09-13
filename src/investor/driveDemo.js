@@ -56,6 +56,7 @@ import {
   shouldAnnounce,
 } from './drive/narration.js';
 import { createGpsSource, createPlaybackSource } from './drive/positionSource.js';
+import { createMotionTileBudget } from './drive/tileBudget.js';
 
 const HOLD_ID = 'investor-drive';
 const URGENT_SIGNALS = new Set(['FORECLOSURE', 'TAX_SALE']);
@@ -168,8 +169,18 @@ export function createDriveDemo({
   routeCoordinates = SIX_ROUTE,
   now = () => Date.now(),
   geolocation = globalThis.navigator?.geolocation,
+  timers = globalThis,
+  getTileset = () => globalThis.__godsEyeView?.tileset || null,
 } = {}) {
   const route = buildRoute(routeCoordinates);
+  /**
+   * Coarser tiles while moving, full detail at rest.
+   *
+   * Driven from the fix rather than from the camera, for the same reason
+   * everything else here is: it is the position source that knows whether the
+   * drive is actually advancing.
+   */
+  const tileBudget = createMotionTileBudget({ getTileset, timers });
 
   let source = null;
   let running = false;
@@ -264,6 +275,11 @@ export function createDriveDemo({
     } else {
       source?.setExternalScale?.(1);
     }
+
+    // Coarser tiles while the camera is moving. Touching on every fix means
+    // any reason the fixes stop — pause, Property Mode, the drive ending —
+    // restores the detail 500 ms later without its own hook.
+    if (mode === MODES.DRIVE) tileBudget.touch();
 
     // (2) Steer.
     if (mode === MODES.DRIVE) {
@@ -394,6 +410,9 @@ export function createDriveDemo({
   function stop() {
     running = false;
     mode = MODES.DRIVE;
+    // Put the detail back now rather than in half a second: the drive is over
+    // and whatever is on screen is what the user is looking at.
+    tileBudget.release();
     source?.stop?.();
     releaseContinuousRender(HOLD_ID);
     camera?.releaseDrive?.();
@@ -576,6 +595,15 @@ export function createDriveDemo({
     get callouts() { return callouts.slice(); },
     get discussed() { return discussion.current; },
     get source() { return source; },
+    /** Motion tile budget state, for the headed probe. */
+    get tileBudget() {
+      return {
+        raised: tileBudget.raised,
+        baseline: tileBudget.baseline,
+        motionSse: tileBudget.motionSse,
+        current: getTileset()?.maximumScreenSpaceError ?? null,
+      };
+    },
     get onRoute() { return onRoute.slice(); },
     get current() {
       const id = discussion.current?.primaryId;
@@ -628,6 +656,7 @@ export function createDriveDemo({
 
     destroy() {
       stop();
+      tileBudget.destroy();
       source?.destroy?.();
     },
   };
