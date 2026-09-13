@@ -64,6 +64,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 246 04 074',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "117 East Court Square Decatur, GA 30030",
       areaM2: 920.3,
       areaAcres: 0.2274,
       ring: Object.freeze([
@@ -111,6 +115,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 213 03 184',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "518 3rd Avenue Decatur, GA 30030",
       areaM2: 651,
       areaAcres: 0.1609,
       ring: Object.freeze([
@@ -166,6 +174,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 206 01 042',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "51 Warren Street Atlanta, GA 30317",
       areaM2: 905.7,
       areaAcres: 0.2238,
       ring: Object.freeze([
@@ -277,6 +289,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 211 03 122',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "70 Rogers Street NE UNIT 6 Atlanta, GA 30317",
       areaM2: 145.5,
       areaAcres: 0.0359,
       ring: Object.freeze([
@@ -322,6 +338,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 210 04 073',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "1512 Iverson Street Atlanta, GA 30307",
       areaM2: 627.4,
       areaAcres: 0.155,
       ring: Object.freeze([
@@ -368,6 +388,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '14 001400120324',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "1076 HARDEE ST NE",
       areaM2: 606.3,
       areaAcres: 0.1498,
       ring: Object.freeze([
@@ -466,6 +490,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 176 04 103',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "628 Gresham Avenue Atlanta, GA 30316",
       areaM2: 799.2,
       areaAcres: 0.1975,
       ring: Object.freeze([
@@ -508,6 +536,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 234 06 022',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "223 Winnona Drive Decatur, GA 30030",
       areaM2: 1183.3,
       areaAcres: 0.2924,
       ring: Object.freeze([
@@ -551,6 +583,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '14 001300041000',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "85 MORELAND AVE SE",
       areaM2: 751.5,
       areaAcres: 0.1857,
       ring: Object.freeze([
@@ -594,6 +630,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '14 002000080223',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "214 POWELL ST SE",
       areaM2: 655.7,
       areaAcres: 0.162,
       ring: Object.freeze([
@@ -638,6 +678,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '14 004700091054',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "500 RALPH MCGILL BLVD NE",
       areaM2: 500.5,
       areaAcres: 0.1237,
       ring: Object.freeze([
@@ -684,6 +728,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '14 001600130347',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "656 SEMINOLE AVE NE",
       areaM2: 712.5,
       areaAcres: 0.1761,
       ring: Object.freeze([
@@ -727,6 +775,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 211 01 005',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "321 Southerland Terrace Atlanta, GA 30307",
       areaM2: 714.3,
       areaAcres: 0.1765,
       ring: Object.freeze([
@@ -799,6 +851,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 242 01 053',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "865 Lullwater Parkway Atlanta, GA 30307",
       areaM2: 7572.1,
       areaAcres: 1.8711,
       ring: Object.freeze([
@@ -860,6 +916,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 232 10 003',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "46 Clarendon Avenue Avondale Estates, GA 30002",
       areaM2: 988.6,
       areaAcres: 0.2443,
       ring: Object.freeze([
@@ -910,6 +970,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '18 047 19 002',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "473 North Clarendon Avenue Scottdale, GA 30079",
       areaM2: 2379.1,
       areaAcres: 0.5879,
       ring: Object.freeze([
@@ -962,6 +1026,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 199 10 042',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "3184 Canary Court Decatur, GA 30032",
       areaM2: 978.2,
       areaAcres: 0.2417,
       ring: Object.freeze([
@@ -1003,6 +1071,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '18 096 17 008',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "3700 Market Street Bldg A Clarkston, GA 30021",
       areaM2: 243,
       areaAcres: 0.0601,
       ring: Object.freeze([
@@ -1054,6 +1126,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '18 213 08 021',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "2366 Fellowship Road Tucker, GA 30084",
       areaM2: 1288.8,
       areaAcres: 0.3185,
       ring: Object.freeze([
@@ -1089,6 +1165,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '18 299 10 004',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "5426 New Peachtree Road Chamblee, GA 30341",
       areaM2: 1697.3,
       areaAcres: 0.4194,
       ring: Object.freeze([
@@ -1135,6 +1215,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '18 241 03 026',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "4204 Peachtree Road Atlanta, GA 30319",
       areaM2: 557.2,
       areaAcres: 0.1377,
       ring: Object.freeze([
@@ -1180,6 +1264,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '17 010600091014',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "1031 JUNIPER ST NE",
       areaM2: 414.5,
       areaAcres: 0.1024,
       ring: Object.freeze([
@@ -1293,6 +1381,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '14 015700090086',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "2787 MAIN ST",
       areaM2: 465.7,
       areaAcres: 0.1151,
       ring: Object.freeze([
@@ -1339,6 +1431,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'fulton-gis',
       attribution: "Fulton County GIS (Property Map Viewer)",
       parcelId: '14 016100070082',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "3710 MAIN ST",
       areaM2: 859.1,
       areaAcres: 0.2123,
       ring: Object.freeze([
@@ -1382,6 +1478,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 109 02 040',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "1866 Mary Lou Lane Atlanta, GA 30316",
       areaM2: 1424.9,
       areaAcres: 0.3521,
       ring: Object.freeze([
@@ -1424,6 +1524,10 @@ export const ATLANTA_DECATUR_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 121 06 003',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "2850 Candler Road Decatur, GA 30034",
       areaM2: 6073.9,
       areaAcres: 1.5009,
       ring: Object.freeze([

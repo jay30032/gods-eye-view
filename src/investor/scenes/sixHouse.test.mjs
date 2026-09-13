@@ -67,7 +67,8 @@ test('every row validates and carries a real OSM footprint', () => {
     // guess — and only the surveyed kind is ever drawn (nearFieldEffects.js
     // allow-lists the sources). Whichever it is, it carries no owner identity:
     // these rows are invented and every signal on them is fiction, so a real
-    // person's name must never end up beside one.
+    // person's name must never end up beside one — and the row must not be
+    // named after the parcel either (see siteAddress.test.mjs).
     const parcel = geometry.parcel;
     assert.ok(
       ['dekalb-gis', 'fulton-gis', 'synthetic'].includes(parcel.source),
@@ -77,8 +78,16 @@ test('every row validates and carries a real OSM footprint', () => {
       assert.ok(parcel.attribution, `${row.id} surveyed parcel with no attribution`);
       assert.ok(Array.isArray(parcel.ring) && parcel.ring.length >= 3, row.id);
     }
-    for (const banned of ['owner', 'ownerName', 'ownerAddr', 'siteAddress', 'OWNERNME1', 'Owner']) {
+    for (const banned of ['owner', 'ownerName', 'ownerAddr', 'OWNERNME1', 'Owner', 'taxpayer']) {
       assert.equal(Object.hasOwn(parcel, banned), false, `${row.id} stores ${banned}`);
+    }
+    // `siteAddress` IS stored, and only so the fictional-address rule can be
+    // checked — a mock signal is never attached to a real site address. It is
+    // the parcel's own public address, not a person, and nothing renders it.
+    // `siteAddress.test.mjs` is what actually enforces the rule.
+    if (parcel.source !== 'synthetic') {
+      assert.ok(parcel.siteAddress, `${row.id} has no site address to check the rule against`);
+      assert.notEqual(parcel.siteAddress, row.address, row.id);
     }
     // The row sits on its own roof, not near it.
     assert.ok(

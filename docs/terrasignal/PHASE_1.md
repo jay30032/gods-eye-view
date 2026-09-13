@@ -31,6 +31,8 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 - [x] Real DeKalb / Fulton county parcels where a public layer has one, drawn as
       a secondary hairline at 40% of the building glow; geometry only, never
       owner identity
+- [x] A mock signal is never attached to a real site address — enforced at fetch
+      time and pinned by `siteAddress.test.mjs`
 - [x] The focused house is lit by a `ClassificationPrimitive` tint on its own
       tiles (verified headed: the classification takes)
 - [x] Any angle on command: sides, compass points, the street, closer/farther,
@@ -579,13 +581,15 @@ authored coordinate: an authored coordinate can sit in the street or in next
 door's garden, which is exactly how you acquire a confident outline around the
 wrong lot. Attribution is carried per block.
 
-**Only geometry is kept.** These layers are cadastral and serve the current
-owner's name and mailing address alongside the polygon. The rows here are
+**Only geometry and the site address are kept.** These layers are cadastral and
+serve the current owner's name and mailing address alongside the polygon. The rows here are
 invented and every signal on them is fiction, so writing a real person's name
 next to a fabricated Notice of Sale Under Power is not something the schema is
-allowed to make possible. Owner, address and assessment fields are dropped at
-the parse boundary; the ring, the public parcel id and the area are what land in
-the tree. `sixHouse.test.mjs` fails if an owner field ever appears.
+allowed to make possible. Owner and assessment fields are dropped at the parse
+boundary; the ring, the public parcel id, the area and the parcel's own site
+address are what land in the tree — the last of those solely to enforce the
+fictional-address rule below. `sixHouse.test.mjs` and `siteAddress.test.mjs`
+both fail if an owner field ever appears.
 
 **A plausibility band does real work.** A cadastral layer will hand back a
 subdivision common area, a right-of-way, a church or a school if the centroid
@@ -596,6 +600,81 @@ refused, and the row keeps its building outline alone.
 That catch turned out to be treating a symptom. The reason the centroid landed
 on school land is that **the footprint itself was a school building** — see
 below.
+
+### Editing a generated file is where the silent bugs live
+
+Three scripts write `mock/*Geometry.js`. `fetch-footprints.mjs` generates the
+whole file; the other two perform surgery on a file they did not write, each
+owning one field. That has now produced two bugs in a row, and both were
+**silent** — nothing threw, no test failed, and `smoke:six` passed through both:
+
+1. `fetch-parcels.mjs` kept everything *before* `parcel:` and appended the
+   entry's closing brace. Correct only while `parcel` was the last field — and
+   it was, until `fetch-streets.mjs` began writing `street` after it. The next
+   parcel run deleted **29 street bearings** from the Atlanta file and **all 6**
+   from the six-house file. The globe just fell back to the long-wall convention
+   and looked entirely plausible.
+2. The field span included the trailing comma, so lifting a block out and
+   writing it back produced `}),,` — a syntax error in a generated file that
+   nothing notices until the next import.
+
+Both fetchers now share `scripts/lib/geometryFile.mjs`, which bounds a field at
+*both* ends and preserves everything after it, and `geometryFile.test.mjs` pins
+the round trips: edit one field and every other field of every entry must come
+back byte for byte, with the result still importable. That is the check that
+would have caught either bug on the day it was written.
+
+### The fictional-address rule
+
+> **A mock signal is never attached to a real site address.**
+
+Every row here is invented and every signal on it — the foreclosures, the tax
+sales, the code-enforcement files, the delinquencies — is fiction. The footprints
+and lot lines beneath them are real, because a demo that outlines nothing real
+does not read as a demo of anything. That leaves exactly one thing that must
+never line up: the **name**.
+
+A row may stand on a real building. It may not also *call itself* by that
+building's address. The moment an authored address equals the address the county
+holds for the parcel the footprint sits on, the product stops saying "here is
+roughly what this looks like" and starts saying "this specific house is in
+foreclosure" about a house that is not. Addresses stay invented — plausible for
+the neighbourhood, matching no parcel on the board.
+
+The rule is enforced twice, because the two failure modes are different:
+
+- **`fetch-parcels.mjs`** compares each row against the county's site address
+  before writing, refuses the parcel on a match, prints the offending row and
+  exits non-zero. That catches a *fetch* introducing a real address.
+- **`siteAddress.test.mjs`** re-derives the same comparison from the data on
+  disk on every `npm test`. That catches a later *hand-edit* of an authored
+  address, which no fetcher would ever see.
+
+The comparison is house number plus street, canonicalised — the two sides are
+written by different hands, so `915 Mead Rd` and `915 Mead Road` have to compare
+equal or the rule would pass by accident forever. Parsing anchors on the street
+type rather than on commas, because an authored row reads
+`915 Mead Rd, Decatur, GA 30030` while DeKalb returns
+`1305 Oakview Road Decatur, GA 30030` with no comma before the city at all.
+
+A **trailing** directional is dropped; a leading one is kept. `2799 Main St,
+East Point` and `2799 Main Street East Point` differ only by a comma, and
+reading that "East" as a quadrant made one address compare as two. Dropping it
+can only make two streets look alike (`Main St NE` vs `Main St SW`), which fails
+the rule *loudly* and gets looked at. Keeping it could let a genuine match
+through in silence, and that is the failure that matters.
+
+**This is why the county's site address is stored.** It is the one field kept
+beyond the geometry, and it exists so the rule can be *checked* rather than
+merely asserted — without it the test has nothing to compare against. It is
+public record and it is the property's own address, a different category from
+the owner's **name and mailing address**, which are dropped at the parse
+boundary and never stored. It also adds no identifying power the file did not
+already have: every record already carries the exact footprint polygon and the
+county parcel id, either of which locates the property far more precisely than a
+street address does. Nothing renders it.
+
+At the last run all **32** rows carrying a surveyed parcel clear the rule.
 
 ### The residential-parcel check
 

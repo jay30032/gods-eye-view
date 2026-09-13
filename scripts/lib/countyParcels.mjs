@@ -41,6 +41,7 @@ export const COUNTIES = Object.freeze({
     url: 'https://dcgis.dekalbcountyga.gov/hosted/rest/services/Parcels/MapServer/0/query',
     idField: 'PARCELID',
     classField: 'CLASSDSCRP',
+    siteAddressField: 'SITEADDRESS',
   }),
   fulton: Object.freeze({
     source: 'fulton-gis',
@@ -48,6 +49,7 @@ export const COUNTIES = Object.freeze({
     url: 'https://gismaps.fultoncountyga.gov/arcgispub2/rest/services/PropertyMapViewer/PropertyMapViewer/MapServer/11/query',
     idField: 'ParcelID',
     classField: 'ClassCode',
+    siteAddressField: 'Address',
   }),
 });
 
@@ -74,10 +76,15 @@ export function isResidentialClass(code) {
  * The parcel containing a point.
  *
  * Returns only what may be stored: the ring, the public parcel identifier, the
- * area and the class code. These layers are cadastral and also serve the
- * current owner's NAME and mailing address — the rows in this repository are
- * invented and every signal on them is fiction, so owner identity is dropped
- * here, at the boundary, and never reaches a caller.
+ * area, the class code, and the parcel's own SITE address. These layers are
+ * cadastral and also serve the current owner's NAME and MAILING address — the
+ * rows in this repository are invented and every signal on them is fiction, so
+ * owner identity is dropped here, at the boundary, and never reaches a caller.
+ *
+ * The site address is a different category: it is the property's public address
+ * rather than a person, and it is kept for one purpose only — so the
+ * fictional-address rule in `src/investor/mock/siteAddress.js` can be checked
+ * instead of merely asserted. Nothing renders it.
  *
  * @returns {{ok:true, feature:object}|{ok:false, reason:string, transport?:boolean}}
  */
@@ -90,7 +97,7 @@ export async function queryParcelAt(county, { lat, lng }, { geometry = true } = 
     geometryType: 'esriGeometryPoint',
     inSR: '4326',
     spatialRel: 'esriSpatialRelIntersects',
-    outFields: `${config.idField},${config.classField}`,
+    outFields: `${config.idField},${config.classField},${config.siteAddressField}`,
     returnGeometry: geometry ? 'true' : 'false',
     outSR: '4326',
     f: 'json',

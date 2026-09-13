@@ -49,6 +49,9 @@ import { SIX_HOUSE_PROPERTIES } from '../src/investor/mock/sixHouse.js';
 import { ATLANTA_DECATUR_GEOMETRY } from '../src/investor/mock/atlantaDecaturGeometry.js';
 import { SIX_HOUSE_GEOMETRY } from '../src/investor/mock/sixHouseGeometry.js';
 import { footprintCentroid, ringArea, toLocal, SQ_M_PER_ACRE } from '../src/investor/mock/parcel.js';
+import { sameStreetAddress } from '../src/investor/mock/siteAddress.js';
+import { COUNTIES } from './lib/countyParcels.mjs';
+import { replaceFieldBlock } from './lib/geometryFile.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -64,28 +67,6 @@ const DATASETS = {
     geometry: SIX_HOUSE_GEOMETRY,
     title: 'six-house Oakhurst scene (?scene=six)',
     geometryPath: join(ROOT, 'src/investor/mock/sixHouseGeometry.js'),
-  },
-};
-
-/**
- * One public parcel layer per county.
- *
- * `source` is what lands in the data and what `nearFieldEffects.js` allow-lists
- * before it will draw a lot line at all. A ring with any other source — notably
- * `'synthetic'` — is data, not a survey, and is never rendered.
- */
-const COUNTIES = {
-  dekalb: {
-    source: 'dekalb-gis',
-    attribution: 'DeKalb County GIS Department',
-    url: 'https://dcgis.dekalbcountyga.gov/hosted/rest/services/Parcels/MapServer/0/query',
-    idField: 'PARCELID',
-  },
-  fulton: {
-    source: 'fulton-gis',
-    attribution: 'Fulton County GIS (Property Map Viewer)',
-    url: 'https://gismaps.fultoncountyga.gov/arcgispub2/rest/services/PropertyMapViewer/PropertyMapViewer/MapServer/11/query',
-    idField: 'ParcelID',
   },
 };
 
@@ -188,7 +169,7 @@ async function queryParcel(county, { lat, lng }) {
     geometryType: 'esriGeometryPoint',
     inSR: '4326',
     spatialRel: 'esriSpatialRelIntersects',
-    outFields: config.idField,
+    outFields: `${config.idField},${config.siteAddressField}`,
     returnGeometry: 'true',
     outSR: '4326',
     f: 'json',
@@ -240,6 +221,9 @@ async function queryParcel(county, { lat, lng }) {
           // The public cadastral identifier. Not personal data, and it is what
           // makes the claim checkable against the county's own viewer.
           parcelId: String(hit.feature?.attributes?.[config.idField] ?? '').trim() || null,
+          // The parcel's own address. Stored ONLY so the fictional-address rule
+          // can be checked — never rendered, never the address the row shows.
+          siteAddress: String(hit.feature?.attributes?.[config.siteAddressField] ?? '').trim() || null,
           areaM2,
           areaAcres: areaM2 / SQ_M_PER_ACRE,
           ring: hit.ring,
@@ -268,34 +252,14 @@ function renderParcelBlock(parcel) {
       source: '${parcel.source}',
       attribution: ${JSON.stringify(parcel.attribution)},
       parcelId: ${parcel.parcelId ? `'${parcel.parcelId}'` : 'null'},
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: ${parcel.siteAddress ? JSON.stringify(parcel.siteAddress) : 'null'},
       areaM2: ${number(parcel.areaM2, 1)},
       areaAcres: ${number(parcel.areaAcres, 4)},
       ring: Object.freeze(${formatRing(parcel.ring, 6)}),
     })`;
-}
-
-/**
- * Replace one row's `parcel:` block in the generated geometry file.
- *
- * Deliberately anchored on the generator's own formatting — the entry opener
- * for that exact id, then the entry's closing `  }),` — so a mistake cannot
- * reach past the row it is editing and rewrite someone else's geometry.
- */
-function replaceParcelBlock(source, id, block) {
-  const opener = `  '${id}': Object.freeze({\n`;
-  const start = source.indexOf(opener);
-  if (start < 0) return { source, ok: false, reason: 'id not found in geometry file' };
-  const endMarker = '\n  }),\n';
-  const end = source.indexOf(endMarker, start);
-  if (end < 0) return { source, ok: false, reason: 'entry never closed' };
-
-  const entry = source.slice(start, end + endMarker.length);
-  const parcelAt = entry.indexOf('\n    parcel: ');
-  if (parcelAt < 0) return { source, ok: false, reason: 'entry carries no parcel field' };
-
-  const head = entry.slice(0, parcelAt);
-  const rewritten = `${head}\n    parcel: ${block},\n  }),\n`;
-  return { source: source.slice(0, start) + rewritten + source.slice(end + endMarker.length), ok: true };
 }
 
 /** Swap the file header's synthetic-parcel paragraph for what is now true. */
@@ -337,6 +301,8 @@ function rewriteHeader(source, stats, generatedAt) {
 async function run(key) {
   const dataset = DATASETS[key];
   const countyOf = new Map(dataset.rows.map((row) => [row.id, row.county]));
+  const addressOf = new Map(dataset.rows.map((row) => [row.id, row.address]));
+  const violations = [];
   const generatedAt = new Date().toISOString().slice(0, 10);
 
   const results = [];
@@ -349,6 +315,30 @@ async function run(key) {
     const centroid = footprintCentroid(ring);
     const county = countyOf.get(id);
     const found = await queryParcel(county, centroid);
+
+    /**
+     * The fictional-address rule, enforced where the real address is in hand.
+     *
+     * A row may stand on a real building; it may not also name it. If the
+     * authored address ever equals the county's address for the lot underneath,
+     * the demo would be asserting a fabricated foreclosure about one identifiable
+     * house. Refuse the parcel rather than write it — the row keeps its building
+     * outline and the run says so loudly.
+     */
+    if (found.ok && sameStreetAddress(addressOf.get(id), found.parcel.siteAddress)) {
+      violations.push({ id, address: addressOf.get(id), siteAddress: found.parcel.siteAddress });
+      results.push({
+        id,
+        county,
+        ok: false,
+        reason: `authored address matches the county's site address — refusing (${found.parcel.siteAddress})`,
+      });
+      process.stdout.write(`  ${id}  ${county.padEnd(6)}  — FICTIONAL-ADDRESS RULE: `
+        + `"${addressOf.get(id)}" is the real address of this parcel\n`);
+      await sleep(POLITE_GAP_MS);
+      continue;
+    }
+
     results.push({ id, county, ...found });
     process.stdout.write(
       found.ok
@@ -361,6 +351,15 @@ async function run(key) {
 
   const found = results.filter((r) => r.ok);
   const transportFailures = results.filter((r) => r.transport);
+
+  if (violations.length) {
+    console.error(`\n${key}: ${violations.length} row(s) BREAK THE FICTIONAL-ADDRESS RULE.`);
+    for (const row of violations) {
+      console.error(`  ${row.id}: authored "${row.address}" is the county's address for its own parcel.`);
+    }
+    console.error('  Re-author those addresses. A mock signal is never attached to a real site address.');
+    process.exitCode = 1;
+  }
 
   /**
    * A run where every row failed in transport is a broken client, not a county
@@ -382,7 +381,7 @@ async function run(key) {
   let written = 0;
   for (const result of results) {
     if (!result.ok) continue; // carry the existing block forward untouched
-    const outcome = replaceParcelBlock(source, result.id, renderParcelBlock(result.parcel));
+    const outcome = replaceFieldBlock(source, result.id, 'parcel', renderParcelBlock(result.parcel));
     if (!outcome.ok) {
       console.error(`  ${result.id}: could not rewrite — ${outcome.reason}`);
       continue;

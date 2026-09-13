@@ -73,6 +73,10 @@ export const SIX_HOUSE_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 213 03 097',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "247 Maxwell Street Decatur, GA 30030",
       areaM2: 1430.8,
       areaAcres: 0.3535,
       ring: Object.freeze([
@@ -119,6 +123,10 @@ export const SIX_HOUSE_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 213 03 207',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "120 Maxwell Street Decatur, GA 30030",
       areaM2: 1152.9,
       areaAcres: 0.2849,
       ring: Object.freeze([
@@ -166,6 +174,10 @@ export const SIX_HOUSE_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 213 03 234',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "602 3rd Avenue Decatur, GA 30030",
       areaM2: 749,
       areaAcres: 0.1851,
       ring: Object.freeze([
@@ -210,6 +222,10 @@ export const SIX_HOUSE_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 213 03 250',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "1305 Oakview Road Decatur, GA 30030",
       areaM2: 1106.1,
       areaAcres: 0.2733,
       ring: Object.freeze([
@@ -259,6 +275,10 @@ export const SIX_HOUSE_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 213 03 219',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "1421 Oakview Road Decatur, GA 30030",
       areaM2: 728.2,
       areaAcres: 0.18,
       ring: Object.freeze([
@@ -304,6 +324,10 @@ export const SIX_HOUSE_GEOMETRY = Object.freeze({
       source: 'dekalb-gis',
       attribution: "DeKalb County GIS Department",
       parcelId: '15 213 03 196',
+      // The county's own address for this lot. Stored so the fictional-address
+      // rule can be CHECKED (src/investor/mock/siteAddress.js); it is never the
+      // address the row shows and nothing renders it.
+      siteAddress: "216 Maxwell Street Decatur, GA 30030",
       areaM2: 1048.1,
       areaAcres: 0.259,
       ring: Object.freeze([

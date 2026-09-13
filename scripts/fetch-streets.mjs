@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { ATLANTA_DECATUR_GEOMETRY } from '../src/investor/mock/atlantaDecaturGeometry.js';
 import { SIX_HOUSE_GEOMETRY } from '../src/investor/mock/sixHouseGeometry.js';
 import { footprintCentroid, metresPerDegreeLng } from '../src/investor/mock/parcel.js';
+import { replaceFieldBlock } from './lib/geometryFile.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const M_PER_DEG_LAT = 111_320;
@@ -198,31 +199,6 @@ function renderStreetBlock(street) {
     })`;
 }
 
-/**
- * Insert or replace one row's `street:` block, anchored on the generator's own
- * formatting so a mistake cannot reach past the entry it is editing.
- */
-function writeStreetBlock(source, id, block) {
-  const opener = `  '${id}': Object.freeze({\n`;
-  const start = source.indexOf(opener);
-  if (start < 0) return { source, ok: false, reason: 'id not found' };
-  const endMarker = '\n  }),\n';
-  const end = source.indexOf(endMarker, start);
-  if (end < 0) return { source, ok: false, reason: 'entry never closed' };
-
-  const entry = source.slice(start, end + endMarker.length);
-  const existing = entry.indexOf('\n    street: ');
-  let rewritten;
-  if (existing >= 0) {
-    rewritten = `${entry.slice(0, existing)}\n    street: ${block},\n  }),\n`;
-  } else {
-    // Append just before the entry's closing brace.
-    const body = entry.slice(0, entry.length - endMarker.length);
-    rewritten = `${body}\n    street: ${block},\n  }),\n`;
-  }
-  return { source: source.slice(0, start) + rewritten + source.slice(end + endMarker.length), ok: true };
-}
-
 async function run(key) {
   const dataset = DATASETS[key];
   const results = [];
@@ -272,7 +248,9 @@ async function run(key) {
     // A transport failure carries the existing block forward rather than
     // replacing a good bearing with a null.
     if (result.transport) continue;
-    const outcome = writeStreetBlock(source, result.id, renderStreetBlock(result.street));
+    const outcome = replaceFieldBlock(
+      source, result.id, 'street', renderStreetBlock(result.street), { insertIfMissing: true },
+    );
     if (!outcome.ok) {
       console.error(`  ${result.id}: could not write — ${outcome.reason}`);
       continue;
