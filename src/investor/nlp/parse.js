@@ -19,7 +19,9 @@ export const INTENTS = Object.freeze([
   'find_money', 'focus', 'why', 'show_deal', 'compare', 'what_if',
   'reset_assumptions', 'save', 'unsave', 'show_saved', 'start_drive',
   'stop_drive', 'drive_next', 'drive_skip', 'world', 'vision_on', 'vision_off',
-  'camera_angle', 'help', 'unknown',
+  'camera_angle', 'drive_pause', 'drive_resume', 'drive_speed', 'drive_look',
+  'look_closer', 'drive_best', 'drive_narration', 'how_recent', 'more_like_it',
+  'help', 'unknown',
 ]);
 
 /** The five that must never stop working, matched before any pattern. */
@@ -338,6 +340,94 @@ export function parseCameraCommand(normalized) {
 }
 
 /**
+ * Drive Mode commands.
+ *
+ * Matched before the camera vocabulary and before `focus`, because a drive
+ * borrows words that already mean something when standing still: "look left"
+ * is a glance out of the side window rather than a request to see the left
+ * wall of a house, and "skip this one" is the route moving on rather than the
+ * shortlist cursor. The session decides what to do when the drive is not
+ * running — several of these fall back to their standing-still meaning.
+ *
+ * @returns {{intent:string, slots:object}|null}
+ */
+export function parseDriveCommand(normalized) {
+  // --- entry -------------------------------------------------------------
+  const driveThrough = /\bdriv(?:e|ing)\b[^.]*\b(through|around|down)\b[^.]*\b(neighbou?rhood|area|block|streets?)\b/
+    .test(normalized);
+  const startHere = /\bstart here\b/.test(normalized)
+    && /\b(surrounding|nearby|around here|these) (streets?|blocks?|area)\b/.test(normalized);
+  const bareDrive = /^(drive|start driving|let's drive|lets drive|drive mode|start the drive)$/
+    .test(normalized);
+  if (driveThrough || startHere || bareDrive) {
+    const slots = {};
+    if (startHere) slots.fromFocused = true;
+    const signalType = matchSignalType(normalized);
+    if (signalType) slots.signalType = signalType;
+    const strategy = matchStrategy(normalized);
+    if (strategy) slots.strategy = strategy;
+    // "show me foreclosures AND rentals" — the second one the single-match
+    // helpers above cannot see, because they stop at the first hit.
+    const types = [];
+    for (const [pattern, type] of SIGNAL_WORDS) if (pattern.test(normalized)) types.push(type);
+    const strategies = [];
+    for (const [pattern, name] of STRATEGY_WORDS) if (pattern.test(normalized)) strategies.push(name);
+    if (types.length) slots.signalTypes = types;
+    if (strategies.length) slots.strategies = strategies;
+    return { intent: 'start_drive', slots };
+  }
+
+  // --- while driving ------------------------------------------------------
+  if (/\bpause (here|there|it)\b|^pause$|\bhold (here|it there)\b|\bstop here\b/.test(normalized)) {
+    return { intent: 'drive_pause', slots: {} };
+  }
+  if (/\bkeep going\b|\bresume( the)? drive\b|^resume$|\bcarry on\b|\bback on (the )?(route|road)\b|\bdrive on\b/
+    .test(normalized)) {
+    return { intent: 'drive_resume', slots: {} };
+  }
+  if (/\blook closer\b|\bcloser look\b|\bpull in\b|\bget closer to (that|it|this)\b/.test(normalized)) {
+    return { intent: 'look_closer', slots: {} };
+  }
+  const look = /\blook (left|right|ahead)\b|\b(overhead|bird'?s eye view)\b/.exec(normalized);
+  if (look) {
+    const direction = look[1] || (/(overhead|bird)/.test(look[0]) ? 'overhead' : 'ahead');
+    return { intent: 'drive_look', slots: { look: direction } };
+  }
+  if (/\b(slower|slow down|slow it down)\b/.test(normalized)) {
+    return { intent: 'drive_speed', slots: { speed: 'slower' } };
+  }
+  if (/\b(faster|speed up|speed it up)\b/.test(normalized)) {
+    return { intent: 'drive_speed', slots: { speed: 'faster' } };
+  }
+  if (/\bbest match\b|\bbest (one|house|property)\b.*\b(route|drive|way)\b|\bbest\b.*\balong this route\b/
+    .test(normalized)) {
+    return { intent: 'drive_best', slots: {} };
+  }
+  const narration = /\b(narration|commentary|talking|voice)\b/.test(normalized);
+  if (narration || /^(quiet|be quiet|stop talking|shush)$/.test(normalized)) {
+    if (/\b(off|stop|silence|mute|shush)\b/.test(normalized)) {
+      return { intent: 'drive_narration', slots: { level: 'off' } };
+    }
+    if (/\b(quiet|less|minimal)\b/.test(normalized)) {
+      return { intent: 'drive_narration', slots: { level: 'quiet' } };
+    }
+    if (/\b(full|on|more|everything)\b/.test(normalized)) {
+      return { intent: 'drive_narration', slots: { level: 'full' } };
+    }
+  }
+
+  // --- referring to the house being discussed -----------------------------
+  if (/\bhow (recent|old|long ago)\b|\bwhen was (that|it|this) (filed|flagged|recorded)\b/.test(normalized)) {
+    return { intent: 'how_recent', slots: {} };
+  }
+  if (/\b(more like (it|that|this|these)|similar to (that|it|this)|find more of (those|these))\b/
+    .test(normalized)) {
+    return { intent: 'more_like_it', slots: {} };
+  }
+  return null;
+}
+
+/**
  * A what-if needs a field *and* something to do to it. "rent" alone is a hunt
  * for rentals; "rent 2800" is a change to this deal.
  */
@@ -431,7 +521,14 @@ export function parseCommand(text, options = {}) {
     return result('world', {}, raw, normalized, 0.95);
   }
 
-  // 3. Drive, before "next" can be read as moving the focus cursor.
+  // 3. Drive Mode, before the camera vocabulary and before `focus` — a drive
+  //    borrows "look left", "skip this one" and "pause here" from both.
+  const driveCommand = parseDriveCommand(normalized);
+  if (driveCommand) {
+    return result(driveCommand.intent, driveCommand.slots, raw, normalized, 0.95);
+  }
+
+  // 3b. The older drive intents, before "next" moves the focus cursor.
   if (/\b(stop|end|quit|exit)\b.*\bdrive\b|\bdrive\b.*\b(stop|off)\b/.test(normalized)) {
     return result('stop_drive', {}, raw, normalized, 0.95);
   }
@@ -455,6 +552,9 @@ export function parseCommand(text, options = {}) {
   }
   if (/\b(save|bookmark|keep)\b/.test(normalized) && !/\bsaved\b/.test(normalized)) {
     const slots = {};
+    // "save that one" during a drive means the house being discussed, which
+    // only the drive knows. Flag it and let the session resolve it.
+    if (/\b(that|this|it)( one)?\b/.test(normalized)) slots.referring = true;
     const noted = /\b(?:with (?:a )?note|note|as|labell?ed|tagged)\s+(.+)$/.exec(normalized);
     if (noted) slots.note = noted[1].trim();
     return result('save', slots, raw, normalized, 0.9);
@@ -464,7 +564,11 @@ export function parseCommand(text, options = {}) {
   if (/\bcompare\b|\b(every|all)\s+(four\s+)?(strateg|path|way)/.test(normalized)
     || /\bwhich (strategy|path|way)\b/.test(normalized)
     || /\ball four\b/.test(normalized)) {
-    return result('compare', {}, raw, normalized, 0.95);
+    const slots = {};
+    // "compare it with the last one" is a drive command about two houses, not
+    // a request for the four strategies on one.
+    if (/\b(last|previous|other) one\b/.test(normalized)) slots.withPrevious = true;
+    return result('compare', slots, raw, normalized, 0.95);
   }
 
   // 6. What-ifs: a field plus a number beats every looser reading of the words.
@@ -485,6 +589,8 @@ export function parseCommand(text, options = {}) {
     const slots = {};
     const strategy = matchStrategy(normalized);
     if (strategy) slots.strategy = strategy;
+    // "why did you flag it" refers to the house being discussed on a drive.
+    if (/\b(flag|flagg?ed|mention|point out|call out)\b/.test(normalized)) slots.referring = true;
     return result('why', slots, raw, normalized, 0.9);
   }
 

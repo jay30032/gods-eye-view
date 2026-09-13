@@ -29,10 +29,12 @@ import { candidateHeadings, pickBestHeading, samplePoints } from './bestAngle.js
 import { footprintCentroid } from '../mock/parcel.js';
 import { geometryFor } from '../mock/geometry.js';
 import {
+  DRIVE_CHASE,
   DURATIONS,
   HERO,
   cameraFromRange,
   clusterCruiseShot,
+  driveChaseShot,
   cruiseShot,
   durationFor,
   headingBetween,
@@ -46,6 +48,7 @@ import {
 
 const FLIGHT_HOLD = 'investor-camera-flight';
 const ORBIT_HOLD = 'investor-camera-orbit';
+const DRIVE_HOLD = 'investor-camera-drive';
 /**
  * Tile gates. Waiting for geometry before the two flights people actually watch
  * trades a short, invisible pause at a stationary camera for tiles popping in
@@ -493,6 +496,98 @@ export function createCameraDirector({
     return true;
   }
 
+  // ---- drive chase -------------------------------------------------------
+
+  /**
+   * The chase camera, held open for the length of a drive.
+   *
+   * Unlike every other shot this is not a flight: there is no destination and
+   * no duration, just a pose written per fix. So it takes its own render hold
+   * and writes with `setView`, exactly as the orbit does — a `flyTo` per fix
+   * would be a new flight every frame, each cancelling the last, and the camera
+   * would never actually arrive anywhere.
+   *
+   * The heading it is given has already been smoothed by `route.smoothHeading`;
+   * the director does not re-filter it. One filter, one place.
+   */
+  let driving = false;
+  let driveLook = { offsetDeg: 0, pitchDeg: DRIVE_CHASE.pitchDeg };
+
+  function engageDrive() {
+    if (driving) return false;
+    cancel();
+    driving = true;
+    currentShot = 'DRIVE';
+    driveLook = { offsetDeg: 0, pitchDeg: DRIVE_CHASE.pitchDeg };
+    holdContinuousRender(DRIVE_HOLD);
+    emitFlight({ flying: false, shot: 'DRIVE', driving: true });
+    return true;
+  }
+
+  function releaseDrive() {
+    if (!driving) return false;
+    driving = false;
+    releaseContinuousRender(DRIVE_HOLD);
+    governorRequestRender('investor-drive-released');
+    return true;
+  }
+
+  /**
+   * "Look left", "look right", "overhead" — and back.
+   *
+   * A temporary offset on the camera only. The drive keeps going and the
+   * tracked position keeps advancing; what changes is where the lens points,
+   * which is why "Resume drive" can ease it back without touching the route
+   * position at all.
+   */
+  function setDriveLook(look) {
+    switch (look) {
+      case 'left':
+        driveLook = { offsetDeg: DRIVE_CHASE.lookLeftDeg, pitchDeg: DRIVE_CHASE.pitchDeg };
+        break;
+      case 'right':
+        driveLook = { offsetDeg: DRIVE_CHASE.lookRightDeg, pitchDeg: DRIVE_CHASE.pitchDeg };
+        break;
+      case 'overhead':
+        driveLook = { offsetDeg: 0, pitchDeg: DRIVE_CHASE.overheadPitchDeg };
+        break;
+      default:
+        driveLook = { offsetDeg: 0, pitchDeg: DRIVE_CHASE.pitchDeg };
+    }
+    return { ...driveLook };
+  }
+
+  /** Ease a look offset back towards straight ahead. */
+  function relaxDriveLook(dtSeconds, { tauS = 0.6 } = {}) {
+    const dt = Number(dtSeconds);
+    if (!Number.isFinite(dt) || dt <= 0) return { ...driveLook };
+    const alpha = 1 - Math.exp(-dt / Math.max(1e-3, tauS));
+    driveLook = {
+      offsetDeg: driveLook.offsetDeg + (0 - driveLook.offsetDeg) * alpha,
+      pitchDeg: driveLook.pitchDeg + (DRIVE_CHASE.pitchDeg - driveLook.pitchDeg) * alpha,
+    };
+    if (Math.abs(driveLook.offsetDeg) < 0.05) driveLook.offsetDeg = 0;
+    if (Math.abs(driveLook.pitchDeg - DRIVE_CHASE.pitchDeg) < 0.05) {
+      driveLook.pitchDeg = DRIVE_CHASE.pitchDeg;
+    }
+    return { ...driveLook };
+  }
+
+  /** One frame of the chase. `headingDeg` must already be smoothed. */
+  function updateDrive(position, headingDeg) {
+    if (!driving || destroyed || !viewer?.camera) return false;
+    if (!Number.isFinite(position?.lat) || !Number.isFinite(position?.lng)) return false;
+    const shot = driveChaseShot(position, headingDeg, {
+      lookOffsetDeg: driveLook.offsetDeg,
+      pitchDeg: driveLook.pitchDeg,
+    });
+    viewer.camera.setView({
+      destination: destinationOf(shot),
+      orientation: orientationOf(shot),
+    });
+    return true;
+  }
+
   function releaseCamera() {
     stopOrbit();
     governorRequestRender('investor-camera-user-input');
@@ -619,6 +714,15 @@ export function createCameraDirector({
     /** Score a house's approach headings without flying anywhere. */
     chooseHeading,
 
+    // ---- drive chase -----------------------------------------------------
+    get driving() { return driving; },
+    engageDrive,
+    releaseDrive,
+    setDriveLook,
+    relaxDriveLook,
+    updateDrive,
+    get driveLook() { return { ...driveLook }; },
+
     /** Where the camera currently stands relative to the focused house. */
     get pose() {
       return heroPose
@@ -686,6 +790,7 @@ export function createCameraDirector({
       destroyed = true;
       cancel();
       stopOrbit();
+      releaseDrive();
       flightListeners.clear();
     },
   };

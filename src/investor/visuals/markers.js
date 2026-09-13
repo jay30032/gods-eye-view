@@ -167,6 +167,8 @@ export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduc
   let shortlistIds = null;
   let hoveredId = null;
   let enabled = false;
+  /** Drive Mode weights per id, or null. See nearFieldEffects for the rule. */
+  let driveActivations = null;
 
   const NO_DEPTH = Number.POSITIVE_INFINITY;
 
@@ -297,10 +299,15 @@ export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduc
   /** Colour, emphasis and which extras show. No geometry is touched. */
   function applyState() {
     for (const [id, marker] of markers) {
-      const alpha = markerAlphaFor(id, { shortlistIds, focusedId, topPickId });
+      const drive = driveActivations ? driveActivations.get(id) : null;
+      // A drive replaces the shortlist dimming: what matters is how far ahead
+      // the house is, not whether it answered an earlier question.
+      const alpha = drive
+        ? Math.max(0, Math.min(1, drive.beacon))
+        : markerAlphaFor(id, { shortlistIds, focusedId, topPickId });
       const isTop = id === topPickId;
       const isFocused = id === focusedId;
-      const show = enabled;
+      const show = enabled && !(drive?.suspended);
 
       marker.billboard.show = show;
       marker.point.show = show;
@@ -368,6 +375,11 @@ export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduc
     setShortlist(ids) {
       const list = Array.isArray(ids) ? ids.filter(Boolean) : [];
       shortlistIds = list.length ? new Set(list) : null;
+      applyState();
+    },
+    /** Drive Mode weights, or null to go back to the standing rules. */
+    setDriveActivations(map) {
+      driveActivations = map instanceof Map && map.size ? map : null;
       applyState();
     },
     setHovered(id) {

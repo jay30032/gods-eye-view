@@ -134,6 +134,17 @@ export function createNearFieldEffects({
   let topPickId = null;
   let savedId = null;
   let shortlistIds = null;
+  /**
+   * Drive Mode's per-property weights, or null when not driving.
+   *
+   * When present these REPLACE the shortlist/focus dimming rules rather than
+   * combining with them. The two answer different questions — "is this part of
+   * the answer you asked for" versus "can you see it from here" — and a house
+   * that is both off-shortlist and fifty metres ahead has to read as fifty
+   * metres ahead, or the drive shows you a dim house at the moment it is the
+   * only thing on screen.
+   */
+  let driveActivations = null;
   /** Last value read off the shared clock — the ground pulses ride this too. */
   let lastSeconds = 0;
 
@@ -468,6 +479,12 @@ export function createNearFieldEffects({
     const goldBrightness = goldBreathFor(seconds, { reduced: still });
 
     for (const [id, entry] of entries) {
+      // Declared first because the visibility block below reads it. It used to
+      // sit lower, which is a temporal dead zone rather than a subtle bug: the
+      // render loop threw on the first frame of every drive and Cesium stopped
+      // rendering. `smoke:drive` caught it; nothing in the unit suite could.
+      const drive = driveActivations ? driveActivations.get(id) : null;
+
       const range = rangeTo(entry.position);
       const visible = range <= DRAW_RADIUS_M;
       entry.outline.show = visible;
@@ -476,10 +493,26 @@ export function createNearFieldEffects({
       // Only the two houses the product is pointing at are lit. The tint is a
       // wash over real photogrammetry, so applying it broadly would recolour
       // the street rather than single out a house.
-      const tinted = visible && tintAppliesTo(id, { focusedId, topPickId });
+      // In a drive the tint is the "useful viewing" highlight, so it arrives on
+      // whatever is close enough to look at — not only on the focused house.
+      const tinted = visible && (drive
+        ? drive.highlight > 0.02 || tintAppliesTo(id, { focusedId, topPickId })
+        : tintAppliesTo(id, { focusedId, topPickId }));
       if (entry.tintFill) entry.tintFill.show = tinted;
       if (entry.tintEdge) entry.tintEdge.show = tinted;
       if (!visible) continue;
+
+      if (drive?.suspended) {
+        // Behind the camera and out of the rear-view: drawn not at all. This is
+        // the cheap half of a drive's frame budget, where most of the route is
+        // behind you most of the time.
+        entry.outline.show = false;
+        if (entry.parcel) entry.parcel.show = false;
+        if (entry.column) entry.column.show = false;
+        if (entry.tintFill) entry.tintFill.show = false;
+        if (entry.tintEdge) entry.tintEdge.show = false;
+        continue;
+      }
 
       const state = outlineStateFor(id, { shortlistIds, focusedId, topPickId, savedId });
       const moving = state.moving && !still;
@@ -491,14 +524,21 @@ export function createNearFieldEffects({
         reduced: !moving,
         gold: state.gold,
       });
-      const alpha = state.alpha;
+      // In a drive the alpha is distance-based; standing still it is selection.
+      const alpha = drive ? drive.alpha : state.alpha;
 
       const uniforms = entry.outlineMaterial.uniforms;
       uniforms.color = state.gold ? goldColor : entry.signalColor;
-      uniforms.brightness = brightness;
-      // A 2 px core that does not breathe, with a halo around it that does.
+      // Status motion only inside the useful window — a house 300 m up the road
+      // pulsing at full rate is noise competing with the one you can see.
+      uniforms.brightness = drive ? brightness * (0.45 + 0.55 * drive.motion) : brightness;
+      // A 2 px core that does not breathe, with a halo around it that does. The
+      // drive fades the outline IN across the approach by shrinking it towards
+      // the core rather than by alpha alone, so it reads as resolving.
       uniforms.coreHalfPx = profile.coreHalfPx;
-      uniforms.glowHalfPx = profile.glowHalfPx;
+      uniforms.glowHalfPx = drive
+        ? profile.coreHalfPx + (profile.glowHalfPx - profile.coreHalfPx) * drive.outline
+        : profile.glowHalfPx;
       uniforms.alpha = alpha;
       uniforms.time = seconds;
       // prefers-reduced-motion: a static glow, and the segment stops existing.
@@ -607,6 +647,11 @@ export function createNearFieldEffects({
       return enabled;
     },
     setFocused(id) { focusedId = id || null; },
+    /** Drive Mode weights, or null to go back to the standing rules. */
+    setDriveActivations(map) {
+      driveActivations = map instanceof Map && map.size ? map : null;
+    },
+    get driving() { return driveActivations !== null; },
     setTopPick(id) { topPickId = id || null; },
     setSaved(id) { savedId = id || null; },
     setShortlist(ids) {

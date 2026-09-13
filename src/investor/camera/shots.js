@@ -165,6 +165,68 @@ export const DRIVE = Object.freeze({
   pitchDeg: -25,
 });
 
+/**
+ * Drive Mode v1's chase camera: above the road, looking along it.
+ *
+ * 38 m is the height at which a residential street reads as a street — low
+ * enough that the houses either side have scale and you can see which is which,
+ * high enough that the camera is not inside the tree canopy, which at 15 m over
+ * Oakhurst it would be for most of the route.
+ *
+ * -22 degrees is shallow on purpose. The near-field layer's own shots look
+ * down at 38-45 degrees because they are *about* a parcel; a drive is about
+ * what is coming, so the frame has to be mostly road ahead with the houses
+ * arriving into it, not a plan view of the block you are on.
+ *
+ * The camera sits its own height back along the travel bearing rather than
+ * directly over the fix, which is what makes it a chase camera: the position
+ * being tracked stays ahead in frame instead of underneath.
+ */
+export const DRIVE_CHASE = Object.freeze({
+  heightM: 38,
+  pitchDeg: -22,
+  /** How far behind the tracked position the camera flies, in metres. */
+  behindM: 26,
+  /** Temporary look offsets — "look left", "look right", "overhead". */
+  lookLeftDeg: -70,
+  lookRightDeg: 70,
+  overheadPitchDeg: -80,
+});
+
+/**
+ * The chase pose for one position fix.
+ *
+ * `headingDeg` is supplied already smoothed — `route.smoothHeading` owns that,
+ * because the filter needs elapsed time and this module has no clock. Passing
+ * the raw tangent here would snap the camera round at every junction.
+ *
+ * @param {{lat:number,lng:number}} position where the drive is
+ * @param {number} headingDeg smoothed travel bearing
+ * @param {{lookOffsetDeg?:number, pitchDeg?:number, heightM?:number}} [options]
+ */
+export function driveChaseShot(position, headingDeg, {
+  lookOffsetDeg = 0,
+  pitchDeg = DRIVE_CHASE.pitchDeg,
+  heightM = DRIVE_CHASE.heightM,
+  behindM = DRIVE_CHASE.behindM,
+} = {}) {
+  const heading = Number(headingDeg) || 0;
+  const behind = offsetByHeading(position, heading + 180, behindM);
+  return {
+    name: 'DRIVE',
+    lat: behind.lat,
+    lng: behind.lng,
+    heightM,
+    // The look offset turns the CAMERA without moving it, so "look left" is a
+    // glance out of the side window rather than the drive changing course.
+    headingDeg: ((heading + lookOffsetDeg) % 360 + 360) % 360,
+    pitchDeg,
+    // Altitude is above the ground under the ROAD, not under the camera's
+    // set-back point — the same correction every other shot makes.
+    groundAnchor: { lat: position.lat, lng: position.lng },
+  };
+}
+
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
 }

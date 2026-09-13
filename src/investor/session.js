@@ -47,6 +47,13 @@ import { applyInvestorChrome, relocateVoiceControl, setAiPrompt, setLodChip, set
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
 import { hideFocusCard, renderFocusCard } from './ui/focusCard.js';
+import {
+  ensureDriveBar,
+  hideDriveIntro,
+  readDriveLive,
+  renderDriveIntro,
+  setDriveProgress,
+} from './ui/driveChrome.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
 
 /** What the six-house scene says instead of the market's opening hint. */
@@ -164,20 +171,116 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     governorRequestRender('investor-pitch-clamp');
   });
 
+  /**
+   * Drive Mode.
+   *
+   * `onAnnounce` no longer focuses the house it mentions. That was right when a
+   * "drive" was a series of stops — the camera was *at* the house, so focusing
+   * it was the truth. Now the drive passes houses at speed and only mentions
+   * them; focusing every call-out would open a card for a house 100 m up the
+   * road and dim the rest of the street to answer a question nobody asked.
+   * Focus happens on "look closer" and nowhere else.
+   */
   const drive = createDriveDemo({
     viewer,
     Cesium,
     camera,
+    visuals,
     getProperties: () => properties,
     onAnnounce: (event) => {
-      focused = event.property;
-      conversation.focusedId = event.id;
-      visuals.setFocused(event.id);
-      renderFocusCard(event.property);
+      if (event.property && event.detail !== true) driveCard(event.property, event);
       setAiPrompt(event.spoken);
     },
-    onStop: () => setNavActive('world'),
+    onState: (state) => applyDriveChrome(state),
+    onStop: () => {
+      setDriveChrome(false);
+      releaseWakeLock();
+      setNavActive('world');
+    },
   });
+
+  /**
+   * The drive's own card: the house currently being talked about.
+   *
+   * Not the full focus card — that opens on "look closer", in Property Mode.
+   * At speed the useful thing is one line saying which house is being mentioned
+   * so "save that one" has a visible referent.
+   */
+  function driveCard(property, event) {
+    renderFocusCard(property, { driveCallout: event?.spoken || null, compact: true });
+  }
+
+  /**
+   * Drive Mode chrome: the scene, the route, the card, the mic, pause, exit.
+   *
+   * Everything else goes. A drive is a single continuous shot and the standing
+   * HUD — the vision toggle, the LOD chip, the demo rail, the bottom nav — is
+   * all controls for a camera the user is not currently flying.
+   */
+  function setDriveChrome(on) {
+    const root = document.body;
+    if (!root) return;
+    root.classList.toggle('ts-drive-mode', Boolean(on));
+  }
+
+  function applyDriveChrome(state) {
+    setDriveChrome(state.running);
+    const bar = ensureDriveBar({
+      pause: () => session.handleIntent('pause here'),
+      resume: () => session.handleIntent('keep going'),
+      exit: () => session.handleIntent('stop drive'),
+    });
+    if (bar) {
+      bar.hidden = !state.running;
+      bar.dataset.mode = state.mode || 'drive';
+      bar.dataset.paused = String(Boolean(state.paused));
+    }
+    if (state.running) setDriveProgress(state.alongM, state.lengthM);
+    else hideDriveIntro();
+  }
+
+  /**
+   * The drive's clock.
+   *
+   * Playback advances on real elapsed time from the render loop rather than on
+   * a `setInterval`: a drive that stepped on a timer would run at a different
+   * speed whenever the frame rate moved, and `frameBudget.js` deliberately caps
+   * this viewer at 30 fps on battery. GPS ignores this — its fixes arrive on
+   * their own schedule — which is why `tick` is a no-op for that source.
+   */
+  let lastDriveTickMs = null;
+  viewer.scene.preRender.addEventListener(() => {
+    if (!drive.running) { lastDriveTickMs = null; return; }
+    const stamp = globalThis.performance?.now?.() ?? Date.now();
+    const dt = lastDriveTickMs === null ? 0 : (stamp - lastDriveTickMs) / 1000;
+    lastDriveTickMs = stamp;
+    // Cap after a stall: a backgrounded tab would otherwise resume by teleporting
+    // half a kilometre down the road.
+    if (dt > 0) drive.tick(Math.min(0.25, dt));
+  });
+
+  /**
+   * Keep the screen awake while a live drive is running.
+   *
+   * A phone on a windscreen mount locks in thirty seconds, which ends the
+   * drive. The lock is released the moment the drive stops — holding it longer
+   * is a battery bug — and every failure is non-fatal: a browser without the
+   * API, or a user who denied it, still gets the drive.
+   */
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if (!globalThis.navigator?.wakeLock?.request) return false;
+      wakeLock = await globalThis.navigator.wakeLock.request('screen');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function releaseWakeLock() {
+    try { wakeLock?.release?.(); } catch { /* already gone */ }
+    wakeLock = null;
+  }
 
   const session = {
     config,
@@ -359,6 +462,13 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
 
       if (parsed.intent === 'why') {
+        if (slots.referring && drive.running) {
+          const target = this.driveTarget('why_flagged');
+          if (!target.ok) { setAiPrompt(target.spoken); return target; }
+          const spoken = whyThisMatters(target.property);
+          setAiPrompt(spoken);
+          return { ok: true, action: 'explain_property', id: target.id, spoken };
+        }
         const result = slots.strategy
           ? applyWhyStrategy(focused, conversation, slots.strategy)
           : applyWhy(focused, conversation);
@@ -383,6 +493,17 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
 
       if (parsed.intent === 'compare') {
+        if (slots.withPrevious && drive.running) {
+          const target = this.driveTarget('compare_last');
+          if (!target.ok) { setAiPrompt(target.spoken); return target; }
+          const previous = this.getById(target.previousId);
+          const spoken = previous
+            ? `${shortAddress(target.property)} scores ${Math.round(target.property.composite)}; `
+              + `${shortAddress(previous)} scores ${Math.round(previous.composite)}.`
+            : 'Nothing to compare with yet.';
+          setAiPrompt(spoken);
+          return { ok: Boolean(previous), action: 'compare_drive', id: target.id, spoken };
+        }
         const result = applyCompare(focused, conversation);
         if (result.ok) {
           lastAnalysis = result.analyses[result.best];
@@ -427,6 +548,11 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
 
       if (parsed.intent === 'save') {
+        if (slots.referring && drive.running) {
+          const target = this.driveTarget('save_that');
+          if (!target.ok) { setAiPrompt(target.spoken); return target; }
+          return this.save(target.id, { note: slots.note || '' });
+        }
         return this.save(focused?.id, { note: slots.note || '' });
       }
 
@@ -453,18 +579,20 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
 
       if (parsed.intent === 'start_drive') {
-        setNavActive('drive');
-        const result = drive.start();
-        setAiPrompt(result.spoken);
-        return result;
+        // "start here and show me the surrounding streets" begins from the
+        // house already in frame; every other entry begins at the route's head.
+        return this.startDrive({ ...slots, gold: Boolean(slots.gold) });
       }
       if (parsed.intent === 'stop_drive') {
         const result = drive.stop();
+        // Exit returns to the market view over the cluster, which is where the
+        // drive was entered from.
+        camera.fly('CRUISE', scene ? scene.rows : null);
         setAiPrompt(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_next') {
-        const result = drive.running ? drive.next() : drive.start();
+        const result = drive.running ? drive.next() : this.startDrive();
         setAiPrompt(result.spoken);
         return result;
       }
@@ -476,6 +604,79 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
 
       if (parsed.intent === 'camera_angle') {
         return this.cameraAngle(slots);
+      }
+
+      // ---- Drive Mode ----------------------------------------------------
+      if (parsed.intent === 'drive_pause') {
+        if (!drive.running) return this.cameraAngle({ orbit: 'stop' });
+        const result = drive.pause();
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'drive_resume') {
+        if (!drive.running) return { ok: false, spoken: 'No drive running.' };
+        const result = drive.keepGoing();
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'drive_speed') {
+        if (!drive.running) return { ok: false, spoken: 'No drive running.' };
+        const result = slots.speed === 'slower' ? drive.slower() : drive.faster();
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'drive_look') {
+        // Standing still, "look left" is a request to see the left side of the
+        // focused house — the camera command it was before Drive Mode existed.
+        if (!drive.running) {
+          const side = slots.look === 'overhead' ? null : slots.look;
+          return side
+            ? this.cameraAngle({ side })
+            : this.cameraAngle({ height: 'higher' });
+        }
+        const result = drive.look(slots.look);
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'look_closer') {
+        if (!drive.running) {
+          return focused ? this.cameraAngle({ range: 'closer' }) : { ok: false, spoken: 'Nothing focused.' };
+        }
+        const result = drive.lookCloser();
+        if (result.ok) {
+          focused = result.property;
+          conversation.focusedId = result.id;
+          renderFocusCard(result.property);
+        }
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'drive_best') {
+        if (!drive.running) return this.handleIntent('show me the best one');
+        const result = drive.requestBestMatch();
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'drive_narration') {
+        const result = drive.setNarrationLevel(slots.level);
+        setAiPrompt(result.spoken);
+        return result;
+      }
+      if (parsed.intent === 'how_recent') {
+        const target = this.driveTarget('how_recent');
+        if (!target.ok) { setAiPrompt(target.spoken); return target; }
+        const signal = (target.property.signals || [])[0];
+        const spoken = signal
+          ? `${String(signal.type).replaceAll('_', ' ').toLowerCase()}, filed ${signal.ageDays} days ago.`
+          : 'No filing date on that one.';
+        setAiPrompt(spoken);
+        return { ok: true, action: 'how_recent', id: target.id, spoken };
+      }
+      if (parsed.intent === 'more_like_it') {
+        const target = this.driveTarget('more_like_it');
+        if (!target.ok) { setAiPrompt(target.spoken); return target; }
+        const type = (target.property.signals || [])[0]?.type;
+        return this.handleIntent(`find ${String(type || '').replaceAll('_', ' ').toLowerCase() || 'money'}`);
       }
 
       if (parsed.intent === 'help') {
@@ -582,6 +783,45 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         ...slots,
         spoken,
       };
+    },
+
+    /**
+     * Which house a referring command means, or the question to ask instead.
+     *
+     * The ambiguous branch is the one that matters. When a call-out named two
+     * houses at once and the user says "save that one", there is no honest
+     * answer — so the drive asks rather than saving one at random and being
+     * wrong half the time.
+     */
+    driveTarget(intent) {
+      const outcome = drive.resolve(intent);
+      if (outcome.ok) {
+        const property = outcome.property || this.getById(outcome.id);
+        return { ...outcome, property, spoken: '' };
+      }
+      return { ok: false, action: intent, ...outcome };
+    },
+
+    /**
+     * The card shown before a drive starts.
+     *
+     * One small card, and deliberately before: a drive that simply begins is
+     * disorienting, and "Oakhurst · 1.4 km · 5 signal types" is the difference
+     * between a demo and a surprise.
+     */
+    startDrive(slots = {}) {
+      if (drive.running) return { ok: true, action: 'start_drive', spoken: 'Already driving.' };
+      const plan = drive.plan();
+      const live = slots.live ?? readDriveLive();
+      renderDriveIntro(plan, { live });
+      const result = drive.start({ live, gold: Boolean(slots.gold) });
+      if (result.ok) {
+        setNavActive('drive');
+        setDriveChrome(true);
+        if (live) requestWakeLock();
+      }
+      setAiPrompt(result.spoken);
+      return result;
     },
 
     world() {

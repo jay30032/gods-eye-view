@@ -119,6 +119,9 @@ export function createGroundPulses({ viewer, Cesium, market, reduced = () => fal
   let scan = null;
   let scanMaterial = null;
   let scanStartedAt = null;
+  /** The drive's route, drawn faintly on the road. */
+  let routeLine = null;
+  let routeShown = false;
 
   const supported = (() => {
     try {
@@ -174,10 +177,85 @@ export function createGroundPulses({ viewer, Cesium, market, reduced = () => fal
     scanStartedAt = null;
   }
 
+  /**
+   * The route, draped on the road.
+   *
+   * Deliberately faint and deliberately white rather than gold: it is the line
+   * the drive is following, not a thing to look at. Drawn bright enough to
+   * answer "where does this go next" at a glance and dim enough that it never
+   * competes with the houses, which are the point.
+   *
+   * Built once when the route is handed over — a polyline of a few hundred
+   * vertices is not something to rebuild per frame, and it never changes.
+   */
+  function buildRouteLine(coordinates) {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+    try { if (routeLine) collection.remove(routeLine); } catch { /* already gone */ }
+    routeLine = null;
+
+    /**
+     * Drop consecutive duplicates, including the closing one.
+     *
+     * The route is a closed loop, so its last vertex repeats its first — and
+     * `loop: true` adds the closing segment itself. Leaving the duplicate in
+     * gives `GroundPolylineGeometry` a zero-length segment, whose direction
+     * cannot be normalised: Cesium throws `normalized result is not a number`
+     * from inside the render loop, stops rendering, and puts up its error
+     * panel. The same trap `fetch-parcels.mjs` cleans ArcGIS rings for.
+     */
+    const clean = [];
+    for (const point of coordinates) {
+      if (!Array.isArray(point) || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) continue;
+      const last = clean[clean.length - 1];
+      if (last && Math.abs(last[0] - point[0]) < 1e-9 && Math.abs(last[1] - point[1]) < 1e-9) continue;
+      clean.push(point);
+    }
+    while (clean.length > 1) {
+      const first = clean[0];
+      const last = clean[clean.length - 1];
+      if (Math.abs(first[0] - last[0]) < 1e-9 && Math.abs(first[1] - last[1]) < 1e-9) clean.pop();
+      else break;
+    }
+    if (clean.length < 3) return;
+
+    const positions = Cesium.Cartesian3.fromDegreesArray(
+      clean.flatMap(([lon, lat]) => [lon, lat]),
+    );
+    routeLine = new Cesium.GroundPolylinePrimitive({
+      geometryInstances: new Cesium.GeometryInstance({
+        geometry: new Cesium.GroundPolylineGeometry({ positions, width: 5, loop: true }),
+      }),
+      appearance: new Cesium.PolylineMaterialAppearance({
+        material: Cesium.Material.fromType('Color', {
+          color: new Cesium.Color(1, 1, 1, 0.22),
+        }),
+      }),
+      classificationType: Cesium.ClassificationType.CESIUM_3D_TILE,
+      asynchronous: true,
+      show: false,
+    });
+    collection.add(routeLine);
+  }
+
   return {
     get supported() { return supported; },
     get ringId() { return ringId; },
     get scanning() { return scanStartedAt !== null; },
+    get routeShown() { return routeShown; },
+
+    /** Hand over the drive route once; it is built, not rebuilt. */
+    setRoute(coordinates) {
+      if (destroyed || !supported) return false;
+      buildRouteLine(coordinates);
+      return Boolean(routeLine);
+    },
+
+    /** Show or hide the route line — Drive Mode owns this. */
+    setRouteVisible(next) {
+      routeShown = Boolean(next);
+      if (routeLine) routeLine.show = routeShown;
+      return routeShown;
+    },
 
     setEnabled(next) {
       enabled = Boolean(next);
@@ -261,6 +339,8 @@ export function createGroundPulses({ viewer, Cesium, market, reduced = () => fal
       destroyed = true;
       clearRing();
       clearScan();
+      try { if (routeLine) collection.remove(routeLine); } catch { /* torn down */ }
+      routeLine = null;
       try { scene.primitives.remove(collection); } catch { /* torn down */ }
     },
   };

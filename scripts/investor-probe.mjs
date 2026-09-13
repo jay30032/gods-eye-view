@@ -68,6 +68,18 @@ const PLAY = HAS('play');
  */
 const SIX = HAS('six');
 /**
+ * Drive Mode v1. Starts the drive by typed command, runs the whole loop at 4x
+ * playback, and measures the things a drive can break that nothing else can:
+ * the frame budget while the camera is in continuous motion, whether every
+ * signal type actually got announced, and whether asking for the best match
+ * produces exactly one gold call-out rather than none or several.
+ */
+const DRIVE = HAS('drive');
+const DRIVE_SPEED_SCALE = 4;
+const DRIVE_RUN_MS = 150_000;
+/** How long to let the whole loop play before giving up on it finishing. */
+const DRIVE_LAP_TIMEOUT_MS = 110_000;
+/**
  * 33 ms is 30 fps, and `frameBudget.js` deliberately caps the investor viewer
  * at exactly 30 fps whenever the machine is on battery. So a flat 33 ms budget
  * is unachievable by construction on an unplugged laptop — which is the demo
@@ -117,10 +129,10 @@ const HERO_CENTRE_FRACTION = 0.30;
 const FRAME_P95_BUDGET_MS = 120;
 const URL_ARG = arg('url', SPAWN_KEYLESS
   ? `http://localhost:${KEYLESS_PORT}/?demo=1&welcome=1`
-  : (SIX ? 'http://localhost:4173/?scene=six' : 'http://localhost:4173/?demo=1&welcome=1'));
+  : ((SIX || DRIVE) ? 'http://localhost:4173/?scene=six' : 'http://localhost:4173/?demo=1&welcome=1'));
 const LABEL = arg('label', SPAWN_KEYLESS
   ? 'investor-keyless'
-  : (SIX ? 'six' : (PLAY ? 'demo' : 'investor')));
+  : (DRIVE ? 'drive' : (SIX ? 'six' : (PLAY ? 'demo' : 'investor'))));
 const LOG_PATH = arg('log', null);
 
 const log = [];
@@ -329,6 +341,10 @@ async function main() {
     heroEffects: null,
     angleChoice: null,
     angles: [],
+    drivePlan: null,
+    driveCallouts: [],
+    driveState: null,
+    drivePropertyMode: null,
   };
 
   /** Markers whose sprite lands inside the viewport. */
@@ -506,6 +522,115 @@ async function main() {
     }
   }
 
+  if (DRIVE) {
+    // The scene descends on its own; the drive starts from the settled cruise.
+    const cruised = await waitForShot('CRUISE', 40_000);
+    playLog.push(`CRUISE over the cluster settled: ${cruised}`);
+    if (!cruised) errors.push({ t: Date.now() - started, kind: 'drive', text: 'CRUISE never settled' });
+    await new Promise((r) => setTimeout(r, 1_500));
+
+    const send = (text) => page.evaluate((phrase) => {
+      const input = document.getElementById('ts-demo-input');
+      const form = document.getElementById('ts-demo-form');
+      if (input && form) {
+        input.value = phrase;
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        return 'typed-bar';
+      }
+      window.__terraSignal?.handleIntent?.(phrase);
+      return 'handleIntent';
+    }, text).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
+
+    const driveState = () => page.evaluate(() => {
+      const drive = window.__terraSignal?.drive;
+      if (!drive) return null;
+      return {
+        running: drive.running,
+        mode: drive.mode,
+        paused: drive.paused,
+        alongM: drive.alongM,
+        lengthM: drive.lengthM,
+        goldId: drive.goldId,
+        level: drive.level,
+        onRoute: (drive.onRoute || []).length,
+        callouts: (drive.callouts || []).map((c) => ({
+          text: c.text, side: c.side, ids: c.ids, gold: Boolean(c.gold), atM: c.atM,
+        })),
+      };
+    }).catch(() => null);
+
+    // Start by typed command, the way a reviewer would.
+    const startedBy = await send('drive through this neighborhood and show me foreclosures and rentals');
+    record(`DRIVE start via ${startedBy}`);
+    playLog.push(`"drive through this neighborhood…" → ${startedBy}`);
+    await new Promise((r) => setTimeout(r, 1_200));
+
+    checks.drivePlan = await page.evaluate(
+      () => window.__terraSignal?.drive?.plan?.() ?? null,
+    ).catch(() => null);
+    record(`CHECK drive plan ${JSON.stringify(checks.drivePlan)}`);
+    if (checks.drivePlan) {
+      playLog.push(`plan: ${checks.drivePlan.area} · ${(checks.drivePlan.lengthM / 1000).toFixed(2)} km`
+        + ` · ${checks.drivePlan.properties} properties · ${checks.drivePlan.signalTypes.length} signal types`);
+    }
+
+    // Ask for the best match, so exactly one gold call-out should follow.
+    await send('show me the best match along this route');
+    playLog.push('"show me the best match along this route" → sent');
+
+    // 4x playback: the whole loop in a headed check, without a four-minute run.
+    await page.evaluate((scale) => {
+      window.__terraSignal?.drive?.source?.setSpeedScale?.(scale);
+    }, DRIVE_SPEED_SCALE).catch(() => {});
+    record(`DRIVE playback scaled to ${DRIVE_SPEED_SCALE}x`);
+
+    // A frame window over the moving camera — the whole question for a drive.
+    const driveStart = await pageNow();
+    await new Promise((r) => setTimeout(r, 4_000));
+    await shot('drive-approach');
+
+    // Run the lap out, grabbing the gold moment when it lands.
+    let goldShotTaken = false;
+    const deadline = Date.now() + DRIVE_LAP_TIMEOUT_MS;
+    let state = null;
+    while (Date.now() < deadline) {
+      state = await driveState();
+      if (!state?.running) break;
+      if (!goldShotTaken && state.callouts.some((c) => c.gold)) {
+        goldShotTaken = true;
+        await shot('drive-gold');
+      }
+      // A full lap: the loop wraps, so stop once we are back near the start
+      // having covered most of it.
+      if (state.callouts.length >= (state.onRoute || 6)) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    windows.drive = [driveStart, await pageNow()];
+    checks.driveState = state;
+    checks.driveCallouts = state?.callouts || [];
+    record(`CHECK drive state ${JSON.stringify({ ...state, callouts: undefined })}`);
+    for (const callout of checks.driveCallouts) {
+      record(`CALLOUT ${callout.gold ? 'GOLD ' : ''}${callout.atM?.toFixed?.(0)}m ${callout.side} :: ${callout.text}`);
+      playLog.push(`${callout.gold ? 'GOLD  ' : 'call  '}${String(Math.round(callout.atM || 0)).padStart(4)}m `
+        + `${String(callout.side).padEnd(5)} ${callout.text}`);
+    }
+    if (!goldShotTaken) await shot('drive-gold');
+
+    // (6) Look closer → Property Mode.
+    await send('look closer');
+    await new Promise((r) => setTimeout(r, 4_000));
+    checks.drivePropertyMode = await driveState();
+    record(`CHECK property mode ${JSON.stringify({ mode: checks.drivePropertyMode?.mode })}`);
+    playLog.push(`"look closer" → mode ${checks.drivePropertyMode?.mode}`);
+    await shot('drive-property-mode');
+
+    // And back onto the road, which must not restart the drive.
+    await send('keep going');
+    await new Promise((r) => setTimeout(r, 2_000));
+    const resumed = await driveState();
+    playLog.push(`"keep going" → mode ${resumed?.mode}, running ${resumed?.running}`);
+  }
+
   if (PLAY) {
     // Descend first — pulses only exist once the camera is in the market.
     await new Promise((r) => setTimeout(r, 5_000));
@@ -604,7 +729,7 @@ async function main() {
 
   // Responsiveness is measured at a fixed mark, not opportunistically: the
   // question is whether the thread is answering once the page should be idle.
-  const respondAt = (PLAY || SIX) ? Date.now() - started + 2_000 : RESPOND_AT_MS;
+  const respondAt = (PLAY || SIX || DRIVE) ? Date.now() - started + 2_000 : RESPOND_AT_MS;
   await new Promise((r) => setTimeout(r, Math.max(0, respondAt - (Date.now() - started))));
   const askedAt = Date.now();
   let respondTimer;
@@ -623,7 +748,7 @@ async function main() {
   const respondMs = Date.now() - askedAt;
   record(`RESPOND at ${respondAt}ms: ${state.blocked ? 'BLOCKED' : `${respondMs}ms ${JSON.stringify(state)}`}`);
 
-  const runMs = PLAY ? PLAY_RUN_MS : (SIX ? SIX_RUN_MS : RUN_MS);
+  const runMs = PLAY ? PLAY_RUN_MS : (DRIVE ? DRIVE_RUN_MS : (SIX ? SIX_RUN_MS : RUN_MS));
   await new Promise((r) => setTimeout(r, Math.max(0, runMs - (Date.now() - started))));
   clearInterval(pixelTimer);
 
@@ -718,6 +843,35 @@ async function main() {
     && Object.keys(checks.angleChoice.angles).length > 0,
   );
 
+  // ---- drive verdict ----
+  const driveFrames = frameStats(frames, windows.drive);
+  const driveBudgetMs = Math.max(
+    SIX_FRAME_P95_BUDGET_MS,
+    Number.isFinite(targetFrameRate) && targetFrameRate > 0
+      ? (1000 / targetFrameRate) * FRAME_CAP_TOLERANCE
+      : 0,
+  );
+  const driveFramesOk = !DRIVE || Boolean(driveFrames && driveFrames.p95 <= driveBudgetMs);
+  /**
+   * Every signal type on the route has to get announced at least once.
+   *
+   * A drive that silently skipped a type would look fine — the houses are all
+   * drawn — and would mean the narration window is too narrow for the speed,
+   * which is the failure this exists to catch.
+   */
+  const driveTypes = new Set(checks.drivePlan?.signalTypes || []);
+  const announcedIds = new Set(checks.driveCallouts.flatMap((c) => c.ids || []));
+  const driveCoverageOk = !DRIVE || Boolean(
+    driveTypes.size > 0
+    && checks.drivePlan
+    && announcedIds.size >= checks.drivePlan.properties,
+  );
+  // Exactly one gold call-out, because exactly one best match was requested.
+  const goldCallouts = checks.driveCallouts.filter((c) => c.gold);
+  const driveGoldOk = !DRIVE || goldCallouts.length === 1;
+  const drivePropertyOk = !DRIVE || checks.drivePropertyMode?.mode === 'property';
+  const driveRanOk = !DRIVE || Boolean(checks.drivePlan?.properties > 0);
+
   const markersOk = !PLAY || (checks.markersInView?.inView ?? 0) >= MIN_MARKERS_IN_VIEW;
   const half = HERO_CENTRE_FRACTION / 2;
   const heroOk = !PLAY || (checks.heroCentred
@@ -726,7 +880,8 @@ async function main() {
 
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
     && framesOk && markersOk && heroOk
-    && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk;
+    && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk
+    && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk;
 
   const tileSummary = TILE_HOSTS.map((h) => {
     const row = tiles.get(h);
@@ -785,6 +940,23 @@ async function main() {
         + `tint ${checks.heroEffects?.classification ? 'classified' : 'UNAVAILABLE'}`
         + ` on [${(checks.heroEffects?.tinted || []).join(', ') || 'none'}]`,
     ] : []),
+    ...(DRIVE ? [
+      `  ${driveRanOk ? 'PASS' : 'FAIL'}  route              `
+        + `${checks.drivePlan ? `${(checks.drivePlan.lengthM / 1000).toFixed(2)} km · `
+          + `${checks.drivePlan.properties} properties · `
+          + `${checks.drivePlan.signalTypes.length} signal types` : 'NO PLAN'}`,
+      `  ${driveCoverageOk ? 'PASS' : 'FAIL'}  call-outs          `
+        + `${checks.driveCallouts.length} call-outs covering ${announcedIds.size}`
+        + `/${checks.drivePlan?.properties ?? '?'} properties`,
+      `  ${driveGoldOk ? 'PASS' : 'FAIL'}  gold call-out      `
+        + `${goldCallouts.length} (expected exactly 1 — best match was requested)`,
+      `  ${drivePropertyOk ? 'PASS' : 'FAIL'}  look closer        `
+        + `mode ${checks.drivePropertyMode?.mode ?? 'NONE'}`,
+      `  ${driveFramesOk ? 'PASS' : 'FAIL'}  frame time p95     `
+        + `drive ${driveFrames ? `${driveFrames.p95}ms` : 'no data'} `
+        + `(budget ${driveBudgetMs.toFixed(1)}ms`
+        + `${Number.isFinite(targetFrameRate) ? ` — viewer capped at ${targetFrameRate} fps` : ''})`,
+    ] : []),
     ...(PLAY ? [
       `  ${markersOk ? 'PASS' : 'FAIL'}  markers at CRUISE  `
         + `${checks.markersInView?.inView ?? 0} of ${checks.markersInView?.count ?? 0} in view `
@@ -803,6 +975,18 @@ async function main() {
     `        governor           mode=${state.mode ?? '?'} holds=[${(state.holds || []).join(', ')}]`,
     '='.repeat(74),
   ];
+  if (DRIVE) {
+    if (driveFrames) {
+      out.push(`  frames driving: n=${driveFrames.n} over ${driveFrames.seconds}s  `
+        + `p50 ${driveFrames.p50}ms  p95 ${driveFrames.p95}ms  worst ${driveFrames.worst}ms`);
+    }
+    if (shots.length) {
+      out.push('  screenshots:');
+      for (const file of shots) out.push(`    ${file}`);
+    }
+    out.push('  sequence:');
+    for (const line of playLog) out.push(`    ${line}`);
+  }
   if (SIX) {
     for (const [label, stat] of [
       ['cruise over cluster', sixCruiseFrames],

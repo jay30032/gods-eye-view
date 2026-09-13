@@ -42,6 +42,9 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
       hero flight, ties to the street, cached per property
 - [x] A ring around the top pick and a scan wave across the scene, both
       shader-animated off the one shared clock
+- [x] Drive Mode v1: a committed road-following loop, a chase camera on a
+      spline, activation by distance ahead, narration that speaks only when
+      useful, and a pluggable position source with a live GPS implementation
 - [x] Phase 2 not started
 
 ## Architecture
@@ -58,6 +61,7 @@ src/investor/
   visuals/               governor-held Cesium primitives
   visuals/effects/       building outline, lot line, tint, columns, ground pulses
   camera/                shot list, director, front-side derivation, best angle
+  drive/                 route spline, activation, narration, position sources
   scenes/                ?scene=six — the six-house near-field scene
   mock/parcel.js         tangent-plane geometry helpers (its synthetic parcel
                          is data only — nothing renders it)
@@ -217,6 +221,7 @@ npm run smoke:investor-keyless   # spawns its own :4174 with the Google key
                                  # blanked in env only — never touches .env
 npm run smoke:demo               # drives the whole acceptance conversation
 npm run smoke:six                # the six-house near-field scene
+npm run smoke:drive              # Drive Mode v1, the whole loop at 4x
 ```
 
 Geometry is refreshed by hand, never by `npm test`:
@@ -225,6 +230,7 @@ Geometry is refreshed by hand, never by `npm test`:
 node scripts/fetch-footprints.mjs   # OSM buildings  → geometry files
 node scripts/fetch-parcels.mjs      # county parcels → geometry files
 node scripts/fetch-streets.mjs      # street bearings → geometry files
+node scripts/fetch-route.mjs        # OSRM loop      → mock/sixRoute.js
 ```
 
 Each launches **real Chrome** (`channel: 'chrome'`, `headless: false` — this
@@ -892,6 +898,163 @@ is the travel, so there is nothing honest to freeze it at.
 is `0` and a missing start stamp would otherwise fire a scan rather than report
 that there is not one. That is the same trap `nearFieldActive` fell into with
 camera height, found the same way — by a test.
+
+## Drive Mode v1
+
+The six-house scene, driven along real roads.
+
+What it replaces: a "route" that was a list of eight houses sorted by score, a
+camera that cut from one to the next every seven seconds, and a line read at
+each stop. Nothing about it was a drive — no roads, no travel, nothing arriving.
+
+### The route
+
+`scripts/fetch-route.mjs` builds one road-following loop past all six houses,
+once, and commits it to `mock/sixRoute.js`. **The app never calls a routing
+service at runtime.**
+
+- **Waypoints are the street-facing side**, not the roofs: each row's stored
+  street bearing and distance put the waypoint on the kerb the house faces.
+  Routing between roofs asks OSRM to find its way to the middle of a building
+  and lets it pick whichever kerb it likes.
+- **OSRM's `/trip`** solves the visiting order and closes the loop. `/route`
+  would take the six in the order given and produce whatever zig-zag implied.
+- **Never a straight line through a yard.** Every vertex is checked against
+  OSM's own highway geometry from Overpass, and the script refuses to write if
+  any sits more than 8 m from a road.
+
+**1,360 m, 38 vertices, worst vertex 0.07 m from a road.** Passing order
+006 → 002 → 004 → 005 → 003 → 001.
+
+The verification caught its own bug first: the cheap per-segment reject compared
+the point to the segment's *endpoints*, so a long straight road passing a metre
+away was discarded as too far and the vertex reported as infinitely off-road.
+The reject is a bounding box now.
+
+### One architectural rule
+
+Everything reads the **position source**, never the spline.
+
+```
+{ position, bearingDeg, speedMps, timestamp, accuracyM }
+```
+
+`PlaybackSource` generates those from the spline; `GpsSource` gets them from a
+phone. `driveDemo.js` projects whatever arrives back onto the route and drives
+activation, sides and narration off the projection. Reading the spline directly
+would be shorter and would mean the GPS path exercised none of the same code.
+
+`positionSource.test.mjs` asserts the consequence directly: the route fed
+through `GpsSource` as fake fixes with ±6 m of noise at 9 m/s fires **the same
+call-outs in the same order** as playback. Without that test, "pluggable" means
+the GPS path compiles.
+
+### The camera
+
+A chase camera on a Catmull-Rom spline — which passes exactly through every
+road vertex, where a B-spline would cut the corner and drive through the garden
+on the inside of it. 38 m up, pitch −22, heading low-pass filtered on the
+*shortest signed delta* so that filtering 359 towards 1 does not spin the camera
+the long way round through south. The filter coefficient comes from elapsed time
+rather than per frame, so a turn takes the same wall-clock time at 30 fps as at
+60.
+
+Playback is 9 m/s, eased in over 2 s. "Slower" / "faster" scale it ×0.6 / ×1.5;
+within 70 m of a house being explained it drops to 40% so the house is still on
+screen when the sentence ends. **Playback speed is not a vehicle's speed** and
+nothing in the product claims otherwise.
+
+### Activation by distance ahead
+
+Emphasis follows what you can see from here, and it ramps rather than switching
+— a house that pops from nothing to a full outline at exactly 120 m reads as a
+rendering glitch.
+
+| ahead | what it is |
+|---|---|
+| > 200 m | a small beacon; something is there, that is all |
+| 120 → 60 m | the outline fades in |
+| 60 m → 0 | highlight and status motion at full |
+| passed | fades to 25%, unless saved or selected |
+| well behind | suspended — nothing drawn |
+
+`selected` overrides all of it: the drive does not get to dim the house the user
+just asked to look at. **"On your left" is computed from the travel bearing at
+that moment**, never stored — on a loop the same house is on your left going one
+way and your right coming back.
+
+### Narration
+
+Three rules, enforced in `narration.js` rather than left to the caller: one
+call-out per property ever (a second lap does not re-announce), neighbours
+within 40 m announced together, and a level the user owns — `full`, `quiet`
+(urgent signals only), `off` (silent, but still tracking so "save that one"
+works).
+
+**"That one" never guesses.** When a call-out named two houses, a referring
+command returns an *ambiguity* and the assistant asks which. Saving the wrong
+house is a silent error the user only discovers later.
+
+### Gold on request
+
+"Show me the best match along this route" ranks by composite and gives the top
+house the full gold treatment as it is approached. Without the request every
+house keeps its signal colour — the gold treatment means "this is the answer",
+and gilding a house nobody asked about asserts a ranking the user did not
+request.
+
+`smoke:drive` caught a real bug here. "Behind us" was decided from
+`signedAheadM`, which on a loop deliberately reports anything more than half a
+lap ahead as behind. The best match sits at 1,382 m on a 1,382 m loop, so asked
+20 m in it read as 20 m *behind* rather than 1,362 m ahead — the drive announced
+it as already missed, suppressed the approach call-out, and left the one house
+the user asked about as the only one never mentioned. Whether it has been passed
+is a fact the drive already knows: whether it has been announced this lap.
+
+### Two silent bugs the headed check found
+
+Both stopped the render loop; neither could fail a unit test.
+
+1. **A temporal dead zone.** The drive's per-property weight was read in the
+   visibility block and declared below it, so `nearFieldEffects` threw on the
+   first frame of every drive and Cesium stopped rendering.
+2. **A zero-length segment.** The route is a closed loop, so its last vertex
+   repeats its first — and `loop: true` adds the closing segment itself. The
+   duplicate gave `GroundPolylineGeometry` a segment whose direction cannot be
+   normalised: `normalized result is not a number`, thrown from inside the
+   render loop.
+
+### `npm run smoke:drive`
+
+Starts the drive by typed command, asks for the best match, runs the whole loop
+at 4× playback, and fails unless: no render errors, p95 frame time inside the
+viewer's own frame budget, **every property on the route announced**, **exactly
+one** gold call-out, and "look closer" reaching Property Mode. It writes
+`drive-approach.png`, `drive-gold.png` and `drive-property-mode.png`.
+
+Measured: **p95 18.3 ms** against a 37.3 ms budget (30 fps cap on battery),
+6 call-outs covering 6/6 properties, 1 gold call-out.
+
+### Live GPS
+
+`?drive=live` starts on `GpsSource` instead of playback, and the Screen Wake
+Lock API holds the screen on while it runs — a phone on a windscreen mount locks
+in thirty seconds, which ends the drive. Four things the source does that a
+naive `watchPosition` does not:
+
+- **course only while moving.** `coords.heading` is null or stale garbage when
+  stationary; feeding it to the camera spins it on the spot. Below 0.8 m/s the
+  bearing comes from the last 15 m of travel instead.
+- **a time-based filter** on position, so a consumer fix's several-metre wander
+  does not become a camera with a tremor, and the behaviour is the same at any
+  fix rate.
+- **snapping only within 12 m.** Pulling every fix onto the road hides real
+  divergence and teleports the camera when the driver leaves the route.
+- **untrusted fixes pass through as data.** A 200 m-accuracy fix under a bridge
+  is reported so the HUD can say so, and never becomes the position.
+
+The GPS path is unit-tested against the real route with noisy fixes; it has not
+been exercised headed, because that needs a device and a location permission.
 
 ## The six-house scene
 

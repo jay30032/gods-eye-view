@@ -39,6 +39,8 @@ export function createOpportunityVisualManager({
   const reducedPolicy = createReducedMotionPolicy({ onChange: () => syncHold() });
   let enabled = Boolean(startEnabled);
   let dealStrategy = null;
+  let driveMode = false;
+  let savedId = null;
   let dealCaption = null;
   let destroyed = false;
   let built = false;
@@ -186,6 +188,7 @@ export function createOpportunityVisualManager({
       return id || null;
     },
     setSaved(id) {
+      savedId = id || null;
       layer.setSaved(id);
       effects.setSaved(id);
       governorRequestRender('investor-saved');
@@ -220,12 +223,43 @@ export function createOpportunityVisualManager({
       governorRequestRender('investor-scan');
       return pulses.scanning;
     },
+    /** Ids the user has saved — Drive Mode never lets these drop to quiet. */
+    get savedIds() { return savedId ? [savedId] : []; },
+    /** True while a drive owns the emphasis rules. */
+    get driveMode() { return driveMode; },
+    /**
+     * Enter or leave Drive Mode.
+     *
+     * Leaving clears the weights as well as the flag: a stale activation map
+     * would keep a house suspended after the drive ended, and the house that
+     * happened to be behind the camera at the end would simply not be there.
+     */
+    setDriveMode(next) {
+      driveMode = Boolean(next);
+      pulses.setRouteVisible(driveMode);
+      if (!driveMode) {
+        layer.setDriveActivations(null);
+        effects.setDriveActivations(null);
+      }
+      governorRequestRender('investor-drive-mode');
+      return driveMode;
+    },
+    /** Hand the drive's route over to be drawn faintly on the road. */
+    setDriveRoute(coordinates) { return pulses.setRoute(coordinates); },
+    /** One frame of Drive Mode emphasis. */
+    setDriveActivations(map) {
+      layer.setDriveActivations(map);
+      effects.setDriveActivations(map);
+      return map ? map.size : 0;
+    },
+
     /** Ground-pulse state, for the headed probes. */
     get pulses() {
       return {
         supported: pulses.supported,
         ringId: pulses.ringId,
         scanning: pulses.scanning,
+        routeShown: pulses.routeShown,
       };
     },
     rebuild() {
