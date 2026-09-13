@@ -1,11 +1,32 @@
 /**
  * Synthetic parcels from real building footprints.
  *
- * There is no free, redistributable parcel polygon for DeKalb or Fulton, and
- * guessing a lot line from an address is worse than admitting the guess. So the
- * footprint — which *is* real, from OpenStreetMap — is the only surveyed thing
- * here, and the parcel around it is openly synthetic: the footprint's
- * **oriented** bounding box pushed out by typical residential setbacks.
+ * ---------------------------------------------------------------------------
+ * NOTHING IN THIS FILE IS RENDERED ANY MORE.
+ *
+ * The synthetic parcel was drawn as the near-field outline until a headed
+ * review showed what it actually looked like on the tiles: a crooked box lying
+ * across the street and around a neighbour's house, in the gold the product
+ * uses to mean *this property*. `nearFieldEffects.js` now outlines the real OSM
+ * footprint and allow-lists parcel sources, so a ring whose `source` is
+ * `'synthetic'` is never drawn.
+ *
+ * What is still live here is the geometry: `footprintCentroid`, `toLocal` /
+ * `toGeo`, `ringArea`, `convexHull` and `orientedBoundingBox` are used by the
+ * effects layer, by `camera/orientation.js` to derive which wall faces the
+ * street, and by the three fetch scripts. `parcelFromFootprint` still runs in
+ * `fetch-footprints.mjs` to seed a parcel block that `fetch-parcels.mjs` then
+ * replaces with a real county polygon wherever one exists; `nominalParcel` is
+ * the old degrade path and is now exercised only by its own tests.
+ * ---------------------------------------------------------------------------
+ *
+ * This was written on the belief that there is no free parcel polygon for
+ * DeKalb or Fulton. That turned out to be wrong — both counties serve one over
+ * public, keyless ArcGIS REST, and `scripts/fetch-parcels.mjs` now fetches it.
+ * What remains below is the seed `fetch-footprints.mjs` writes before that runs,
+ * and the fallback for a row no county could answer for: the footprint's
+ * **oriented** bounding box pushed out by typical residential setbacks, openly
+ * synthetic and never drawn.
  *
  * Oriented, not axis-aligned. A house at 40 degrees to north gets a north-up
  * bbox a third larger than the house, and the parcel drawn from it reads as a

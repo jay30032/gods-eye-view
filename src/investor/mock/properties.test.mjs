@@ -91,7 +91,7 @@ test('sources read like the feed they would actually come from', () => {
         // Georgia records no Notice of Default, so this is a servicer feed.
         assert.equal(signal.source, 'MOCK/90-day delinquency — servicer feed', where);
       } else if (signal.type === 'LISTED_OPPORTUNITY') {
-        assert.equal(signal.source, 'MOCK/FMLS listing under comps', where);
+        assert.equal(signal.source, 'MOCK/public listing feed', where);
       } else {
         assert.match(
           signal.source,

@@ -34,6 +34,14 @@ export const DURATIONS = Object.freeze({
   toDrive: 2.0,
   /** Let REVEAL breathe before dropping to HERO — otherwise it is never seen. */
   revealDwell: 0.8,
+  /**
+   * An any-angle re-framing: "show me the back", "closer", "from the street".
+   *
+   * Two seconds is long enough to read as the camera travelling around a house
+   * rather than cutting to a new one, and short enough that a reviewer asking
+   * for four angles in a row is not kept waiting through any of them.
+   */
+  reframe: 2.0,
 });
 
 /** Parked globe: the view the app opens on. */
@@ -125,6 +133,19 @@ export const HERO = Object.freeze({
    * a lower third put the house behind the chrome.
    */
   subjectFrameFraction: 0.55,
+  /**
+   * How much of the marker's rise the framing gives away, 0..1.
+   *
+   * Two things want the same place on screen. Aim purely at the house and the
+   * marker floating 14 m above it climbs towards the HUD; aim purely at the
+   * marker — which is what this did — and the *house* drops to 70% down the
+   * frame, all but touching the command bar, with a third of the shot spent on
+   * sky. A headed six-house run measured exactly that: 50/69%.
+   *
+   * Splitting the difference puts the house at about 61% and the marker at
+   * about 49%, so the composition holds both and neither is against an edge.
+   */
+  markerRiseShare: 0.5,
   /** 72-second lap: 2 deg/s was too slow to read as motion at all. */
   orbitDegPerSec: 5,
   /** One revolution, then stop: a parked demo must not hold the GPU forever. */
@@ -337,19 +358,43 @@ export function markerRiseDeg(rangeM = HERO.rangeM, riseM = MARKER_HEIGHT_M) {
   return Math.atan2(riseM, rangeM) / DEG;
 }
 
-/** The focused house: 150 m out, just below centre, never looking at the sky. */
-export function heroShot(property, { headingDeg = HERO.headingDeg, fovRad = 60 * DEG } = {}) {
+/**
+ * The focused house: 150 m out, just below centre, never looking at the sky.
+ *
+ * `headingDeg`, `rangeM` and `pitchDeg` are all overridable because the
+ * any-angle commands ("show me the back", "closer", "higher") are re-framings of
+ * THIS shot rather than shots of their own. Routing them through here is what
+ * holds the house at the same place on screen as the camera moves around it:
+ * the two framing tilts are recomputed against the new range, so the subject
+ * stays at `subjectFrameFraction` down the frame instead of drifting up it as
+ * the camera pulls back.
+ */
+export function heroShot(property, {
+  headingDeg = HERO.headingDeg,
+  rangeM = HERO.rangeM,
+  pitchDeg = HERO.pitchDeg,
+  fovRad = 60 * DEG,
+} = {}) {
   const subject = { lat: property.lat, lng: property.lng };
+  const range = Math.max(1, Number(rangeM) || HERO.rangeM);
   const pose = cameraFromRange(subject, {
     headingDeg,
-    pitchDeg: HERO.pitchDeg,
-    rangeM: HERO.rangeM,
+    pitchDeg,
+    rangeM: range,
   });
   // Two tilts, both upward. The subject tilt drops the target down the frame;
   // the marker tilt accounts for the marker floating ABOVE the roof, which makes
   // it appear HIGHER in frame than the house — so the lens has to come up to
-  // meet it, not go down. Never past level.
-  const framed = Math.min(-1, pose.pitchDeg + subjectTiltDeg(fovRad) + markerRiseDeg());
+  // meet it, not go down. The marker tilt is measured at the RANGE actually
+  // being flown: 14 m of clearance subtends 5 degrees at 150 m and under 1 at
+  // 900, and using the 150 m figure at 900 would tip the house out of frame.
+  //
+  // Only PART of that rise is taken. Taking all of it centres the marker and
+  // pushes the house itself to 70% down the frame — see HERO.markerRiseShare.
+  const framed = Math.min(
+    -1,
+    pose.pitchDeg + subjectTiltDeg(fovRad) + markerRiseDeg(range) * HERO.markerRiseShare,
+  );
   return {
     name: 'HERO',
     ...pose,

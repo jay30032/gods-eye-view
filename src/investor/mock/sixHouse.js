@@ -30,7 +30,7 @@ const CHAMPION = 'MOCK/notice-of-sale — The Champion';
 const SERVICER = 'MOCK/90-day delinquency — servicer feed';
 const TAX_LIST = 'MOCK/DeKalb Tax Commissioner tax sale list';
 const CODE = 'MOCK/code enforcement — DeKalb County';
-const FMLS = 'MOCK/FMLS listing under comps';
+const LISTING_FEED = 'MOCK/public listing feed';
 
 export const SIX_HOUSE_PROPERTIES = Object.freeze([
   Object.freeze({
@@ -138,7 +138,7 @@ export const SIX_HOUSE_PROPERTIES = Object.freeze([
     estimatedValue: 398000,
     estimatedEquityPct: 0.27,
     signals: [
-      signal('LISTED_OPPORTUNITY', 0.71, '2026-08-30', FMLS),
+      signal('LISTED_OPPORTUNITY', 0.71, '2026-08-30', LISTING_FEED),
     ],
     deal: deal(312000, 18000, 398000, 2500),
     note: 'End unit facing the park, on the market since midsummer with no photographs of the kitchen.',

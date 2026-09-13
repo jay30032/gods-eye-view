@@ -19,7 +19,7 @@ export const INTENTS = Object.freeze([
   'find_money', 'focus', 'why', 'show_deal', 'compare', 'what_if',
   'reset_assumptions', 'save', 'unsave', 'show_saved', 'start_drive',
   'stop_drive', 'drive_next', 'drive_skip', 'world', 'vision_on', 'vision_off',
-  'help', 'unknown',
+  'camera_angle', 'help', 'unknown',
 ]);
 
 /** The five that must never stop working, matched before any pattern. */
@@ -74,6 +74,24 @@ const FIELD_WORDS = Object.freeze([
   [/\bdown\b/, 'downPayment'],
 ]);
 
+/**
+ * Any-angle camera vocabulary.
+ *
+ * Ordered inside `parseCameraCommand`, and the order is load-bearing: "back up"
+ * is a range change and "show me the back" is a side, and they share a word.
+ * Range is therefore consumed before sides, which is the only way both readings
+ * survive.
+ */
+const SIDE_PATTERNS = Object.freeze([
+  [/\b(back|rear|backside)\b/, 'back'],
+  [/\b(front|frontage)\b/, 'front'],
+  [/\bleft(?:[\s-]hand)?\b/, 'left'],
+  [/\bright(?:[\s-]hand)?\b/, 'right'],
+]);
+
+/** "from the north", "from the south-east". Longest first, as ever. */
+const COMPASS_PATTERN = /\bfrom (?:the )?(north[\s-]?east|north[\s-]?west|south[\s-]?east|south[\s-]?west|north|south|east|west)\b/;
+
 const PLUS_WORDS = /\b(higher|more|plus|up|add|increase|raise|over)\b/;
 const MINUS_WORDS = /\b(lower|less|minus|down|cut|drop|reduce|under)\b/;
 
@@ -97,6 +115,10 @@ const SUGGESTIONS = Object.freeze([
   'reset the numbers',
   'save it',
   'next',
+  'show me the back',
+  'from the street',
+  'closer',
+  'orbit',
   'zoom out',
   'help',
 ]);
@@ -253,6 +275,69 @@ function findMoneySlots(normalized, vocabulary) {
 }
 
 /**
+ * Any-angle camera commands: sides, compass points, distance, height, orbit.
+ *
+ * The internal order is the design and it is not alphabetical:
+ *
+ *   1. **orbit**, because "go around" is not a request for the back;
+ *   2. **range**, because "back up" and "show me the back" share a word and
+ *      only consuming range first leaves both readings alive;
+ *   3. **height**;
+ *   4. **compass**, before sides, because "from the north" is a bearing and
+ *      "the north side" would otherwise be read as a wall;
+ *   5. **the street**, which is a synonym for the front;
+ *   6. **sides** last, and only when the utterance actually reads as a request
+ *      to look at something.
+ *
+ * @returns {object|null} camera slots, or null if this is not a camera command
+ */
+export function parseCameraCommand(normalized) {
+  // "go back" is the focus cursor stepping backwards through a shortlist, not
+  // a request to see the back of a house. Give it up before anything else can
+  // claim the word.
+  if (/\bgo back\b/.test(normalized)) return null;
+
+  if (/\b(orbits?|orbiting|circles?|circling|spins?|spinning|go(?:ing)? around|fly(?:ing)? around|walk(?:ing)? around|rotates?|rotating)\b/.test(normalized)) {
+    return /\b(stop|end|halt|quit|cancel|freeze|enough)\b/.test(normalized)
+      ? { orbit: 'stop' }
+      : { orbit: 'start' };
+  }
+  if (/^(stop|stop it|hold still|stay there|freeze|hold it)$/.test(normalized)) {
+    return { orbit: 'stop' };
+  }
+
+  if (/\b(closer|zoom in|move in|come in|nearer|tighter|close up)\b/.test(normalized)) {
+    return { range: 'closer' };
+  }
+  if (/\b(farther|further|back up|pull back|back off|wider|further out|further away)\b/.test(normalized)) {
+    return { range: 'farther' };
+  }
+
+  if (/\b(higher|go up|rise|lift up|from above|bird'?s eye)\b/.test(normalized)) {
+    return { height: 'higher' };
+  }
+  if (/\b(lower|go down|drop down|descend|street level|ground level|eye level)\b/.test(normalized)) {
+    return { height: 'lower' };
+  }
+
+  const compass = COMPASS_PATTERN.exec(normalized);
+  if (compass) return { compass: compass[1].replace(/[\s-]/g, '') };
+
+  if (/\bfrom the street\b|\bstreet view\b|\bstreet[\s-]?side\b|\bfrom the curb\b|\bkerb\b/.test(normalized)) {
+    return { side: 'front', viaStreet: true };
+  }
+
+  // A side only counts when the sentence is asking to look at something. That
+  // keeps "the front" in "the front of the deal" — and any other stray use of
+  // these very common words — out of the camera.
+  const viewish = /\b(show|see|view|look|from|give me|swing|move|take me|face|facing)\b/.test(normalized)
+    || /\bside\b/.test(normalized);
+  if (!viewish) return null;
+  const side = matchFirst(SIDE_PATTERNS, normalized);
+  return side ? { side } : null;
+}
+
+/**
  * A what-if needs a field *and* something to do to it. "rent" alone is a hunt
  * for rentals; "rent 2800" is a change to this deal.
  */
@@ -388,6 +473,12 @@ export function parseCommand(text, options = {}) {
     const hypothetical = /\b(what if|assume|suppose|say|pretend)\b/.test(normalized);
     return result('what_if', whatIf, raw, normalized, hypothetical ? 0.95 : 0.85);
   }
+
+  // 6b. Any-angle camera. After what-ifs so "rent 2800 higher" is still a
+  //     what-if, and before `focus` so "show me the back" is a camera move
+  //     rather than the shortlist cursor stepping backwards.
+  const cameraSlots = parseCameraCommand(normalized);
+  if (cameraSlots) return result('camera_angle', cameraSlots, raw, normalized, 0.9);
 
   // 7. Why, with or without a strategy to justify.
   if (/\bwhy\b|what(?:'s| is) special|^explain\b/.test(normalized)) {

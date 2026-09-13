@@ -141,7 +141,7 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     estimatedValue: 365000,
     estimatedEquityPct: 0.22,
     signals: [
-      signal('LISTED_OPPORTUNITY', 0.77, '2026-09-01', 'MOCK/FMLS listing under comps'),
+      signal('LISTED_OPPORTUNITY', 0.77, '2026-09-01', 'MOCK/public listing feed'),
     ],
     deal: deal(284000, 18000, 365000, 2600),
     note: 'Quiet Kirkwood townhome on a cul-de-sac, fresh paint over an older kitchen.',
@@ -185,7 +185,7 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     estimatedValue: 575000,
     estimatedEquityPct: 0.18,
     signals: [
-      signal('LISTED_OPPORTUNITY', 0.69, '2026-08-22', 'MOCK/FMLS listing under comps'),
+      signal('LISTED_OPPORTUNITY', 0.69, '2026-08-22', 'MOCK/public listing feed'),
     ],
     deal: deal(472000, 28000, 575000, 3100),
     note: 'Inman Park cottage on a narrow lot, renovated on both sides and skipped in the middle.',
@@ -297,7 +297,7 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     estimatedValue: 340000,
     estimatedEquityPct: 0.21,
     signals: [
-      signal('LISTED_OPPORTUNITY', 0.73, '2026-08-27', 'MOCK/FMLS listing under comps'),
+      signal('LISTED_OPPORTUNITY', 0.73, '2026-08-27', 'MOCK/public listing feed'),
     ],
     deal: deal(268000, 16000, 340000, 2300),
     note: 'Cabbagetown mill-village townhome a block off the loop, quiet listing, tidy inside.',
@@ -319,7 +319,7 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     estimatedValue: 295000,
     estimatedEquityPct: 0.16,
     signals: [
-      signal('LISTED_OPPORTUNITY', 0.66, '2026-09-03', 'MOCK/FMLS listing under comps'),
+      signal('LISTED_OPPORTUNITY', 0.66, '2026-09-03', 'MOCK/public listing feed'),
     ],
     deal: deal(248000, 12000, 295000, 2200),
     note: 'Old Fourth Ward condo over the BeltLine, building assessment posted in the lobby.',
@@ -519,7 +519,7 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     estimatedValue: 355000,
     estimatedEquityPct: 0.19,
     signals: [
-      signal('LISTED_OPPORTUNITY', 0.71, '2026-08-29', 'MOCK/FMLS listing under comps'),
+      signal('LISTED_OPPORTUNITY', 0.71, '2026-08-29', 'MOCK/public listing feed'),
     ],
     deal: deal(287000, 15000, 355000, 2500),
     note: 'Chamblee townhome behind the Peachtree corridor, interior original to the build.',
@@ -563,7 +563,7 @@ export const ATLANTA_DECATUR_PROPERTIES = Object.freeze([
     estimatedValue: 275000,
     estimatedEquityPct: 0.14,
     signals: [
-      signal('LISTED_OPPORTUNITY', 0.64, '2026-09-05', 'MOCK/FMLS listing under comps'),
+      signal('LISTED_OPPORTUNITY', 0.64, '2026-09-05', 'MOCK/public listing feed'),
     ],
     deal: deal(236000, 9000, 275000, 2100),
     note: 'Midtown one-bedroom high up the tower, turnkey, nothing wrong with it.',

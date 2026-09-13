@@ -6,6 +6,7 @@ import {
 import { cameraHeightM, isNearMarket, lodFromHeight } from '../lod.js';
 import { createMarkerLayer } from './markers.js';
 import { createNearFieldEffects } from './effects/nearFieldEffects.js';
+import { createGroundPulses } from './effects/groundPulses.js';
 import { createReducedMotionPolicy } from './reducedMotionPolicy.js';
 
 const HOLD_ID = 'investor-opportunity';
@@ -48,6 +49,18 @@ export function createOpportunityVisualManager({
 
   const layer = createMarkerLayer({ viewer, Cesium, market, getProperties, reduced });
   const effects = createNearFieldEffects({ viewer, Cesium, market, getProperties, reduced });
+  /**
+   * The two draped pulses — the top pick's ring and the scan wave.
+   *
+   * Ticked off `effects.seconds` rather than a clock of their own, so a flight
+   * that freezes the near field freezes these with it. Registered after the
+   * effects layer so the value it reads each frame is this frame's, not last
+   * frame's.
+   */
+  const pulses = createGroundPulses({ viewer, Cesium, market, reduced });
+  const removePulseTick = viewer.scene.preRender.addEventListener(
+    () => pulses.tick(effects.seconds),
+  );
 
   /** In space the markers are meaningless and must not hold the render loop. */
   function isSpace() {
@@ -129,13 +142,21 @@ export function createOpportunityVisualManager({
         count: effects.count,
         surveyed: effects.surveyedIds,
         approximate: effects.approximateIds,
+        parcels: effects.parcelIds,
+        parcelSources: effects.parcelSources,
+        classification: effects.classificationSupported,
+        tinted: effects.tintedIds,
+        tintEdges: effects.tintEdgeIds,
       };
     },
     /** Screen positions of shown markers — used by the headed smoke check. */
     screenPositions() { return layer.screenPositions(); },
+    /** Where one house's footprint centroid lands on screen, in pixels. */
+    footprintScreenPosition(id) { return effects.screenPositionFor(id); },
 
     setEnabled(next) {
       enabled = Boolean(next);
+      pulses.setEnabled(enabled);
       refresh();
       return enabled;
     },
@@ -158,6 +179,9 @@ export function createOpportunityVisualManager({
     setTopPick(id) {
       layer.setTopPick(id);
       effects.setTopPick(id);
+      // The ring needs the house, not just its id: it is a disc centred on the
+      // property's own coordinate, which by now is its footprint centroid.
+      pulses.setTopPick(id ? (getProperties() || []).find((row) => row.id === id) || null : null);
       governorRequestRender('investor-top-pick');
       return id || null;
     },
@@ -184,11 +208,25 @@ export function createOpportunityVisualManager({
       return Boolean(active);
     },
     /**
-     * The scan sweep was a ground-clamped ellipse and went with the rest of
-     * them. The shortlist resolving on screen is the reveal now.
+     * Fire the scan wave: one draped ring crossing the whole board before the
+     * matches light.
+     *
+     * Given a shortlist it spans those houses; given nothing it spans the whole
+     * inventory, which is what "find me money" over a cold board should sweep.
      */
-    startScan() {
+    startScan(points = null) {
+      const rows = Array.isArray(points) && points.length ? points : (getProperties() || []);
+      pulses.startScan(rows, effects.seconds);
       governorRequestRender('investor-scan');
+      return pulses.scanning;
+    },
+    /** Ground-pulse state, for the headed probes. */
+    get pulses() {
+      return {
+        supported: pulses.supported,
+        ringId: pulses.ringId,
+        scanning: pulses.scanning,
+      };
     },
     rebuild() {
       built = false;
@@ -198,6 +236,8 @@ export function createOpportunityVisualManager({
     pickPropertyId(picked) { return layer.idFrom(picked) || effects.idFrom(picked); },
     destroy() {
       destroyed = true;
+      try { removePulseTick?.(); } catch { /* already gone */ }
+      pulses.destroy();
       handler.destroy();
       if (typeof removeMove === 'function') removeMove();
       layer.destroy();

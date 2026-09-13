@@ -9,6 +9,9 @@ import { prefersReducedMotion } from './visuals/reducedMotionPolicy.js';
 import { whyThisMatters } from './focus.js';
 import { createCameraDirector } from './camera/director.js';
 import { DURATIONS, worldToggleTarget } from './camera/shots.js';
+import { frontNormalDeg, headingForCompass, headingForSide } from './camera/orientation.js';
+import { geometryFor } from './mock/geometry.js';
+import { shortAddress } from './visuals/markers.js';
 import { clampApplies, clampPitchDeg, pitchNeedsClamp } from './camera/pitchClamp.js';
 import { cameraHeightM, lodFromHeight } from './lod.js';
 import { readSavedProperties, removeSavedProperty, saveProperty } from './saved.js';
@@ -345,7 +348,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           return moved;
         }
         const result = applyFocus(properties, conversation, slots);
-        if (result.ok) this.focus(result.id);
+        if (result.ok) {
+          // "Show me the best one" is a question about the whole board, so it
+          // gets the same sweep "find me money" does before the answer lights.
+          if (slots.step === 'top') visuals.startScan();
+          this.focus(result.id);
+        }
         setAiPrompt(result.spoken);
         return result;
       }
@@ -466,6 +474,10 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         return result;
       }
 
+      if (parsed.intent === 'camera_angle') {
+        return this.cameraAngle(slots);
+      }
+
       if (parsed.intent === 'help') {
         setAiPrompt(HELP_LINE);
         // The rail is the written version of the same cheat sheet.
@@ -483,6 +495,95 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       setAiPrompt(spoken);
       return { ok: false, action: 'unknown', suggestion, spoken };
     },
+    /**
+     * Which way the focused house faces, and where that came from.
+     *
+     * `street` means a real OSM way decided it; `long-axis` means the row had
+     * no street within range and the long-wall convention was used, which is a
+     * convention and not a measurement. The distinction is surfaced in the
+     * spoken line so a reviewer is never told "this is the front" with more
+     * confidence than the data supports.
+     */
+    frontOf(property) {
+      const record = geometryFor(property?.id);
+      const ring = record?.building?.footprint?.[0] || null;
+      if (!ring) return null;
+      const bearing = record?.street?.bearingDeg;
+      return frontNormalDeg(ring, Number.isFinite(bearing) ? bearing : null);
+    },
+
+    /**
+     * "Show me the back", "from the street", "closer", "orbit".
+     *
+     * Every one of these is relative to the house already in frame, so with
+     * nothing focused there is no question to answer — say so rather than
+     * moving a camera that is looking at a neighbourhood.
+     */
+    cameraAngle(slots = {}) {
+      if (!focused) {
+        const spoken = 'Pick a house first — try "show me the best one".';
+        setAiPrompt(spoken);
+        return { ok: false, action: 'camera_angle', spoken };
+      }
+
+      if (slots.orbit === 'stop') {
+        camera.stopOrbit();
+        const spoken = 'Holding here.';
+        setAiPrompt(spoken);
+        return { ok: true, action: 'camera_orbit', orbit: 'stop', spoken };
+      }
+      if (slots.orbit === 'start') {
+        camera.orbit(focused);
+        const spoken = `Circling ${shortAddress(focused)}.`;
+        setAiPrompt(spoken);
+        return { ok: true, action: 'camera_orbit', orbit: 'start', spoken };
+      }
+
+      let headingDeg = null;
+      let spoken = '';
+      let source = null;
+
+      if (slots.compass) {
+        headingDeg = headingForCompass(slots.compass);
+        spoken = `Looking from the ${slots.compass}.`;
+      } else if (slots.side) {
+        const front = this.frontOf(focused);
+        if (!front) {
+          const missing = 'No footprint for that one, so I cannot tell front from back.';
+          setAiPrompt(missing);
+          return { ok: false, action: 'camera_angle', spoken: missing };
+        }
+        headingDeg = headingForSide(slots.side, front.bearingDeg);
+        source = front.source;
+        const where = slots.viaStreet ? 'From the street' : `The ${slots.side}`;
+        // An honest hedge when the front came from the long-wall convention
+        // rather than from a real street.
+        spoken = source === 'street'
+          ? `${where}.`
+          : `${where} — estimated from the building's long wall, no street mapped.`;
+      } else if (slots.range) {
+        spoken = slots.range === 'closer' ? 'Moving in.' : 'Pulling back.';
+      } else if (slots.height) {
+        spoken = slots.height === 'higher' ? 'Going up.' : 'Coming down.';
+      }
+
+      camera.reframe({
+        headingDeg: Number.isFinite(headingDeg) ? headingDeg : undefined,
+        range: slots.range,
+        height: slots.height,
+      });
+      setAiPrompt(spoken);
+      return {
+        ok: true,
+        action: 'camera_angle',
+        id: focused.id,
+        headingDeg,
+        frontSource: source,
+        ...slots,
+        spoken,
+      };
+    },
+
     world() {
       hideSavedSheet();
       hideFocusCard();

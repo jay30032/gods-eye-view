@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ACCEPTANCE_PHRASES } from '../conversation.js';
-import { buildPlaceVocabulary, matchPlaces, parseCommand, suggestFor } from './parse.js';
+import { INTENTS, buildPlaceVocabulary, matchPlaces, parseCommand, suggestFor } from './parse.js';
 
 /**
  * One row per utterance: what was said, the intent it must produce, and the
@@ -196,3 +196,102 @@ test('the longest place name wins over a shorter one inside it', () => {
   assert.equal(parseCommand('find foreclosures in east point').slots.city, 'East Point');
   assert.equal(parseCommand('show me tax sales in decatur').slots.city, 'Decatur');
 });
+
+// ---------------------------------------------------------------------------
+// Any-angle camera commands
+// ---------------------------------------------------------------------------
+
+const CAMERA_TABLE = Object.freeze([
+  // --- sides ---
+  ['show me the back', 'camera_angle', { side: 'back' }],
+  ['show me the front', 'camera_angle', { side: 'front' }],
+  ['show me the left side', 'camera_angle', { side: 'left' }],
+  ['show me the right side', 'camera_angle', { side: 'right' }],
+  ['see the rear', 'camera_angle', { side: 'back' }],
+  ['left side', 'camera_angle', { side: 'left' }],
+
+  // --- compass ---
+  ['from the north', 'camera_angle', { compass: 'north' }],
+  ['from the south', 'camera_angle', { compass: 'south' }],
+  ['from the east', 'camera_angle', { compass: 'east' }],
+  ['from the west', 'camera_angle', { compass: 'west' }],
+  ['from the south-east', 'camera_angle', { compass: 'southeast' }],
+  ['from northwest', 'camera_angle', { compass: 'northwest' }],
+
+  // --- the street ---
+  ['from the street', 'camera_angle', { side: 'front', viaStreet: true }],
+  ['street view', 'camera_angle', { side: 'front', viaStreet: true }],
+
+  // --- range and height ---
+  ['closer', 'camera_angle', { range: 'closer' }],
+  ['zoom in', 'camera_angle', { range: 'closer' }],
+  ['farther', 'camera_angle', { range: 'farther' }],
+  ['further', 'camera_angle', { range: 'farther' }],
+  ['back up', 'camera_angle', { range: 'farther' }],
+  ['pull back', 'camera_angle', { range: 'farther' }],
+  ['higher', 'camera_angle', { height: 'higher' }],
+  ['go up', 'camera_angle', { height: 'higher' }],
+  ['lower', 'camera_angle', { height: 'lower' }],
+  ['street level', 'camera_angle', { height: 'lower' }],
+
+  // --- orbit ---
+  ['orbit', 'camera_angle', { orbit: 'start' }],
+  ['orbit it', 'camera_angle', { orbit: 'start' }],
+  ['go around', 'camera_angle', { orbit: 'start' }],
+  ['circle the house', 'camera_angle', { orbit: 'start' }],
+  ['stop', 'camera_angle', { orbit: 'stop' }],
+  ['stop orbiting', 'camera_angle', { orbit: 'stop' }],
+  ['stop spinning', 'camera_angle', { orbit: 'stop' }],
+]);
+
+test('every any-angle phrase resolves to a camera move', () => {
+  for (const [utterance, intent, slots] of CAMERA_TABLE) {
+    const parsed = parseCommand(utterance);
+    assert.ok(parsed, `"${utterance}" parsed to nothing`);
+    assert.equal(parsed.intent, intent, `"${utterance}"`);
+    for (const [key, value] of Object.entries(slots)) {
+      assert.equal(parsed.slots[key], value, `"${utterance}" slot ${key}`);
+    }
+  }
+});
+
+test('a camera move never steals a phrase that already meant something else', () => {
+  // These are the collisions that actually exist in the vocabulary, and each
+  // one is a phrase the demo depends on.
+  const untouched = [
+    ['find me money', 'find_money'],
+    ['why', 'why'],
+    ['show me the deal', 'show_deal'],
+    ['assume rehab is twenty thousand higher', 'what_if'],
+    ['save it', 'save'],
+    // "best one" is the shortlist's head, not a camera angle.
+    ['show me the best one', 'focus'],
+    // "back" as a cursor step, not the back of a house.
+    ['go back', 'focus'],
+    // "stop drive" belongs to the drive, which is matched earlier.
+    ['stop drive', 'stop_drive'],
+    ['next', 'focus'],
+    // "zoom out" is the market view and predates the camera vocabulary.
+    ['zoom out', 'world'],
+    // A what-if still wins when there is a field AND a number.
+    ['rent 2800 higher', 'what_if'],
+    ['show me foreclosures in kirkwood', 'find_money'],
+  ];
+  for (const [utterance, intent] of untouched) {
+    assert.equal(parseCommand(utterance).intent, intent, `"${utterance}"`);
+  }
+});
+
+test('the five acceptance phrases still match exactly, camera vocabulary or not', () => {
+  for (const phrase of ACCEPTANCE_PHRASES) {
+    const parsed = parseCommand(phrase);
+    assert.ok(parsed, phrase);
+    assert.equal(parsed.confidence, 1, `${phrase} is no longer an exact match`);
+    assert.notEqual(parsed.intent, 'camera_angle', `${phrase} was stolen by the camera`);
+  }
+});
+
+test('camera_angle is a declared intent', () => {
+  assert.ok(INTENTS.includes('camera_angle'));
+});
+

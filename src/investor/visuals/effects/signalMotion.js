@@ -231,6 +231,58 @@ export function glowWidthFor(type, seconds, { reduced = false, gold = false } = 
 }
 
 /**
+ * Half-width of the solid core of a building outline, in pixels.
+ *
+ * 1.0 draws a 2 px line. That is the whole correction: the outline is a line
+ * *drawn on* the roof, not a ribbon of light laid over the block. The glow
+ * around it breathes with the signal's tempo, but the core does not — a line
+ * whose thickness pulses reads as a rendering fault rather than as emphasis.
+ */
+export const OUTLINE_CORE_HALF_PX = 1.0;
+/** The gold core is a touch heavier so the top pick still wins the frame. */
+export const GOLD_CORE_HALF_PX = 1.25;
+
+/**
+ * A real parcel is drawn UNDER the building, at 40% of its glow.
+ *
+ * The building footprint is the answer to "which house"; the lot line is
+ * context. Drawn at equal weight the two rings compete and the eye cannot tell
+ * which one is the claim — which is exactly the failure the synthetic parcel
+ * box created. A hairline at 40% reads as "and this is the lot", which is all
+ * it is entitled to say.
+ */
+export const PARCEL_LINE_SCALE = 0.40;
+/** Thinner than a building core: the lot line is a hairline, not a line. */
+export const PARCEL_CORE_HALF_PX = 0.6;
+
+/**
+ * The pixel profile of one building outline at a moment on the shared clock.
+ *
+ * @returns {{coreHalfPx:number, glowHalfPx:number}} core is fixed per class;
+ *   the glow breathes inside the type's own pixel band.
+ */
+export function outlineProfileFor(type, seconds, { reduced = false, gold = false } = {}) {
+  return {
+    coreHalfPx: gold ? GOLD_CORE_HALF_PX : OUTLINE_CORE_HALF_PX,
+    glowHalfPx: glowWidthFor(type, seconds, { reduced, gold }),
+  };
+}
+
+/**
+ * The profile of the secondary lot line under that building.
+ *
+ * @returns {{coreHalfPx:number, glowHalfPx:number, alphaScale:number}}
+ */
+export function parcelProfileFor(type, seconds, { reduced = false } = {}) {
+  const building = outlineProfileFor(type, seconds, { reduced, gold: false });
+  return {
+    coreHalfPx: PARCEL_CORE_HALF_PX,
+    glowHalfPx: building.glowHalfPx * PARCEL_LINE_SCALE,
+    alphaScale: PARCEL_LINE_SCALE,
+  };
+}
+
+/**
  * Selection state for one outline.
  *
  * Order matters and is the product decision, not an implementation detail:
@@ -287,6 +339,81 @@ export function columnAlphaFor(rangeM) {
   // Smoothstep: no visible edge where the ramp starts or stops.
   const eased = t * t * (3 - 2 * t);
   return COLUMN_ALPHA_NEAR + (COLUMN_ALPHA_FAR - COLUMN_ALPHA_NEAR) * eased;
+}
+
+// ---------------------------------------------------------------------------
+// Ground pulses: the top pick's ring, and the scan wave
+// ---------------------------------------------------------------------------
+
+/** One ring every four seconds. Comfortably clear of the 2.2 s no-strobe floor. */
+export const RING_PERIOD_S = 4.0;
+/** How far the ring gets before it is gone, in metres from the footprint. */
+export const RING_MAX_RADIUS_M = 30;
+/** Frozen radius under prefers-reduced-motion: a static ring, not a pulse. */
+export const RING_STATIC_RADIUS_FRAC = 0.55;
+export const RING_STATIC_ALPHA = 0.30;
+/**
+ * The ring never starts at full strength.
+ *
+ * A ring that appears at alpha 1 and shrinks away reads as a flash at the
+ * footprint every four seconds. Fading in over the first 8% of the cycle turns
+ * the same geometry into something that emanates from the house.
+ */
+export const RING_FADE_IN_FRAC = 0.08;
+
+/**
+ * The expanding ring around the top pick.
+ *
+ * @returns {{radiusFrac:number, alpha:number}} both in [0,1]; multiply
+ *   `radiusFrac` by {@link RING_MAX_RADIUS_M} for metres.
+ */
+export function ringEnvelopeFor(seconds, { reduced = false } = {}) {
+  if (reduced) {
+    return { radiusFrac: RING_STATIC_RADIUS_FRAC, alpha: RING_STATIC_ALPHA };
+  }
+  const phase = phaseOf(seconds, RING_PERIOD_S);
+  const fadeIn = clamp01(phase / RING_FADE_IN_FRAC);
+  const fadeOut = (1 - phase) ** 1.5;
+  return { radiusFrac: clamp01(phase), alpha: clamp01(fadeIn * fadeOut) };
+}
+
+/** How long one scan wave takes to cross the scene. */
+export const SCAN_DURATION_S = 1.6;
+
+/**
+ * The one-shot scan wave fired by "find me money".
+ *
+ * Unlike the ring this does not loop: it runs once, over `SCAN_DURATION_S`,
+ * and is then inactive until fired again. `active` is false outside that
+ * window — including for a negative elapsed time, which is what a caller gets
+ * if the clock was frozen mid-flight and thawed behind the start stamp.
+ *
+ * @param {number} elapsedS seconds since the wave was fired
+ * @returns {{active:boolean, radiusFrac:number, alpha:number}}
+ */
+export function scanEnvelopeFor(elapsedS, { reduced = false } = {}) {
+  // Reject the absence BEFORE coercing it. `Number(null)` is 0, which is a
+  // perfectly good "the wave just started" — so a missing start stamp would
+  // otherwise fire a scan rather than report that there is not one. The same
+  // trap `nearFieldActive` fell into with camera height.
+  if (elapsedS === null || elapsedS === undefined || elapsedS === '') {
+    return { active: false, radiusFrac: 0, alpha: 0 };
+  }
+  const elapsed = Number(elapsedS);
+  if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > SCAN_DURATION_S) {
+    return { active: false, radiusFrac: 0, alpha: 0 };
+  }
+  // Reduced motion gets no travelling wave at all — the whole point of it is
+  // the travel, so there is nothing honest to freeze it at.
+  if (reduced) return { active: false, radiusFrac: 0, alpha: 0 };
+
+  const t = clamp01(elapsed / SCAN_DURATION_S);
+  // Smoothstep out: quick off the mark, easing as it reaches the edge, so the
+  // wave reads as sweeping rather than as a circle being scaled up.
+  const eased = t * t * (3 - 2 * t);
+  const fadeIn = clamp01(t / 0.12);
+  const fadeOut = (1 - t) ** 1.2;
+  return { active: true, radiusFrac: eased, alpha: clamp01(fadeIn * fadeOut) };
 }
 
 /**

@@ -26,6 +26,17 @@ import {
   nearFieldActive,
   outlineStateFor,
   phaseOf,
+  RING_MAX_RADIUS_M,
+  RING_PERIOD_S,
+  RING_STATIC_ALPHA,
+  RING_STATIC_RADIUS_FRAC,
+  SCAN_DURATION_S,
+  ringEnvelopeFor,
+  scanEnvelopeFor,
+  outlineProfileFor,
+  parcelProfileFor,
+  OUTLINE_CORE_HALF_PX,
+  PARCEL_LINE_SCALE,
 } from './signalMotion.js';
 import { colorForSignal } from '../markers.js';
 import { SIGNAL_LOOK } from '../propertyPulse.js';
@@ -384,4 +395,115 @@ test('the clock survives a missing performance clock', () => {
   clock.read(500);
   clock.freeze(1_500);
   assert.equal(clock.read(Number.NaN), 1);
+});
+
+// ---------------------------------------------------------------------------
+// Ground pulses
+// ---------------------------------------------------------------------------
+
+test('the ring grows from nothing to its full radius over one period', () => {
+  const start = ringEnvelopeFor(0);
+  assert.equal(start.radiusFrac, 0);
+
+  // Monotonic growth across the cycle — a ring that ever shrank would read as
+  // collapsing inward, which is the opposite of what it is saying.
+  let previous = -1;
+  for (let t = 0; t < RING_PERIOD_S; t += 0.01) {
+    const { radiusFrac } = ringEnvelopeFor(t);
+    assert.ok(radiusFrac >= previous - 1e-9, `radius went backwards at ${t}`);
+    assert.ok(radiusFrac >= 0 && radiusFrac <= 1, `radius ${radiusFrac} at ${t}`);
+    previous = radiusFrac;
+  }
+  // And it is a loop: the next period starts over.
+  assert.ok(ringEnvelopeFor(RING_PERIOD_S).radiusFrac < 0.01);
+});
+
+test('the ring fades in off the house and is gone by the time it arrives', () => {
+  // It must not appear at full strength — that reads as a flash, not a pulse.
+  assert.ok(ringEnvelopeFor(0).alpha < 0.01);
+  // It is brightest early, while it is still near the house.
+  const early = ringEnvelopeFor(RING_PERIOD_S * 0.2).alpha;
+  const late = ringEnvelopeFor(RING_PERIOD_S * 0.85).alpha;
+  assert.ok(early > late, `early ${early} should beat late ${late}`);
+  // Nothing is left at the rim.
+  assert.ok(ringEnvelopeFor(RING_PERIOD_S * 0.999).alpha < 0.02);
+});
+
+test('the ring envelope is bounded everywhere, including on a broken clock', () => {
+  for (let t = -10; t < 20; t += 0.005) {
+    const { radiusFrac, alpha } = ringEnvelopeFor(t);
+    assert.ok(radiusFrac >= 0 && radiusFrac <= 1, `radius ${radiusFrac} at ${t}`);
+    assert.ok(alpha >= 0 && alpha <= 1, `alpha ${alpha} at ${t}`);
+  }
+  for (const bad of [NaN, Infinity, -Infinity, null, undefined, 'x']) {
+    const { radiusFrac, alpha } = ringEnvelopeFor(bad);
+    assert.ok(Number.isFinite(radiusFrac) && Number.isFinite(alpha), String(bad));
+  }
+});
+
+test('the ring period clears the no-strobe floor and its radius is a real distance', () => {
+  assert.ok(RING_PERIOD_S >= 2.2, `${RING_PERIOD_S}s strobes`);
+  assert.ok(RING_MAX_RADIUS_M > 0 && RING_MAX_RADIUS_M <= 60);
+});
+
+test('prefers-reduced-motion parks the ring instead of pulsing it', () => {
+  const a = ringEnvelopeFor(0, { reduced: true });
+  const b = ringEnvelopeFor(2.7, { reduced: true });
+  assert.deepEqual(a, b, 'a reduced ring must not move');
+  assert.equal(a.radiusFrac, RING_STATIC_RADIUS_FRAC);
+  assert.equal(a.alpha, RING_STATIC_ALPHA);
+});
+
+test('the scan wave runs once and is inactive outside its own window', () => {
+  assert.equal(scanEnvelopeFor(-0.01).active, false);
+  assert.equal(scanEnvelopeFor(0).active, true);
+  assert.equal(scanEnvelopeFor(SCAN_DURATION_S).active, true);
+  assert.equal(scanEnvelopeFor(SCAN_DURATION_S + 0.01).active, false);
+  // A frozen-then-thawed clock can hand back a negative elapsed time; that is
+  // "not started", never "wrapped round to the end".
+  assert.equal(scanEnvelopeFor(-5).active, false);
+  for (const bad of [NaN, Infinity, null, undefined]) {
+    assert.equal(scanEnvelopeFor(bad).active, false, String(bad));
+  }
+});
+
+test('the scan expands outward and fades as it goes, bounded throughout', () => {
+  let previous = -1;
+  for (let t = 0; t <= SCAN_DURATION_S; t += 0.005) {
+    const { radiusFrac, alpha } = scanEnvelopeFor(t);
+    assert.ok(radiusFrac >= previous - 1e-9, `scan went backwards at ${t}`);
+    assert.ok(radiusFrac >= 0 && radiusFrac <= 1, `radius ${radiusFrac} at ${t}`);
+    assert.ok(alpha >= 0 && alpha <= 1, `alpha ${alpha} at ${t}`);
+    previous = radiusFrac;
+  }
+  assert.ok(scanEnvelopeFor(SCAN_DURATION_S * 0.2).alpha
+    > scanEnvelopeFor(SCAN_DURATION_S * 0.9).alpha);
+});
+
+test('a travelling wave has nothing honest to freeze, so reduced motion drops it', () => {
+  assert.equal(scanEnvelopeFor(0.5, { reduced: true }).active, false);
+});
+
+// ---------------------------------------------------------------------------
+// Outline profile: a drawn line, not a ribbon
+// ---------------------------------------------------------------------------
+
+test('the outline core is a steady 2 px and only the glow breathes', () => {
+  const widths = new Set();
+  const glows = new Set();
+  for (let t = 0; t < 6; t += 0.01) {
+    const profile = outlineProfileFor('FORECLOSURE', t);
+    widths.add(profile.coreHalfPx);
+    glows.add(Math.round(profile.glowHalfPx * 100));
+  }
+  assert.deepEqual([...widths], [OUTLINE_CORE_HALF_PX], 'the core must not pulse');
+  assert.ok(glows.size > 10, 'the glow should breathe with the tempo');
+});
+
+test('a surveyed lot line is drawn well under the building it belongs to', () => {
+  const building = outlineProfileFor('TAX_SALE', 1.3);
+  const lot = parcelProfileFor('TAX_SALE', 1.3);
+  assert.ok(lot.coreHalfPx < building.coreHalfPx, 'the lot line must be thinner');
+  assert.equal(lot.alphaScale, PARCEL_LINE_SCALE);
+  assert.ok(Math.abs(lot.glowHalfPx - building.glowHalfPx * PARCEL_LINE_SCALE) < 1e-9);
 });

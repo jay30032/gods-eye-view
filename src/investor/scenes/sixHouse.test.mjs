@@ -63,7 +63,23 @@ test('every row validates and carries a real OSM footprint', () => {
     assert.equal(geometry.building.source, 'osm', row.id);
     assert.ok(Array.isArray(geometry.building.footprint), `${row.id} has no footprint`);
     assert.ok(geometry.building.footprint[0].length >= 3, row.id);
-    assert.equal(geometry.parcel.source, 'synthetic', row.id);
+    // A lot line is either surveyed by the county or it is the old synthetic
+    // guess — and only the surveyed kind is ever drawn (nearFieldEffects.js
+    // allow-lists the sources). Whichever it is, it carries no owner identity:
+    // these rows are invented and every signal on them is fiction, so a real
+    // person's name must never end up beside one.
+    const parcel = geometry.parcel;
+    assert.ok(
+      ['dekalb-gis', 'fulton-gis', 'synthetic'].includes(parcel.source),
+      `${row.id} unexpected parcel source ${parcel.source}`,
+    );
+    if (parcel.source !== 'synthetic') {
+      assert.ok(parcel.attribution, `${row.id} surveyed parcel with no attribution`);
+      assert.ok(Array.isArray(parcel.ring) && parcel.ring.length >= 3, row.id);
+    }
+    for (const banned of ['owner', 'ownerName', 'ownerAddr', 'siteAddress', 'OWNERNME1', 'Owner']) {
+      assert.equal(Object.hasOwn(parcel, banned), false, `${row.id} stores ${banned}`);
+    }
     // The row sits on its own roof, not near it.
     assert.ok(
       distanceBetween(row, geometry.centroid) < 1,

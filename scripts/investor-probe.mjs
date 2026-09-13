@@ -82,7 +82,23 @@ const SIX = HAS('six');
  */
 const SIX_FRAME_P95_BUDGET_MS = 33;
 const FRAME_CAP_TOLERANCE = 1.12;
-const SIX_RUN_MS = 45_000;
+const SIX_RUN_MS = 70_000;
+/**
+ * The any-angle moves the six-house check drives, in order.
+ *
+ * These are the two that have to hold framing: "show me the back" swings the
+ * camera through roughly 180 degrees, and "from the street" derives its heading
+ * from real OSM street data rather than from a constant. If either can drop the
+ * house out of the middle of the frame, the framing maths is wrong.
+ */
+const SIX_ANGLES = Object.freeze([
+  { phrase: 'show me the back', shot: 'hero-six-back' },
+  { phrase: 'from the street', shot: 'hero-six-street' },
+]);
+/** The house must stay in the middle 30% of the frame through every angle. */
+const ANGLE_CENTRE_FRACTION = 0.30;
+/** A 2 s re-framing plus a moment for tiles to catch up. */
+const ANGLE_SETTLE_MS = 3_200;
 const PLAY_PHRASES = [
   'Find me money',
   'Why?',
@@ -311,6 +327,8 @@ async function main() {
     heroScene: null,
     cruiseEffects: null,
     heroEffects: null,
+    angleChoice: null,
+    angles: [],
   };
 
   /** Markers whose sprite lands inside the viewport. */
@@ -342,6 +360,12 @@ async function main() {
       count: effects?.count ?? 0,
       surveyed: effects?.surveyed?.length ?? 0,
       approximate: effects?.approximate?.length ?? 0,
+      // Real county lot lines, and whether the tile tint is available at all.
+      parcels: effects?.parcels?.length ?? 0,
+      parcelSources: effects?.parcelSources ?? {},
+      classification: effects?.classification ?? null,
+      tinted: effects?.tinted ?? [],
+      tintEdges: effects?.tintEdges?.length ?? 0,
       // Above ground, the way the layer's own ceiling is defined.
       cameraAglM: (() => {
         const h = window.__godsEyeView?.viewer?.camera?.positionCartographic?.height;
@@ -350,6 +374,29 @@ async function main() {
       })(),
     };
   }).catch(() => null);
+
+  /**
+   * Where the focused house's FOOTPRINT CENTROID sits in frame, 0..1.
+   *
+   * Deliberately the footprint and not the marker: the marker floats 14 m over
+   * the roof, so centring it would sit the house itself low in frame — which is
+   * exactly the error the hero framing tilts exist to cancel.
+   */
+  const footprintFrame = (id) => page.evaluate((propertyId) => {
+    const point = window.__terraSignal?.visuals?.footprintScreenPosition?.(propertyId);
+    if (!point) return null;
+    return {
+      fx: point.x / window.innerWidth,
+      fy: point.y / window.innerHeight,
+    };
+  }, id).catch(() => null);
+
+  /** What the camera director thinks it is doing right now. */
+  const cameraPose = () => page.evaluate(() => ({
+    pose: window.__terraSignal?.camera?.pose ?? null,
+    angles: window.__terraSignal?.camera?.angleChoices ?? {},
+    pulses: window.__terraSignal?.visuals?.pulses ?? null,
+  })).catch(() => ({ pose: null, angles: {}, pulses: null }));
 
   const sceneState = () => page.evaluate(() => ({
     mode: window.__terraSignal?.sceneMode ?? null,
@@ -415,6 +462,48 @@ async function main() {
     await new Promise((r) => setTimeout(r, 4_000));
     await shot('hero-six-plus-4s');
     playLog.push(`gold ${checks.scene?.goldId} · focused ${checks.heroScene?.focusedId}`);
+
+    // Which approach heading the occlusion sweep chose, and why.
+    const chosen = await cameraPose();
+    checks.angleChoice = chosen;
+    record(`CHECK camera pose ${JSON.stringify(chosen.pose)}`);
+    record(`CHECK angle choices ${JSON.stringify(chosen.angles)}`);
+    for (const [id, choice] of Object.entries(chosen.angles || {})) {
+      playLog.push(`angle ${id}: ${Math.round(choice.headingDeg)}° `
+        + `score ${Number(choice.score).toFixed(2)} (${choice.reason}`
+        + `${choice.frontSource ? `, front from ${choice.frontSource}` : ''})`);
+    }
+
+    // The any-angle moves. Each one must leave the house where it found it:
+    // in the middle of the frame.
+    const goldId = checks.scene?.goldId ?? null;
+    const before = await footprintFrame(goldId);
+    record(`CHECK footprint frame at HERO ${JSON.stringify(before)}`);
+
+    for (const angle of SIX_ANGLES) {
+      const sent = await page.evaluate((text) => {
+        const input = document.getElementById('ts-demo-input');
+        const form = document.getElementById('ts-demo-form');
+        if (input && form) {
+          input.value = text;
+          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          return 'typed-bar';
+        }
+        window.__terraSignal?.handleIntent?.(text);
+        return 'handleIntent';
+      }, angle.phrase).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
+      record(`SIX "${angle.phrase}" via ${sent}`);
+
+      await new Promise((r) => setTimeout(r, ANGLE_SETTLE_MS));
+      const frame = await footprintFrame(goldId);
+      const pose = await cameraPose();
+      checks.angles.push({ phrase: angle.phrase, frame, pose: pose.pose, shot: angle.shot });
+      record(`CHECK "${angle.phrase}" footprint frame ${JSON.stringify(frame)} `
+        + `pose ${JSON.stringify(pose.pose)}`);
+      playLog.push(`"${angle.phrase}" → heading ${pose.pose ? Math.round(pose.pose.headingDeg) : '?'}°`
+        + `, house at ${frame ? `${(frame.fx * 100).toFixed(0)}%, ${(frame.fy * 100).toFixed(0)}%` : 'OFF SCREEN'}`);
+      await shot(angle.shot);
+    }
   }
 
   if (PLAY) {
@@ -608,6 +697,26 @@ async function main() {
     checks.heroScene?.focusedId
     && checks.heroScene.focusedId === checks.scene?.goldId,
   );
+  /**
+   * Every any-angle move keeps the house in the middle of the frame.
+   *
+   * This is the whole claim of routing the angle commands through the hero
+   * framing rather than through raw headings: the camera travels and the
+   * subject does not. A move that swings 180 degrees and leaves the house in a
+   * corner has not re-framed anything, it has just moved.
+   */
+  const angleHalf = ANGLE_CENTRE_FRACTION / 2;
+  const angleRows = checks.angles || [];
+  const sixAnglesOk = !SIX || (angleRows.length === SIX_ANGLES.length && angleRows.every(
+    (row) => row.frame
+      && Math.abs(row.frame.fx - 0.5) <= angleHalf
+      && Math.abs(row.frame.fy - 0.5) <= angleHalf,
+  ));
+  // The occlusion sweep has to have actually run and chosen something.
+  const sixAngleChoiceOk = !SIX || Boolean(
+    checks.angleChoice?.angles
+    && Object.keys(checks.angleChoice.angles).length > 0,
+  );
 
   const markersOk = !PLAY || (checks.markersInView?.inView ?? 0) >= MIN_MARKERS_IN_VIEW;
   const half = HERO_CENTRE_FRACTION / 2;
@@ -617,7 +726,7 @@ async function main() {
 
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
     && framesOk && markersOk && heroOk
-    && sixFramesOk && sixSceneOk && sixGoldOk;
+    && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk;
 
   const tileSummary = TILE_HOSTS.map((h) => {
     const row = tiles.get(h);
@@ -654,6 +763,27 @@ async function main() {
         + `hero ${sixHeroFrames ? `${sixHeroFrames.p95}ms` : 'no data'} `
         + `(budget ${sixBudgetMs.toFixed(1)}ms`
         + `${Number.isFinite(targetFrameRate) ? ` — viewer capped at ${targetFrameRate} fps` : ''})`,
+      `  ${sixAngleChoiceOk ? 'PASS' : 'FAIL'}  best-angle sweep   `
+        + `${Object.keys(checks.angleChoice?.angles || {}).length} house(s) scored`
+        + (checks.angleChoice?.pose
+          ? ` · now ${Math.round(checks.angleChoice.pose.headingDeg)}°`
+            + ` @ ${Math.round(checks.angleChoice.pose.rangeM)} m`
+          : ''),
+      `  ${sixAnglesOk ? 'PASS' : 'FAIL'}  any-angle framing  `
+        + (angleRows.length
+          ? angleRows.map((row) => `${row.phrase.replace('show me the ', '')} `
+            + (row.frame
+              ? `${(row.frame.fx * 100).toFixed(0)}/${(row.frame.fy * 100).toFixed(0)}%`
+              : 'OFF SCREEN')).join(' · ')
+          : 'no moves driven')
+        + ` (centre ${ANGLE_CENTRE_FRACTION * 100}%)`,
+      `        ground pulses      `
+        + `ring on ${checks.angleChoice?.pulses?.ringId ?? 'NONE'}`
+        + ` · supported=${checks.angleChoice?.pulses?.supported ?? '?'}`,
+      `        county parcels     `
+        + `${checks.cruiseEffects?.parcels ?? 0} surveyed lot lines · `
+        + `tint ${checks.heroEffects?.classification ? 'classified' : 'UNAVAILABLE'}`
+        + ` on [${(checks.heroEffects?.tinted || []).join(', ') || 'none'}]`,
     ] : []),
     ...(PLAY ? [
       `  ${markersOk ? 'PASS' : 'FAIL'}  markers at CRUISE  `

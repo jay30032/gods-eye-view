@@ -162,12 +162,17 @@ test('HERO sits exactly 150m from the house, just below centre frame', () => {
   assert.ok(Math.abs(shot.heightM - expectedAltitude) < 0.5);
 
   // 0.55 down the frame is a twentieth below centre: 3 degrees of tilt at 60 FOV,
-  // then back down by however far the marker floats above the roof.
+  // then part way back up towards the marker floating above the roof.
   assert.ok(Math.abs(subjectTiltDeg() - 3) < 1e-9, `tilt is ${subjectTiltDeg()}`);
   const rise = markerRiseDeg();
   assert.ok(rise > 4 && rise < 7, `marker rise is ${rise} deg`);
-  assert.ok(Math.abs(shot.pitchDeg - (HERO.pitchDeg + 3 + rise)) < 1e-9,
-    `rendered pitch ${shot.pitchDeg}`);
+  assert.ok(
+    Math.abs(shot.pitchDeg - (HERO.pitchDeg + 3 + rise * HERO.markerRiseShare)) < 1e-9,
+    `rendered pitch ${shot.pitchDeg}`,
+  );
+  // Only part of the marker rise is taken: all of it centres the MARKER and
+  // drops the house to 70% down the frame, against the command bar.
+  assert.ok(HERO.markerRiseShare > 0 && HERO.markerRiseShare < 1);
   // Both corrections tilt UP: the subject drops down the frame, and the marker
   // floats above the roof so the lens has to rise to meet it.
   assert.ok(shot.pitchDeg > HERO.pitchDeg, 'the framed pitch is shallower than the depression');

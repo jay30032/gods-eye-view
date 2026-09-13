@@ -26,6 +26,20 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 - [x] Gold pick is the head of the `findMoney` ranking, not a signal on a row
 - [x] Signals read like Georgia: Notice of Sale Under Power, fi. fa. tax sales, servicer delinquency
 - [x] Every foreclosure and tax sale carries a derived first-Tuesday auction date and countdown
+- [x] The near-field outline traces the real OSM building footprint — 2 px core,
+      ~6 px glow — and synthetic parcels are gone from the render entirely
+- [x] Real DeKalb / Fulton county parcels where a public layer has one, drawn as
+      a secondary hairline at 40% of the building glow; geometry only, never
+      owner identity
+- [x] The focused house is lit by a `ClassificationPrimitive` tint on its own
+      tiles (verified headed: the classification takes)
+- [x] Any angle on command: sides, compass points, the street, closer/farther,
+      higher/lower, orbit/stop — each a 2 s cubic re-framing that holds the
+      house on the same part of the screen
+- [x] Best-angle framing: eight headings ray-cast against the tiles before the
+      hero flight, ties to the street, cached per property
+- [x] A ring around the top pick and a scan wave across the scene, both
+      shader-animated off the one shared clock
 - [x] Phase 2 not started
 
 ## Architecture
@@ -40,9 +54,11 @@ src/investor/
   mock/                  DEMO/MOCK inventory + search
   deal/                  deterministic underwriting
   visuals/               governor-held Cesium primitives
-  visuals/effects/       near-field parcel glow, per-signal motion, columns
+  visuals/effects/       building outline, lot line, tint, columns, ground pulses
+  camera/                shot list, director, front-side derivation, best angle
   scenes/                ?scene=six — the six-house near-field scene
-  mock/parcel.js         synthetic parcels from real footprints
+  mock/parcel.js         tangent-plane geometry helpers (its synthetic parcel
+                         is data only — nothing renders it)
   ui/                    brand, bottom nav, focus, saved, escapeHtml
   session.js             bootstrap + demo intents
   ensureBasemap.js       keyless Esri → OSM + requestRender bursts + empty-globe assert
@@ -199,6 +215,14 @@ npm run smoke:investor-keyless   # spawns its own :4174 with the Google key
                                  # blanked in env only — never touches .env
 npm run smoke:demo               # drives the whole acceptance conversation
 npm run smoke:six                # the six-house near-field scene
+```
+
+Geometry is refreshed by hand, never by `npm test`:
+
+```bash
+node scripts/fetch-footprints.mjs   # OSM buildings  → geometry files
+node scripts/fetch-parcels.mjs      # county parcels → geometry files
+node scripts/fetch-streets.mjs      # street bearings → geometry files
 ```
 
 Each launches **real Chrome** (`channel: 'chrome'`, `headless: false` — this
@@ -381,9 +405,14 @@ not want when the question is "which of these four roofs". A 48-pixel billboard
 floating over a block of Oakhurst cannot point at a house.
 
 So below **1,500 m above ground** a second layer comes up: `visuals/effects/`.
-It draws the parcel each house sits on and a column of light over the
-footprint, and it hands back to the sprites on the way up. The markers are
+It draws the building itself — the real OSM footprint — a lot line under it
+where a county surveyed one, a tint over the focused house, and a column of
+light above it, and it hands back to the sprites on the way up. The markers are
 untouched and still drawn at every altitude; this layer only adds.
+
+It used to draw a **synthetic parcel** instead: the footprint's oriented
+bounding box pushed out by guessed setbacks. That is gone from the render — see
+[Geometry](#geometry-real-footprints-real-parcels-where-a-county-has-one).
 
 ### Four rules
 
@@ -403,10 +432,10 @@ untouched and still drawn at every altitude; this layer only adds.
    floats and two booleans per property per frame, with no allocation (the two
    `Cesium.Color` objects per entry are built once and assigned by reference).
 4. **Never colour the wrong house.** A row whose Overpass lookup missed has no
-   footprint, so it gets no building outline and no column — only a nominal
-   parcel glow at 55% alpha, plus the beacon the far field already draws. An
-   approximate mark is honest. A confident gold outline around the neighbour's
-   house is not.
+   footprint, so it draws nothing in this layer at all — it keeps the far-field
+   beacon, which marks a coordinate without claiming to know which roof. Silence
+   is honest. A confident gold outline around the neighbour's house is not, and
+   neither is a box that only looks surveyed.
 
 ### Where each animation runs
 
@@ -502,7 +531,7 @@ same datum `shots.js` measures its altitudes from. The market constant is used
 rather than sampling the surface under the camera because `scene.sampleHeight`
 is a render-thread query and this runs every frame.
 
-## Geometry: real footprints, synthetic parcels
+## Geometry: real footprints, real parcels where a county has one
 
 `scripts/fetch-footprints.mjs` asks OpenStreetMap, via Overpass, for the nearest
 residential building within 120 m of each authored row, and writes
@@ -510,30 +539,92 @@ residential building within 120 m of each authored row, and writes
 property id. Each row's `lat`/`lng` is then snapped to its footprint centroid,
 in place, touching nothing else in the dataset.
 
-It is run by hand and is **not** part of `npm test`: a unit suite that depends
-on a third-party API is a unit suite that fails when someone else's server is
-busy.
+Two more fetchers enrich the same files, run by hand for the same reason — a
+unit suite that depends on a third-party API is a unit suite that fails when
+someone else's server is busy:
 
-**The footprints are real; the parcels are not.** There is no free,
-redistributable parcel polygon for DeKalb or Fulton, so each lot is synthesised
-in `mock/parcel.js` from the footprint's **oriented** bounding box — min-area,
-not north-up, because a house at 40° to north gets an axis-aligned box a third
-larger than itself — pushed out 9 m at the sides and 18 m front and back, capped
-at 0.35 acres. A detached house presents its long wall to the street, so the
-long axis takes the side setbacks and the short axis takes front and back.
+| script | adds | source |
+|---|---|---|
+| `fetch-footprints.mjs` | `building.footprint` | OpenStreetMap (ODbL) |
+| `fetch-parcels.mjs` | `parcel` (real lot lines) | DeKalb / Fulton county GIS |
+| `fetch-streets.mjs` | `street.bearingDeg` | OpenStreetMap (ODbL) |
 
-The cap scales both setbacks down together and can only reach zero, so a parcel
-is never smaller than the box around the house it belongs to. Expanding a
-typical 12 × 10 m house gives 30 × 46 m — 0.34 acres, a normal Decatur lot.
-`parcel.source` is `'synthetic'` and the generated file says out loud that it
-marks roughly where a lot would be and is not a survey.
+### The synthetic parcel is gone from the render
+
+Phase 1 shipped a **synthetic** parcel per row: the footprint's oriented
+bounding box pushed out 9 m at the sides and 18 m front and back. On a headed
+review that box was plainly the wrong object — a crooked gold rectangle lying
+across the street and around a neighbour's house, drawn in the colour the
+product uses to mean *this property*.
+
+The near-field outline now traces the **real OSM building footprint**, and
+`nearFieldEffects.js` allow-lists parcel sources: only `'dekalb-gis'` and
+`'fulton-gis'` are ever drawn. A `'synthetic'` ring is still in the data and is
+never rendered. A row with no footprint draws nothing in this layer at all — it
+keeps the far-field beacon, which marks a coordinate without claiming to know
+which roof.
+
+### Real parcels
+
+Both counties serve parcels over public, keyless ArcGIS REST:
+
+```
+DeKalb  https://dcgis.dekalbcountyga.gov/hosted/rest/services/Parcels/MapServer/0
+Fulton  https://gismaps.fultoncountyga.gov/arcgispub2/rest/services/
+          PropertyMapViewer/PropertyMapViewer/MapServer/11
+```
+
+The query is point-in-polygon at the row's **footprint centroid**, not at the
+authored coordinate: an authored coordinate can sit in the street or in next
+door's garden, which is exactly how you acquire a confident outline around the
+wrong lot. Attribution is carried per block.
+
+**Only geometry is kept.** These layers are cadastral and serve the current
+owner's name and mailing address alongside the polygon. The rows here are
+invented and every signal on them is fiction, so writing a real person's name
+next to a fabricated Notice of Sale Under Power is not something the schema is
+allowed to make possible. Owner, address and assessment fields are dropped at
+the parse boundary; the ring, the public parcel id and the area are what land in
+the tree. `sixHouse.test.mjs` fails if an owner field ever appears.
+
+**A plausibility band does real work.** A cadastral layer will hand back a
+subdivision common area, a right-of-way, a church or a school if the centroid
+falls in one. On the first run `DEMO-SIX-004` resolved to a **5.67-acre parcel
+classed E1 — Oakhurst Elementary School**, whose grounds that row's OSM
+footprint stands on. Drawing it would have reproduced the bug this whole change
+exists to fix at the scale of a city block. Lots outside 120 m² – 2 acres are
+refused, and the row keeps its building outline alone.
+
+Coverage at the last run: **26 of 29** Atlanta rows with a footprint, **5 of 6**
+in the six-house scene.
+
+### Street bearings
+
+`fetch-streets.mjs` stores the compass bearing from each footprint centroid to
+the nearest point on the nearest residential way — `residential`,
+`living_street`, `unclassified`, `tertiary`, `secondary`, `primary`. `service`
+is deliberately excluded: the alley behind a house is the nearest way
+surprisingly often, and calling that the front puts the "front" camera in the
+back garden.
+
+The bearing is measured to the closest point **on** the way rather than to its
+nearest node, because nodes on a straight street can be fifty metres apart and
+using them would swing the derived front by tens of degrees depending on where
+the mapper clicked.
+
+Overpass answers a shared endpoint under load with `504`, and a run that gets
+throttled halfway is normal — so a transport failure **carries the existing
+block forward** rather than replacing a good bearing with a null. Rows that
+never resolved simply have no `street` block and fall back to the long-wall
+convention, which `orientation.js` reports as `source: 'long-axis'` so the
+spoken line can hedge instead of asserting.
 
 **Nothing is derived from Google's 3D tiles.** That tileset is licensed imagery,
 not a data source; vectorising it would be a terms violation and the result
-could not be committed. Overpass or nothing. The generated files carry ODbL
-attribution for the OSM footprints.
+could not be committed. Overpass and the county portals, or nothing.
 
-Three things the script learned the hard way:
+Three things `fetch-footprints.mjs` learned the hard way, all of which the two
+newer fetchers inherited:
 
 - **Overpass answers undici's default User-Agent with a bare `406 Not
   Acceptable`.** Not a rate limit, not a bad query — a refusal to serve an
@@ -543,16 +634,141 @@ Three things the script learned the hard way:
 - **A run where every row misses refuses to write anything.** Thirty nulls is a
   broken client, not a market without houses in it.
 - **A miss may add a row to the degrade list; it may never remove one from the
-  surveyed list.** Overpass is shared and rate-limited, and a run that gets
-  throttled halfway through is normal — without carry-forward one 429 silently
-  replaces a real footprint with a null and a house that was fine yesterday
-  quietly degrades.
+  surveyed list.**
 
 The `building=yes` tier is accepted, but only after the obviously
 non-residential tags are excluded: a `building=yes` carrying `amenity=townhall`
 is the Decatur city hall, and the row nearest the Square would otherwise light
 it up. There is a footprint size floor too — it began at 45 m² and let a 46 m²
 outbuilding win a row whose house is 1,740 sqft.
+
+## Lighting the house: outline, lot line, tint
+
+Three layers of claim, in descending order of confidence:
+
+| | geometry | weight |
+|---|---|---|
+| building outline | real OSM footprint | 2 px core, ~6 px glow |
+| lot line | county parcel, where one exists | hairline at **40%** of the building's glow |
+| building tint | extruded from the footprint, classified onto the tiles | rim 30% / fill 10% |
+
+The outline profile is expressed in **pixels**, not in fractions of the baked
+ribbon. `GroundPolylineGeometry` bakes its width at construction, so the geometry
+is built once at the widest the design needs and the material carves the profile
+out in pixels — which is what lets "2 px core" mean two actual pixels at any
+range. The core does not breathe; only the glow around it does, because a line
+whose *thickness* pulses reads as a rendering fault rather than as emphasis.
+
+### The tint
+
+The top pick and the focused house get a translucent gold volume extruded from
+the footprint, ground to ground + 9 m, as a `ClassificationPrimitive` with
+`classificationType` CESIUM_3D_TILE. It colours the actual photogrammetry of
+that building and stops at its walls. **Verified headed: the classification
+takes** — the tint lands on the focused roof and not on the neighbours or the
+tree canopy — so the draped-fill fallback was not needed.
+
+"Strongest at the edges" is built out of **geometry, not a shader**: the
+classification path takes a per-instance colour, not a material, so there is no
+fragment-varying gradient available. Two volumes do it instead — a fill over an
+inset copy of the footprint at 10%, and a rim band (the footprint with that
+inset punched out as a hole) at 30%. They share an edge and never overlap, so
+neither alpha stacks on the other.
+
+The inset is a scale about the centroid rather than a mitred polygon offset. A
+mitred offset of a concave footprint can self-intersect, and an invalid hole is
+a Cesium `DeveloperError` that stops the render loop; a uniform scale of a
+simple polygon is always simple.
+
+9 m is a little over two storeys. The volume has to *contain* the roof it
+colours — one that stops at the eaves leaves the ridge untinted, which reads as
+a bug — and going much higher starts catching the canopy overhanging the house.
+
+## Any angle on command
+
+"Show me the back", "from the street", "from the north-east", "closer",
+"higher", "orbit". Every one is a **re-framing of HERO**, not a shot of its own,
+which is what holds the house at the same place on screen while the camera
+travels around it: same subject, same framing fractions, only the pose changes.
+Two seconds, cubic in and out, the same easing every other flight uses.
+
+**The front is the wall facing the street.** `orientation.js` takes the stored
+street bearing and returns the outward normal of the footprint edge that faces
+it — the direction you would be standing to look at the front door. Candidate
+edges are those whose normal is within 75° of the street; past that an edge is a
+side wall however close to the road its midpoint falls, which is what stops a
+corner lot's long flank being read as the frontage. Among those, the edge whose
+midpoint reaches furthest towards the street wins, and a longer wall breaks a
+tie.
+
+Left and right are **the viewer's**, standing in the street looking at the
+front, because that is the only thing a person means by "the left side of the
+house".
+
+Without a street the long-wall convention takes over, and the session says so
+out loud — "estimated from the building's long wall, no street mapped" — rather
+than asserting a front it cannot know. The two perpendiculars to the long axis
+are 180° apart and nothing in the geometry says which one is the garden.
+
+Range and pitch are relative and clamped: 60–900 m, 12°–78°. Repeated presses
+stop at the rails instead of running to zero or to orbit.
+
+## Best-angle framing
+
+HERO used to fly to a fixed heading of 35° for every house on the board. On an
+open corner lot that is fine. On the other side of a mature oak — which in
+Oakhurst is most of them — it lands the camera behind a tree and the house the
+product just pointed at is a few pixels of roof through foliage.
+
+So before the hero flight, **eight headings are scored** at HERO's own pitch and
+range. Rays are cast from each candidate camera position to the footprint's
+corners and its centroid against the loaded tiles; the score is the fraction
+unoccluded. The centroid is in the sample set because a footprint's corners can
+all be visible through gaps while the middle of the roof — the part that fills
+the frame — is behind a canopy, and corners alone would score that angle
+perfect.
+
+Best score wins. **Ties go to the street**, because a house is meant to be seen
+from the front. The tie epsilon is 0.2: with five sample points a score moves in
+fifths, so anything smaller is one ray clipping a gutter and must not overrule
+framing. Every angle scoring identically is reported as `all-equal` rather than
+as a choice — that means the sweep measured nothing, usually because no tiles
+were loaded to cast against, and the caller keeps the default heading.
+
+The choice is **cached per property**: the trees do not move between one focus
+and the next, and caching also keeps the camera stable, so returning to a house
+puts it back where it was rather than somewhere new because a few more tiles had
+loaded. `camera.angleChoices` exposes the whole sweep — every heading, its
+score, which won, and why.
+
+## Ring and scan wave
+
+Two draped pulses, both drawn the same way: a **static** disc whose material
+paints a moving annulus inside it. A ring that literally grew would mean
+rebuilding an `EllipseGeometry` every frame, which is the per-frame geometry
+work this layer exists to avoid. `st` is the disc's own bounding square, so
+`length(st - 0.5) * 2` is the normalised distance from the centre and that is
+the only value either shader needs.
+
+- **the ring** loops every 4 s around the top pick's footprint, 0 → 30 m, fading
+  as it goes. It fades *in* over the first 8% of the cycle too: a ring that
+  appears at full strength and shrinks away reads as a flash at the footprint
+  every four seconds rather than as something emanating from the house.
+- **the scan** fires once, on `find_money` and on "show me the best one", and
+  crosses the scene bounds in 1.6 s before the matches light. It is removed on
+  the frame it finishes rather than left classifying tiles for the rest of the
+  session.
+
+Both ride the **same shared clock** the rest of `effects/` runs on, so a flight
+that freezes the near field freezes these with it rather than leaving a ring
+pulsing over a moving camera. `prefers-reduced-motion` parks the ring at a
+static radius and drops the scan entirely — the whole point of a travelling wave
+is the travel, so there is nothing honest to freeze it at.
+
+`scanEnvelopeFor` rejects `null` **before** coercing it, because `Number(null)`
+is `0` and a missing start stamp would otherwise fire a scan rather than report
+that there is not one. That is the same trap `nearFieldActive` fell into with
+camera height, found the same way — by a test.
 
 ## The six-house scene
 
@@ -567,8 +783,8 @@ rows are spread across the metro on purpose — that is what CRUISE is for — a
 signal type.** No six of them are ever in frame together.
 
 The scene opens on CRUISE over the cluster at **900 m**, which is deliberately
-inside the 1,500 m near-field ceiling, so the parcel glow and the columns are
-already up when the shot settles. That shot keeps the name `CRUISE` — it is a
+inside the 1,500 m near-field ceiling, so the building outlines and the columns
+are already up when the shot settles. That shot keeps the name `CRUISE` — it is a
 re-aiming of the same shot, not a new one, so transition durations, the pitch
 clamp and every probe that waits on a settled shot go on working unchanged.
 
@@ -585,16 +801,25 @@ equal to `ACCEPTANCE_PHRASES`.
 ### `npm run smoke:six`
 
 A fourth headed check, narrower than `smoke:demo` on purpose: it does not drive
-the conversation, it measures the two shots the near-field layer has to hold.
-It fails unless all six parcels built off real footprints, the layer is active
-at 900 m, "show me the best one" lands on the gold house, there are no render
+the conversation, it measures the shots the near-field layer has to hold. It
+fails unless all six outlines built off real footprints, the layer is active at
+900 m, "show me the best one" lands on the gold house, there are no render
 errors, and **p95 frame time is ≤ 33 ms** in both the settled cruise and the
-flight to hero. 33 ms rather than `smoke:demo`'s 120 ms because that budget is
+flight to hero.
+
+It then drives two any-angle moves — **"show me the back"** and **"from the
+street"** — and asserts that the focused house's *footprint centroid* stays
+inside the middle 30% of the frame through both. The footprint and not the
+marker: the marker floats 14 m over the roof, so centring it sits the house
+itself low in frame, which is exactly the error the framing tilts exist to
+cancel. That check is what caught `HERO` framing the marker and leaving the
+house at **69%** down the frame, against the command bar — see
+`HERO.markerRiseShare`. 33 ms rather than `smoke:demo`'s 120 ms because that budget is
 the whole question: building once and animating through uniforms is only worth
 doing if the result holds 30 fps.
 
-It writes `cruise-six.png`, `hero-six.png` and `hero-six-plus-4s.png` to
-`/tmp/shots/`.
+It writes `cruise-six.png`, `hero-six.png`, `hero-six-plus-4s.png`,
+`hero-six-back.png` and `hero-six-street.png` to `/tmp/shots/`.
 
 **The budget is relative to the frame cap, not absolute.** 33 ms *is* 30 fps,
 and `frameBudget.js` caps the investor viewer at exactly 30 fps whenever the

@@ -23,9 +23,15 @@
  */
 import { governorRequestRender, holdContinuousRender, releaseContinuousRender } from '../../renderGovernor.js';
 import { prefersReducedMotion } from '../visuals/reducedMotionPolicy.js';
+import { normalizeDeg, stepPitchDeg, stepRangeM } from './orientation.js';
+import { frontNormalDeg, headingForSide } from './orientation.js';
+import { candidateHeadings, pickBestHeading, samplePoints } from './bestAngle.js';
+import { footprintCentroid } from '../mock/parcel.js';
+import { geometryFor } from '../mock/geometry.js';
 import {
   DURATIONS,
   HERO,
+  cameraFromRange,
   clusterCruiseShot,
   cruiseShot,
   durationFor,
@@ -46,6 +52,10 @@ const ORBIT_HOLD = 'investor-camera-orbit';
  * while it moves. Both are hard-capped so a slow network delays the demo rather
  * than stalling it.
  */
+/** Slack on an occlusion ray: the sample point IS the surface it lands on. */
+const RAY_TOLERANCE_M = 2;
+/** Lift sample points off the lawn so a ray does not graze the garden. */
+const SAMPLE_RISE_M = 1;
 const TILE_WAIT_TIMEOUT_MS = 4_000;
 const STAGING_GATE_MS = 2_500;
 const HERO_GATE_MS = 1_500;
@@ -57,6 +67,7 @@ export function createCameraDirector({
   reducedMotion = prefersReducedMotion,
   timers = globalThis,
   now = () => Date.now(),
+  getGeometry = geometryFor,
 }) {
   let flightSeq = 0;
   let activeFlight = 0;
@@ -67,6 +78,26 @@ export function createCameraDirector({
   let destroyed = false;
   let gateSeq = 0;
   let heroGated = false;
+  /**
+   * Where the camera is standing relative to the focused house.
+   *
+   * The any-angle commands are relative — "closer" means closer than wherever
+   * you are now — so something has to remember the current framing. It lives
+   * here rather than in the session because the director is the only thing
+   * allowed to move the camera, and a pose the camera owner does not know about
+   * would go stale the moment anything else flew.
+   */
+  let heroPose = null;
+  /**
+   * Chosen approach heading per property id.
+   *
+   * Cached because the sweep is forty ray casts against the tileset and the
+   * answer does not change: the trees do not move between one focus and the
+   * next. Caching also keeps the choice stable, so going back to a house you
+   * have already seen puts the camera where it was rather than somewhere new
+   * because a few more tiles had loaded.
+   */
+  const headingChoices = new Map();
   const flightListeners = new Set();
 
   /**
@@ -81,6 +112,130 @@ export function createCameraDirector({
   }
 
   const easing = () => Cesium?.EasingFunction?.CUBIC_IN_OUT;
+
+  /**
+   * Hero framing options carrying the viewer's true vertical FOV.
+   *
+   * Cesium's `frustum.fov` is the angle in the WIDER direction; the framing
+   * maths needs the vertical one, which on a 16:10 canvas is closer to 40
+   * degrees than 60. Getting this wrong moves the house up the frame.
+   */
+  function heroOptions(extra = {}) {
+    const fovy = Number(viewer?.scene?.camera?.frustum?.fovy);
+    return Number.isFinite(fovy) && fovy > 0 ? { ...extra, fovRad: fovy } : { ...extra };
+  }
+
+  /**
+   * Is the straight line from `from` to `to` clear of loaded geometry?
+   *
+   * `scene.pickFromRay` returns the FIRST thing the ray meets. The target
+   * points sit on the building itself, so the ray is expected to hit at
+   * (roughly) the target — that counts as clear. Anything appreciably nearer is
+   * a tree, a neighbour's roof, or a power line standing between the camera and
+   * the house, which is exactly what this is looking for.
+   */
+  function rayIsClear(from, to) {
+    try {
+      if (typeof viewer.scene?.pickFromRay !== 'function') return null;
+      const direction = Cesium.Cartesian3.normalize(
+        Cesium.Cartesian3.subtract(to, from, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3(),
+      );
+      const ray = new Cesium.Ray(from, direction);
+      const hit = viewer.scene.pickFromRay(ray, []);
+      if (!hit?.position) return true; // nothing in the way at all
+      const reach = Cesium.Cartesian3.distance(from, to);
+      const blocked = Cesium.Cartesian3.distance(from, hit.position);
+      // Two metres of slack: the ray lands on the wall or roof surface that the
+      // sample point describes, not on a mathematical point in mid-air.
+      return blocked >= reach - RAY_TOLERANCE_M;
+    } catch {
+      // pickFromRay throws on some drivers and whenever nothing is loaded.
+      return null;
+    }
+  }
+
+  /**
+   * Score eight approach headings and keep the one that can see the house.
+   *
+   * Runs once per property, before the hero flight, at the hero pitch and
+   * range — scoring an angle at some other distance would answer a question
+   * nobody asked. Returns null when the scene cannot pick at all, in which case
+   * the caller keeps the default heading rather than trusting a sweep that
+   * measured nothing.
+   */
+  function chooseHeading(property) {
+    if (!property?.id) return null;
+    if (headingChoices.has(property.id)) return headingChoices.get(property.id);
+
+    const record = getGeometry(property.id);
+    const ring = record?.building?.footprint?.[0] || null;
+    if (!ring) return null;
+
+    const centroid = footprintCentroid(ring) || { lat: property.lat, lng: property.lng };
+    const ground = groundHeightM(centroid.lat, centroid.lng);
+    // Sample a metre above the footprint so a ray does not graze the lawn on
+    // its way in and report the house as blocked by its own garden.
+    const targets = samplePoints(ring, centroid).map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(
+      lon, lat, ground + SAMPLE_RISE_M,
+    ));
+    if (!targets.length) return null;
+
+    const scored = [];
+    let measured = 0;
+    for (const headingDeg of candidateHeadings()) {
+      const pose = cameraFromRange(centroid, {
+        headingDeg,
+        pitchDeg: HERO.pitchDeg,
+        rangeM: HERO.rangeM,
+      });
+      // Anchor every candidate camera to the SUBJECT's ground, not its own.
+      // That is what `heroShot` does via `groundAnchor`, so the sweep measures
+      // the pose the flight will actually take — and it saves eight
+      // `sampleHeight` calls, which are render-thread queries.
+      const from = Cesium.Cartesian3.fromDegrees(pose.lng, pose.lat, pose.heightM + ground);
+      let clear = 0;
+      let counted = 0;
+      for (const target of targets) {
+        const answer = rayIsClear(from, target);
+        if (answer === null) continue;
+        counted += 1;
+        if (answer) clear += 1;
+      }
+      if (!counted) continue;
+      measured += 1;
+      scored.push({ headingDeg, score: clear / counted });
+    }
+    // Nothing could be measured — no tiles, or no picking on this driver.
+    if (!measured) return null;
+
+    // The tie-break: a house is meant to be seen from the street.
+    const bearing = record?.street?.bearingDeg;
+    const front = frontNormalDeg(ring, Number.isFinite(bearing) ? bearing : null);
+    const streetHeading = front ? headingForSide('front', front.bearingDeg) : null;
+
+    const choice = pickBestHeading(scored, streetHeading);
+    if (!choice) return null;
+    const answer = {
+      ...choice,
+      id: property.id,
+      streetHeadingDeg: streetHeading,
+      frontSource: front?.source ?? null,
+      scores: scored,
+    };
+    headingChoices.set(property.id, answer);
+    return answer;
+  }
+
+  /** The pose a fresh HERO lands on, before anyone asks for another angle. */
+  function defaultPose(property) {
+    return {
+      property,
+      headingDeg: HERO.headingDeg,
+      rangeM: HERO.rangeM,
+      pitchDeg: Math.abs(HERO.pitchDeg),
+    };
+  }
 
   /**
    * Ground elevation under a point, in metres above the ellipsoid.
@@ -289,7 +444,12 @@ export function createCameraDirector({
   } = {}) {
     stopOrbit();
     if (destroyed || !viewer?.camera || !property || reducedMotion()) return false;
-    let headingDeg = HERO.headingDeg;
+    // Pick up from wherever the camera is standing. Starting every orbit at the
+    // default heading would snap the view the instant someone who has just
+    // asked for the back of the house says "orbit".
+    const base = heroPose?.property === property ? heroPose : defaultPose(property);
+    heroPose = { ...base, property };
+    let headingDeg = base.headingDeg;
     let travelled = 0;
     let last = now();
 
@@ -304,11 +464,16 @@ export function createCameraDirector({
       const step = degPerSec * delta;
       travelled += step;
       headingDeg = (headingDeg + step) % 360;
-      // Same FOV the flight used, or the framing jumps the instant we take over.
-      const fovy = Number(viewer?.scene?.camera?.frustum?.fovy);
-      const shot = heroShot(property, Number.isFinite(fovy) && fovy > 0
-        ? { headingDeg, fovRad: fovy }
-        : { headingDeg });
+      // Same FOV, range and pitch the flight used, or the framing jumps the
+      // instant we take over.
+      const shot = heroShot(property, heroOptions({
+        headingDeg,
+        rangeM: base.rangeM,
+        pitchDeg: base.pitchDeg,
+      }));
+      // Keep the remembered pose in step, so "closer" after an orbit measures
+      // from where the camera actually is.
+      heroPose = { ...base, property, headingDeg };
       viewer.camera.setView({
         destination: destinationOf(shot),
         orientation: orientationOf(shot),
@@ -374,8 +539,18 @@ export function createCameraDirector({
           // Cesium's frustum.fov is the angle in the WIDER direction; the
           // framing maths needs the vertical one, which on a 16:10 canvas is
           // closer to 40 degrees than 60.
-          const fovy = Number(viewer?.scene?.camera?.frustum?.fovy);
-          if (Number.isFinite(fovy) && fovy > 0) options = { ...options, fovRad: fovy };
+          options = heroOptions(options);
+          // Arriving at a house resets the framing: whatever angle the last
+          // house was being looked at from, this one starts square — except
+          // for the approach heading, which is chosen by looking rather than
+          // assumed. A house behind a tree from the default 35 degrees is a
+          // house the demo just pointed at and cannot show you.
+          const chosen = chooseHeading(target);
+          heroPose = defaultPose(target);
+          if (chosen) {
+            heroPose.headingDeg = chosen.headingDeg;
+            options = { ...options, headingDeg: chosen.headingDeg };
+          }
           // Gate the FIRST descent onto a house — that flight ends on rooftop
           // geometry that has never been in view at this LOD. Later hops are
           // already inside loaded tiles and should not pay the wait.
@@ -412,7 +587,84 @@ export function createCameraDirector({
       const height = currentHeightM();
       const apex = await flyToShot(hopApexShot(from, to, height), { duration: DURATIONS.hop / 2 });
       if (apex.cancelled) return apex;
-      return flyToShot(heroShot(to), { duration: DURATIONS.hop / 2 });
+      const chosen = chooseHeading(to);
+      heroPose = defaultPose(to);
+      if (chosen) heroPose.headingDeg = chosen.headingDeg;
+      return flyToShot(
+        heroShot(to, heroOptions({ headingDeg: heroPose.headingDeg })),
+        { duration: DURATIONS.hop / 2 },
+      );
+    },
+
+    /**
+     * Every approach heading chosen so far, keyed by property id — what the
+     * sweep found, which angle won, and why. The headed probe reads this.
+     */
+    get angleChoices() {
+      const out = {};
+      for (const [id, choice] of headingChoices) {
+        out[id] = {
+          headingDeg: choice.headingDeg,
+          score: choice.score,
+          tied: choice.tied,
+          reason: choice.reason,
+          streetHeadingDeg: choice.streetHeadingDeg,
+          frontSource: choice.frontSource,
+          scores: choice.scores,
+        };
+      }
+      return out;
+    },
+
+    /** Score a house's approach headings without flying anywhere. */
+    chooseHeading,
+
+    /** Where the camera currently stands relative to the focused house. */
+    get pose() {
+      return heroPose
+        ? {
+          id: heroPose.property?.id ?? null,
+          headingDeg: heroPose.headingDeg,
+          rangeM: heroPose.rangeM,
+          pitchDeg: heroPose.pitchDeg,
+        }
+        : null;
+    },
+
+    /**
+     * Move to another angle on the house already in frame.
+     *
+     * Every one of these is a re-framing of HERO rather than a shot of its own,
+     * which is what holds the house at the same place on screen while the camera
+     * travels around it: same subject, same framing fractions, only the pose
+     * changes. Two seconds, cubic in and out, the same easing every other
+     * flight uses.
+     *
+     * @param {{headingDeg?:number, range?:'closer'|'farther',
+     *   height?:'higher'|'lower'}} changes
+     */
+    reframe(changes = {}) {
+      if (!heroPose?.property) {
+        return Promise.resolve({ cancelled: true, shot: 'HERO', reason: 'no house in frame' });
+      }
+      // An angle request is the user taking the wheel; a still-running orbit
+      // would drag the camera off the angle they just asked for.
+      stopOrbit();
+
+      const next = { ...heroPose };
+      if (Number.isFinite(changes.headingDeg)) next.headingDeg = normalizeDeg(changes.headingDeg);
+      if (changes.range) next.rangeM = stepRangeM(next.rangeM, changes.range);
+      if (changes.height) next.pitchDeg = stepPitchDeg(next.pitchDeg, changes.height);
+      heroPose = next;
+
+      return flyToShot(
+        heroShot(next.property, heroOptions({
+          headingDeg: next.headingDeg,
+          rangeM: next.rangeM,
+          pitchDeg: next.pitchDeg,
+        })),
+        { duration: DURATIONS.reframe },
+      );
     },
 
     orbit(property, options) {
