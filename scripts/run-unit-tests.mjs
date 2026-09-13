@@ -21,12 +21,21 @@ export function assertNode24AllocationRuntime(version = process.versions.node) {
   return version;
 }
 
-/** Discover repository unit tests in stable path order. */
+/**
+ * Discover repository unit tests in stable path order.
+ *
+ * `scripts/` is walked as well as `src/`. The generator scripts are not app
+ * code, but they carry real product rules — which county land classes count as
+ * residential, for one — and a rule that decides whether the globe outlines a
+ * house or a school is worth a test whichever directory it lives in.
+ * `node_modules` inside either tree is skipped.
+ */
 export function discoverUnitTestFiles(root = process.cwd()) {
-  const sourceRoot = path.join(root, 'src');
+  const roots = ['src', 'scripts'].map((name) => path.join(root, name));
   const files = [];
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === 'node_modules') continue;
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) visit(absolute);
       else if (entry.isFile() && entry.name.endsWith('.test.mjs')) {
@@ -34,7 +43,7 @@ export function discoverUnitTestFiles(root = process.cwd()) {
       }
     }
   };
-  visit(sourceRoot);
+  for (const directory of roots) visit(directory);
   return files.sort();
 }
 

@@ -590,12 +590,56 @@ the tree. `sixHouse.test.mjs` fails if an owner field ever appears.
 **A plausibility band does real work.** A cadastral layer will hand back a
 subdivision common area, a right-of-way, a church or a school if the centroid
 falls in one. On the first run `DEMO-SIX-004` resolved to a **5.67-acre parcel
-classed E1 — Oakhurst Elementary School**, whose grounds that row's OSM
-footprint stands on. Drawing it would have reproduced the bug this whole change
-exists to fix at the scale of a city block. Lots outside 120 m² – 2 acres are
+classed E1 — Oakhurst Elementary School**. Lots outside 120 m² – 2 acres are
 refused, and the row keeps its building outline alone.
 
-Coverage at the last run: **26 of 29** Atlanta rows with a footprint, **5 of 6**
+That catch turned out to be treating a symptom. The reason the centroid landed
+on school land is that **the footprint itself was a school building** — see
+below.
+
+### The residential-parcel check
+
+`DEMO-SIX-004` is authored as a single-family row and matched OSM
+`way/51282519`: `building=yes`, no `amenity`, no `shop`, an utterly ordinary
+240 m² footprint. It is a building on the grounds of Oakhurst Elementary.
+**No tag rule can catch that** — the tags are indistinguishable from a large
+house. The county can: the parcel under it is classed `E1`.
+
+So `fetch-footprints.mjs` now walks its candidates nearest-first and asks the
+county what the land is before accepting one. The preference order is
+three-valued, not two, and the third value is the point:
+
+1. a candidate the county **confirms** is residential;
+2. failing that, the best candidate whose land could not be determined — no
+   parcel, or the county did not answer;
+3. **never** one the county says is a school, a church or a shop.
+
+Collapsing (2) into (1) silently re-admits the school the moment a county
+server blinks; collapsing it into (3) drops every footprint in the market on a
+network failure. A transport failure therefore degrades to the old tag-only
+behaviour and says so in the log.
+
+`R` is residential in both counties' class fields. Sampling ~1,000 parcels
+around each market: DeKalb `CLASSDSCRP` R3 ×941, E1 ×48, C3 ×32, …; Fulton
+`ClassCode` R3 ×1324, C3 ×56, E1 ×30, U3, I3, H3. `scripts/lib/countyParcels.mjs`
+holds the rule and `countyParcels.test.mjs` pins it — `npm test` discovers
+`scripts/` as well as `src/` for exactly this reason: a rule that decides
+whether the globe outlines a house or a school is worth a test wherever it
+lives.
+
+Re-run, `DEMO-SIX-004` walked past **four E1 school buildings** and landed on
+`way/51277800` — 142 m², 46 m away, on parcel `15 213 03 250`, class **R3**,
+0.27 acres, fronting Oakview Road. Its coordinates, parcel and street bearing
+all moved with it.
+
+**`--only` no longer deletes the rows it was not asked about.** The renderer
+writes the whole file from `records`, and `records` only ever held the selected
+rows — so a targeted re-run used to emit a geometry file containing one entry
+and silently drop every other footprint, real county parcel and street bearing
+in it. Rows outside the selection are now spliced back in verbatim, and the
+script refuses to write a partial dataset if any of them is missing.
+
+Coverage at the last run: **26 of 29** Atlanta rows with a footprint, **6 of 6**
 in the six-house scene.
 
 ### Street bearings

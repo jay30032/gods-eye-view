@@ -39,6 +39,7 @@ import {
   footprintCentroid,
   parcelFromFootprint,
 } from '../src/investor/mock/parcel.js';
+import { COUNTIES, landClassAt } from './lib/countyParcels.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -117,6 +118,18 @@ const SKIP_TAG_KEYS = ['amenity', 'shop', 'tourism', 'office', 'leisure', 'healt
 const MIN_FOOTPRINT_M2 = 70;
 /** A footprint this large is not a single-family roof, whatever it claims. */
 const MAX_FOOTPRINT_M2 = 1_200;
+
+/**
+ * How many candidates to ask the county about before giving up.
+ *
+ * Each check is an HTTP round trip to a county GIS server, and the candidates
+ * are already sorted nearest-dwelling-first, so the answer is almost always the
+ * first or second. Ten is enough to walk past a school's whole building
+ * inventory and still be bounded.
+ */
+const MAX_PARCEL_CHECKS = 10;
+/** Courtesy gap between county lookups. Their servers, our problem. */
+const PARCEL_GAP_MS = 250;
 
 const args = process.argv.slice(2);
 const HAS = (name) => args.includes(`--${name}`);
@@ -240,10 +253,10 @@ function tierOf(tags) {
 }
 
 /**
- * The nearest qualifying dwelling to a row's authored coordinate.
- * @returns {{rings:Array, tier:number, distanceM:number, osm:string, tags:object}|null}
+ * Every building that could be a dwelling, nearest and best-tagged first.
+ * @returns {Array<object>}
  */
-function pickBuilding(elements, lat, lng) {
+function rankCandidates(elements, lat, lng) {
   const target = [lng, lat];
   const candidates = [];
   for (const element of elements || []) {
@@ -267,9 +280,72 @@ function pickBuilding(elements, lat, lng) {
       centroid,
     });
   }
-  if (!candidates.length) return null;
   candidates.sort((a, b) => (a.tier - b.tier) || (a.distanceM - b.distanceM));
-  return candidates[0];
+  return candidates;
+}
+
+/**
+ * The nearest qualifying dwelling that is actually standing on a house lot.
+ *
+ * Tags alone cannot answer this. `DEMO-SIX-004` — a single-family row — matched
+ * a `building=yes` with no `amenity`, no `shop`, and an utterly ordinary 240 m²
+ * footprint, which turned out to be a building on the grounds of **Oakhurst
+ * Elementary School**. Nothing in OSM distinguished it from a large house. The
+ * county did: the parcel under it is classed `E1`, exempt.
+ *
+ * So the candidates are walked nearest-first and each one's land is checked
+ * against the county before it is accepted. The preference order matters and is
+ * three-valued, not two:
+ *
+ *   1. a candidate the county **confirms** is residential;
+ *   2. failing that, the best candidate whose land could not be determined —
+ *      no parcel, or the county did not answer;
+ *   3. never one the county says is a school, a church or a shop.
+ *
+ * Collapsing (2) into (1) would silently re-admit the school the moment a
+ * county server blinked; collapsing it into (3) would drop every footprint in
+ * the market on a network failure. Neither is acceptable, so a transport
+ * failure degrades to the old tag-only behaviour and says so in the log.
+ *
+ * @returns {{pick:object|null, rejected:Array, checked:number, degraded:boolean}}
+ */
+async function pickBuilding(elements, lat, lng, county) {
+  const candidates = rankCandidates(elements, lat, lng);
+  if (!candidates.length) return { pick: null, rejected: [], checked: 0, degraded: false };
+
+  // No county on the row, or a county with no published parcel layer: there is
+  // nothing to check against, so the tag-based answer stands.
+  if (!county || !COUNTIES[county]) {
+    return { pick: candidates[0], rejected: [], checked: 0, degraded: true };
+  }
+
+  const rejected = [];
+  let indeterminate = null;
+  let transportFailed = false;
+  const limit = Math.min(candidates.length, MAX_PARCEL_CHECKS);
+
+  for (let i = 0; i < limit; i += 1) {
+    const candidate = candidates[i];
+    const land = await landClassAt(county, candidate.centroid);
+    if (i < limit - 1) await sleep(PARCEL_GAP_MS);
+
+    if (land.residential === true) {
+      return { pick: { ...candidate, land }, rejected, checked: i + 1, degraded: false };
+    }
+    if (land.residential === false) {
+      rejected.push({ osm: candidate.osm, classCode: land.classCode, distanceM: candidate.distanceM });
+      continue;
+    }
+    if (land.transport) transportFailed = true;
+    if (!indeterminate) indeterminate = { ...candidate, land };
+  }
+
+  if (indeterminate) {
+    return { pick: indeterminate, rejected, checked: limit, degraded: true, transportFailed };
+  }
+  // Everything within reach is confirmed non-residential. No footprint is the
+  // honest answer — the row keeps its beacon and claims no roof.
+  return { pick: null, rejected, checked: limit, degraded: false };
 }
 
 const number = (value, digits) => Number(Number(value).toFixed(digits));
@@ -279,8 +355,29 @@ function formatRing(ring, indent) {
   return `[\n${ring.map(([lon, latitude]) => `${pad}  [${number(lon, 7)}, ${number(latitude, 7)}],`).join('\n')}\n${pad}]`;
 }
 
+/**
+ * The exact source text of one entry in the current geometry file.
+ *
+ * Anchored on the generator's own formatting, the way `fetch-parcels.mjs` and
+ * `fetch-streets.mjs` anchor theirs, so a mistake cannot reach past the entry
+ * it is reading.
+ */
+function existingEntryText(source, id) {
+  const opener = `  '${id}': Object.freeze({\n`;
+  const start = source.indexOf(opener);
+  if (start < 0) return null;
+  const endMarker = '\n  }),\n';
+  const end = source.indexOf(endMarker, start);
+  if (end < 0) return null;
+  return source.slice(start, end + endMarker.length);
+}
+
 function renderGeometryFile(records, generatedAt) {
   const entries = records.map((record) => {
+    // A row this run did not look at keeps its existing block byte for byte —
+    // including the real county parcel and street bearing that the other two
+    // fetchers wrote, neither of which this script knows how to regenerate.
+    if (record.preservedText) return record.preservedText.replace(/\n$/, '');
     const { id, building, parcel } = record;
     const buildingBlock = building
       ? `Object.freeze({
@@ -323,7 +420,7 @@ ${building.rings.map((ring) => `        Object.freeze(${formatRing(ring, 8)}),`)
   }),`;
   });
 
-  const withFootprint = records.filter((r) => r.building).length;
+  const withFootprint = records.filter((r) => r.building || r.preservedHasFootprint).length;
   return `/**
  * Building footprints and synthetic parcels for the ${DATASET.title}.
  *
@@ -374,7 +471,7 @@ export function ${DATASET.exportName === 'SIX_HOUSE_GEOMETRY' ? 'sixHouseParcelR
 
 /** Rows whose footprint lookup found nothing — these degrade to a parcel glow. */
 export const ${DATASET.exportName === 'SIX_HOUSE_GEOMETRY' ? 'SIX_HOUSE_ROWS_WITHOUT_FOOTPRINT' : 'ROWS_WITHOUT_FOOTPRINT'} = Object.freeze([
-${records.filter((r) => !r.building).map((r) => `  '${r.id}',`).join('\n')}
+${records.filter((r) => !r.building && !r.preservedHasFootprint).map((r) => `  '${r.id}',`).join('\n')}
 ]);
 `;
 }
@@ -454,7 +551,7 @@ async function carryForward(records) {
 async function main() {
   const rows = DATASET.rows.filter((row) => !ONLY.length || ONLY.includes(row.id));
   console.log(`Overpass: ${DATASET_KEY} — ${rows.length} rows, ${SEARCH_RADIUS_M} m radius,`
-    + ' nearest dwelling wins.\n');
+    + ' nearest dwelling on RESIDENTIAL county land wins.\n');
 
   const records = [];
   const failures = [];
@@ -463,10 +560,17 @@ async function main() {
     const label = `${String(index + 1).padStart(2)}/${rows.length} ${row.id}`;
     let picked = null;
     let reason = null;
+    let outcome = null;
     try {
       const data = await overpass(row.lat, row.lng);
-      picked = pickBuilding(data.elements, row.lat, row.lng);
-      if (!picked) reason = `no residential building within ${SEARCH_RADIUS_M} m`;
+      outcome = await pickBuilding(data.elements, row.lat, row.lng, row.county);
+      picked = outcome.pick;
+      if (!picked) {
+        reason = outcome.rejected.length
+          ? `every building within ${SEARCH_RADIUS_M} m stands on non-residential land`
+            + ` (${outcome.rejected.map((r) => r.classCode || '?').join(', ')})`
+          : `no residential building within ${SEARCH_RADIUS_M} m`;
+      }
     } catch (error) {
       reason = `overpass error: ${String(error?.message || error).slice(0, 120)}`;
     }
@@ -485,9 +589,18 @@ async function main() {
         centroid: picked.centroid,
         shiftM,
       });
+      const land = picked.land?.classCode
+        ? `class ${picked.land.classCode}`
+        : (outcome?.degraded ? 'class UNKNOWN' : '');
       console.log(`${label}  ${picked.osm.padEnd(16)} building=${String(picked.tags.building).padEnd(12)}`
         + ` ${picked.areaM2.toFixed(0).padStart(4)} m²  shift ${shiftM.toFixed(1).padStart(5)} m`
-        + `  lot ${parcel ? parcel.areaAcres.toFixed(3) : '  -  '} ac`);
+        + `  lot ${parcel ? parcel.areaAcres.toFixed(3) : '  -  '} ac  ${land}`);
+      // Say out loud what was walked past. A row that skipped four buildings to
+      // find a house is a row worth looking at by eye.
+      for (const skip of outcome?.rejected || []) {
+        console.log(`${' '.repeat(label.length)}    skipped ${skip.osm} `
+          + `(${skip.classCode || 'no class'}, ${skip.distanceM.toFixed(0)} m) — not residential`);
+      }
     }
     if (index < rows.length - 1) await sleep(POLITE_GAP_MS);
   }
@@ -502,6 +615,47 @@ async function main() {
   if (carried.length) {
     console.log(`\ncarried ${carried.length} existing footprint(s) through a missed lookup:`
       + ` ${carried.join(', ')}`);
+  }
+
+  /**
+   * `--only` must not delete the rows it was not asked about.
+   *
+   * The renderer writes the whole file from `records`, and `records` only ever
+   * held the selected rows — so a targeted re-run used to emit a geometry file
+   * containing one entry and silently drop every other footprint, real county
+   * parcel and street bearing in it. Rows outside the selection are therefore
+   * spliced back in verbatim, in the dataset's own order, from the file on disk.
+   */
+  if (ONLY.length) {
+    let existing = '';
+    try {
+      existing = readFileSync(GEOMETRY_PATH, 'utf8');
+    } catch {
+      console.error('\n--only: no existing geometry file to preserve rows from — refusing to write.');
+      process.exit(1);
+    }
+    const bySelectedId = new Map(records.map((record) => [record.id, record]));
+    const merged = [];
+    for (const row of DATASET.rows) {
+      const selected = bySelectedId.get(row.id);
+      if (selected) {
+        merged.push(selected);
+        continue;
+      }
+      const text = existingEntryText(existing, row.id);
+      if (!text) {
+        console.error(`\n--only: ${row.id} is not in the existing file — refusing to write a partial dataset.`);
+        process.exit(1);
+      }
+      merged.push({
+        id: row.id,
+        preservedText: text,
+        preservedHasFootprint: /footprint: Object\.freeze\(\[/.test(text),
+      });
+    }
+    records.length = 0;
+    records.push(...merged);
+    console.log(`\n--only: preserved ${merged.length - bySelectedId.size} untouched row(s) verbatim.`);
   }
 
   const resolvedCount = records.filter((r) => r.building).length;
