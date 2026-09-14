@@ -265,13 +265,17 @@ export function createCameraDirector({
     return Number(market?.groundElevationM) || 0;
   }
 
-  function destinationOf(shot) {
+  function destinationOf(shot, groundOverride = null) {
     // WORLD is a space view; adding a few hundred metres to 18,000 km is noise,
     // but keeping one code path is worth more than the micro-optimisation.
     // A shot may anchor its altitude to a point other than the camera position
     // — HERO measures from the house's ground, not the ground it stands on.
     const anchor = shot.groundAnchor || { lat: shot.lat, lng: shot.lng };
-    const ground = shot.name === 'WORLD' ? 0 : groundHeightM(anchor.lat, anchor.lng);
+    // A caller that already knows the ground says so. The drive does, because
+    // it must not pay for a height sample on every frame — see `driveGround`.
+    const ground = Number.isFinite(groundOverride)
+      ? groundOverride
+      : (shot.name === 'WORLD' ? 0 : groundHeightM(anchor.lat, anchor.lng));
     return Cesium.Cartesian3.fromDegrees(shot.lng, shot.lat, shot.heightM + ground);
   }
 
@@ -455,6 +459,17 @@ export function createCameraDirector({
     let headingDeg = base.headingDeg;
     let travelled = 0;
     let last = now();
+    /**
+     * The ground under the house, sampled ONCE.
+     *
+     * The orbit re-derives the hero shot every frame and used to resolve the
+     * ground through `destinationOf` each time — `scene.sampleHeight`, which
+     * `nearFieldEffects` documents as a render-thread query it refuses to make
+     * per frame, running for a seventy-two second lap on a parked demo. The
+     * orbit's subject does not move, so its ground is a constant and one sample
+     * answers every frame. Same defect the drive chase camera had.
+     */
+    const orbitGround = groundHeightM(property.lat, property.lng);
 
     orbiting = true;
     holdContinuousRender(ORBIT_HOLD);
@@ -478,7 +493,7 @@ export function createCameraDirector({
       // from where the camera actually is.
       heroPose = { ...base, property, headingDeg };
       viewer.camera.setView({
-        destination: destinationOf(shot),
+        destination: destinationOf(shot, orbitGround),
         orientation: orientationOf(shot),
       });
       // One revolution is a look around the house. Past that it is just a
@@ -527,6 +542,7 @@ export function createCameraDirector({
   function releaseDrive() {
     if (!driving) return false;
     driving = false;
+    driveGround = null;
     releaseContinuousRender(DRIVE_HOLD);
     governorRequestRender('investor-drive-released');
     return true;
@@ -578,6 +594,56 @@ export function createCameraDirector({
     return { ...driveLook, settled };
   }
 
+  /**
+   * The ground under the drive, sampled sparingly instead of every frame.
+   *
+   * `scene.sampleHeight` is a **render-thread query** — `nearFieldEffects`
+   * documents that and deliberately uses a market constant rather than call it
+   * per frame. The chase camera called it on every single frame through
+   * `destinationOf`, and it was the dominant cost of Drive Mode: measured at
+   * the 60 fps cap, p95 33.4 ms and 16-23% of frames dropped with it, p95
+   * 18.6 ms and under 3% dropped without. Not tiles — this.
+   *
+   * Ground elevation along a residential street changes slowly, so it is
+   * re-sampled only after 20 m of travel or 300 ms, whichever comes first, and
+   * the result is eased rather than stepped: tiles stream in underneath and a
+   * late sample can differ from an early one by a metre or two, which as a
+   * step would be a visible bob in the camera.
+   */
+  const DRIVE_GROUND_RESAMPLE_M = 20;
+  const DRIVE_GROUND_RESAMPLE_MS = 300;
+  const DRIVE_GROUND_TAU_S = 0.5;
+  let driveGround = null; // { lat, lng, sampled, eased, at }
+
+  function driveGroundHeight(lat, lng) {
+    const stamp = now();
+    if (driveGround) {
+      const dLat = (lat - driveGround.lat) * 111_320;
+      const dLng = (lng - driveGround.lng) * 111_320 * Math.cos(lat * Math.PI / 180);
+      const moved = Math.hypot(dLat, dLng);
+      const aged = stamp - driveGround.at;
+      if (moved < DRIVE_GROUND_RESAMPLE_M && aged < DRIVE_GROUND_RESAMPLE_MS) {
+        // Between samples the eased value still walks towards the last one, so
+        // a change arrives over a few frames rather than in one.
+        const dt = Math.max(0, aged - (driveGround.easedAt ?? 0)) / 1000;
+        const alpha = dt > 0 ? 1 - Math.exp(-dt / DRIVE_GROUND_TAU_S) : 0;
+        driveGround.eased += (driveGround.sampled - driveGround.eased) * alpha;
+        driveGround.easedAt = aged;
+        return driveGround.eased;
+      }
+    }
+    const sampled = groundHeightM(lat, lng);
+    driveGround = {
+      lat,
+      lng,
+      sampled,
+      eased: driveGround ? driveGround.eased : sampled,
+      easedAt: 0,
+      at: stamp,
+    };
+    return driveGround.eased;
+  }
+
   /** One frame of the chase. `headingDeg` must already be smoothed. */
   function updateDrive(position, headingDeg) {
     if (!driving || destroyed || !viewer?.camera) return false;
@@ -586,8 +652,10 @@ export function createCameraDirector({
       lookOffsetDeg: driveLook.offsetDeg,
       pitchDeg: driveLook.pitchDeg,
     });
+    // The ground under the ROAD, which is what the shot anchors its altitude to.
+    const ground = driveGroundHeight(position.lat, position.lng);
     viewer.camera.setView({
-      destination: destinationOf(shot),
+      destination: destinationOf(shot, ground),
       orientation: orientationOf(shot),
     });
     return true;

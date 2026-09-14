@@ -1063,21 +1063,57 @@ yet. It also never makes the tiles finer than it found them: if something has
 already asked for a coarser budget, motion is not the moment to demand more
 detail than it wanted.
 
-**What it did and did not do.** Mechanically it works — `sse 24` while driving,
-back to 16 the moment the drive pauses. On the machine it was measured on it did
-**not** move driving p95, which stayed pinned at 66.7 ms. That number is two
-vsyncs on a display the OS had throttled to 30 Hz at 18% battery, so the drive
-is consistently a little over a 33.3 ms frame and lands on the next one; the
-budget removes streaming work without removing whatever else crosses that line.
-The tail looked better (worst 633 ms → 233 ms in the paired run) but that is one
-sample each and not evidence.
+**It does not demonstrably help, and the hypothesis behind it was wrong.**
 
-**It has not been measured at the 60 fps cap.** The cap comes from
-`navigator.getBattery().charging` and cannot be forced from a URL; lifting
-`targetFrameRate` by hand does not help because the 30 Hz ceiling survives
-removing it entirely, which is how we know the ceiling is the OS and not
-`frameBudget.js`. Re-run `smoke:drive` on mains to find out whether the budget
-earns its keep at 60 fps, where the headroom question is sharper.
+Measured at the 60 fps cap across three A/B pairs (budget raised vs pinned at
+its resting value), the runs with it enabled were not better and were noisier:
+dropped-frame percentages of 34.4/10.5 with it against 13.4/5.4 without, and
+within-condition variance larger than the difference. Two of three pairs favour
+leaving it off.
+
+The reason is that it was solving the wrong problem. The dropped frames were not
+tile churn at all — see below.
+
+It is kept because it is harmless at rest, costs nothing when no drive is
+running, and may earn its keep on slower hardware or a worse network. It is
+**not** load-bearing and nothing measured requires it.
+
+### What was actually costing the frames
+
+`scene.sampleHeight` is a **render-thread query**. `nearFieldEffects` documents
+that and deliberately uses a market constant rather than call it per frame. The
+chase camera called it on **every frame** through `destinationOf`, and so did
+the hero orbit.
+
+Measured at the 60 fps cap, with the call stubbed out:
+
+| | p95 | dropped frames |
+|---|---|---|
+| `sampleHeight` per frame | 33.4 ms | 16–23% |
+| `sampleHeight` skipped | **18.6 ms** | **0.8–3.1%** |
+
+Both conditions reproduced across repeats. It was not tiles, it was this.
+
+The fix is to sample sparingly rather than never: the drive re-samples after 20 m
+of travel or 300 ms, whichever comes first, and eases the result rather than
+stepping it, because tiles stream in underneath and a late sample can differ from
+an early one by a metre or two — which as a step is a visible bob. The orbit
+samples **once**, because its subject does not move and its ground is therefore a
+constant.
+
+After the fix, on a clean mid-drive window: **p95 31.3 ms and 5.2% dropped**,
+identical across repeats, against 33.4 ms and 16–23% before.
+
+### The probe must not charge its own stalls to the product
+
+`page.screenshot()` blocks the compositor for hundreds of milliseconds — the
+drive's worst frame was 2,266 ms and every one of those was a capture. At the
+30 fps cap the budget was loose enough to hide it; at 60 fps it alone pushed the
+drive's p95 over budget while a clean window of the same drive measured 31.3 ms.
+Captures are now bracketed in page time and excluded from every frame window.
+
+Measured after both fixes: **`smoke:drive` p95 18.6–18.7 ms** against a 33 ms
+budget, stable across three consecutive runs.
 
 ### `npm run smoke:drive`
 

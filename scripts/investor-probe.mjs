@@ -139,13 +139,26 @@ const log = [];
 let started = Date.now();
 const record = (line) => log.push(`[${String(Date.now() - started).padStart(6)}ms] ${line}`);
 
+/**
+ * Page-clock intervals the probe itself stalled the renderer, and must not
+ * charge to the product.
+ *
+ * `page.screenshot()` blocks the compositor for hundreds of milliseconds — the
+ * drive's worst frame was 2,266 ms and every one of those was a capture. A
+ * check that counts its own instrumentation as a dropped frame is measuring
+ * itself, and at the 60 fps cap that alone pushed the drive's p95 over budget
+ * while a clean window of the same drive measured 31.3 ms.
+ */
+const frameExclusions = [];
+
 /** p95 of the frame gaps recorded inside [start, end] page-clock milliseconds. */
 function frameStats(frames, window) {
   if (!window || !frames.length) return null;
   const [start, end] = window;
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  const excluded = (stamp) => frameExclusions.some(([from, to]) => stamp >= from && stamp <= to);
   const gaps = frames
-    .filter(([stamp]) => stamp >= start && stamp <= end)
+    .filter(([stamp]) => stamp >= start && stamp <= end && !excluded(stamp))
     .map(([, gap]) => gap)
     .sort((a, b) => a - b);
   if (gaps.length < 5) return null;
@@ -280,9 +293,17 @@ async function main() {
     try {
       mkdirSync(SHOT_DIR, { recursive: true });
       const file = join(SHOT_DIR, `${label}.png`);
+      // Bracket the capture in page time so its stall is not charged to the
+      // product's frame budget. A little slack either side covers the frame
+      // already in flight when the capture starts.
+      const from = await pageNow();
       await page.screenshot({ path: file });
+      const to = await pageNow();
+      if (Number.isFinite(from) && Number.isFinite(to)) {
+        frameExclusions.push([from - 120, to + 120]);
+      }
       shots.push(file);
-      record(`SHOT ${label} -> ${file}`);
+      record(`SHOT ${label} -> ${file} (renderer stalled ${Math.round(to - from)}ms, excluded)`);
       return file;
     } catch (error) {
       record(`SHOT ${label} FAILED ${error.message}`);
