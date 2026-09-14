@@ -1038,45 +1038,25 @@ Both stopped the render loop; neither could fail a unit test.
    normalised: `normalized result is not a number`, thrown from inside the
    render loop.
 
-### Motion tile budget
+### A motion tile budget was tried and reverted
 
-A stationary camera and a moving one ask Google's tileset different questions.
-Standing still the view is fixed and the streamer converges. Driving, the
-frustum sweeps a new block every few seconds — four times that in the headed
-check — so the set of tiles satisfying the screen space error never settles.
+The first theory for Drive Mode's dropped frames was tile churn: a moving camera
+never lets the streamer converge, so raising `maximumScreenSpaceError` while the
+camera moves should trade detail for frame rate. It was built, tested and
+measured.
 
-Measured on the six-house route with `targetFrameRate` lifted so the number is
-the work and not the cap: **stationary p95 33.9 ms, driving p95 66.7 ms**. 66.7
-is exactly two vsync intervals — a *missed* frame, missed while the camera is
-moving, which is when a dropped frame is most visible.
+**It does not help.** Across three A/B pairs at the 60 fps cap — the budget
+raised versus pinned at its resting value — the runs with it enabled were no
+better and noisier: dropped-frame percentages of 34.4 / 10.5 with it against
+13.4 / 5.4 without, with within-condition variance larger than the difference
+between conditions. Two of three pairs favoured leaving it off.
 
-So while the camera moves `maximumScreenSpaceError` goes to **24**, and 500 ms
-after motion stops it goes back to whatever it was (16). Detail at rest is what
-matters, because resting is when you are looking.
+It was reverted rather than kept "just in case". It mutated a shared tileset
+property from a feature that had no measured reason to, and unproven performance
+machinery is a liability: the next person to see `sse 24` in a log has to work
+out whether it matters.
 
-It restores on **silence** rather than on an event. There is no "the camera
-stopped" event to subscribe to, and pausing, entering Property Mode and ending
-the drive would each need their own hook. `touch()` is called on every fix and
-re-arms a 500 ms timer, so motion keeps the budget raised simply by continuing
-and *any* reason the fixes stop restores it — including reasons not thought of
-yet. It also never makes the tiles finer than it found them: if something has
-already asked for a coarser budget, motion is not the moment to demand more
-detail than it wanted.
-
-**It does not demonstrably help, and the hypothesis behind it was wrong.**
-
-Measured at the 60 fps cap across three A/B pairs (budget raised vs pinned at
-its resting value), the runs with it enabled were not better and were noisier:
-dropped-frame percentages of 34.4/10.5 with it against 13.4/5.4 without, and
-within-condition variance larger than the difference. Two of three pairs favour
-leaving it off.
-
-The reason is that it was solving the wrong problem. The dropped frames were not
-tile churn at all — see below.
-
-It is kept because it is harmless at rest, costs nothing when no drive is
-running, and may earn its keep on slower hardware or a worse network. It is
-**not** load-bearing and nothing measured requires it.
+The theory was wrong because the cost was somewhere else entirely.
 
 ### What was actually costing the frames
 
@@ -1112,8 +1092,39 @@ drive's worst frame was 2,266 ms and every one of those was a capture. At the
 drive's p95 over budget while a clean window of the same drive measured 31.3 ms.
 Captures are now bracketed in page time and excluded from every frame window.
 
-Measured after both fixes: **`smoke:drive` p95 18.6–18.7 ms** against a 33 ms
-budget, stable across three consecutive runs.
+Measured after both fixes: **`smoke:drive` p95 18.6–18.7 ms** against a 37.3 ms
+budget at the 60 fps cap, stable across three consecutive runs.
+
+### The frame budget is counted in dropped vsyncs
+
+```
+budget = max(33, frameInterval × 2) × 1.12
+```
+
+Frame times on a vsync-locked renderer are quantised — at 60 fps a frame costs
+16.7 or 33.3 or 50 ms and nothing in between — so a p95 is not really a duration.
+It is a statement about how many vsyncs the 95th-percentile frame missed, and the
+budget says one thing: **at the 95th percentile a frame may miss one vsync, and
+may not miss two.**
+
+One is acceptable because the windows being measured are the two flights that end
+on geometry never before in view at that LOD. Google's photogrammetry is streamed,
+not resident, and a renderer that never missed a vsync while arriving somewhere
+new would be one that had stopped asking for new detail. Two is not acceptable:
+50 ms at 60 fps reads as a stutter rather than as loading.
+
+The tolerance has to apply to the **floor** as well as to the measured interval,
+and originally did not. `max(33, frameInterval × 1.12)` puts the budget at exactly
+33.0 ms at 60 fps — while a frame that drops one vsync at 60 fps costs 33.3 ms,
+which always exceeds it. The check therefore demanded that fewer than 5% of frames
+drop even a single vsync, which is not what "33 ms with two frames of slack" was
+meant to say: `smoke:six` failed at 33.4 against 33.0 while rendering exactly as
+designed, having passed at 34.2 against 37.3 the day before for no reason other
+than the laptop being unplugged.
+
+The 33 ms floor is kept for displays faster than 60 Hz. On a 120 Hz panel
+`frameInterval × 2` is 16.7 ms, and holding the investor demo to that would be
+asserting something about the hardware rather than about the product.
 
 ### `npm run smoke:drive`
 
