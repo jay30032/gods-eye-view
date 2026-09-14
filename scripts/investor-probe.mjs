@@ -75,6 +75,18 @@ const SIX = HAS('six');
  * produces exactly one gold call-out rather than none or several.
  */
 const DRIVE = HAS('drive');
+/**
+ * Drive Mode v2 adds three things the v1 check could not have caught, all of
+ * which look identical to a working drive from the outside:
+ *
+ *   - the panorama never advancing (one pano, held for the whole loop, because
+ *     the cadence read a loop wrap as a lap backwards);
+ *   - the gold pin never appearing (the markers rebuild only when the set
+ *     changes, and a key that never changes never rebuilds);
+ *   - "keep going" resuming somewhere else (the saved route position is the
+ *     whole difference between a question and a restart).
+ */
+const DRIVE_VIEW_TOLERANCE_M = 25;
 const DRIVE_SPEED_SCALE = 4;
 const DRIVE_RUN_MS = 150_000;
 /** How long to let the whole loop play before giving up on it finishing. */
@@ -414,6 +426,11 @@ async function main() {
     driveCallouts: [],
     driveState: null,
     drivePropertyMode: null,
+    streetView: null,
+    streetViewSamples: [],
+    streetViewGoldPin: false,
+    lotView: null,
+    resumedView: null,
   };
 
   /** Markers whose sprite lands inside the viewport. */
@@ -613,6 +630,7 @@ async function main() {
     const driveState = () => page.evaluate(() => {
       const drive = window.__terraSignal?.drive;
       if (!drive) return null;
+      const streetView = window.__terraSignal?.streetView || null;
       return {
         running: drive.running,
         mode: drive.mode,
@@ -621,6 +639,20 @@ async function main() {
         lengthM: drive.lengthM,
         goldId: drive.goldId,
         level: drive.level,
+        view: drive.view,
+        panoDriving: drive.panoDriving,
+        panoId: streetView?.panoId ?? null,
+        panoStats: streetView?.stats ?? null,
+        panoFailure: streetView?.failure ?? null,
+        panoMarkers: streetView?.markers ?? [],
+        directorView: window.__terraSignal?.viewDirector?.view ?? null,
+        directorEnabled: window.__terraSignal?.viewDirector?.enabled ?? false,
+        fade: window.__terraSignal?.viewDirector?.fade ?? null,
+        svOpacity: (() => {
+          const el = document.getElementById('ts-streetview');
+          if (!el) return null;
+          return { opacity: el.style.opacity, hidden: el.hidden };
+        })(),
         onRoute: (drive.onRoute || []).length,
         callouts: (drive.callouts || []).map((c) => ({
           text: c.text, side: c.side, ids: c.ids, gold: Boolean(c.gold), atM: c.atM,
@@ -628,11 +660,35 @@ async function main() {
       };
     }).catch(() => null);
 
-    // Start by typed command, the way a reviewer would.
+    // Start by typed command, the way a reviewer would. No "in 3D", so this is
+    // the Street View drive — which is what makes it the default under test.
     const startedBy = await send('drive through this neighborhood and show me foreclosures and rentals');
     record(`DRIVE start via ${startedBy}`);
     playLog.push(`"drive through this neighborhood…" → ${startedBy}`);
     await new Promise((r) => setTimeout(r, 1_200));
+
+    /**
+     * Wait for the panorama to actually come up.
+     *
+     * The mount is a network round trip to maps.googleapis.com and the drive
+     * deliberately does not wait for it — it begins on the chase camera and the
+     * panorama fades in over it. So does this: a fixed sleep here would either
+     * be too short on a cold cache or would hide a key that refuses.
+     */
+    const panoDeadline = Date.now() + 20_000;
+    let svUp = null;
+    while (Date.now() < panoDeadline) {
+      svUp = await driveState();
+      if (svUp?.panoDriving || svUp?.panoFailure) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    if (svUp?.panoFailure) {
+      record(`STREETVIEW UNAVAILABLE :: ${svUp.panoFailure}`);
+      playLog.push(`Street View refused: ${svUp.panoFailure}`);
+    } else {
+      record(`STREETVIEW up, first pano ${svUp?.panoId ?? 'NONE'}`);
+      playLog.push(`Street View driving, first pano ${svUp?.panoId ?? 'NONE'}`);
+    }
 
     checks.drivePlan = await page.evaluate(
       () => window.__terraSignal?.drive?.plan?.() ?? null,
@@ -657,14 +713,38 @@ async function main() {
     const driveStart = await pageNow();
     await new Promise((r) => setTimeout(r, 4_000));
     await shot('drive-approach');
+    await shot('drive-streetview');
 
     // Run the lap out, grabbing the gold moment when it lands.
     let goldShotTaken = false;
+    let goldPinSeen = false;
     const deadline = Date.now() + DRIVE_LAP_TIMEOUT_MS;
     let state = null;
     while (Date.now() < deadline) {
       state = await driveState();
       if (!state?.running) break;
+      /**
+       * Sample the panorama as the lap runs.
+       *
+       * Sampled rather than checked once, because the failure this is looking
+       * for is a panorama that is *up* and never *advances* — one pano held for
+       * a whole loop looks identical to a working drive in a single reading and
+       * identical to a still photograph over 1.4 km of route.
+       */
+      if (state.panoId) {
+        checks.streetViewSamples.push({
+          alongM: Math.round(state.alongM),
+          panoId: state.panoId,
+          markers: (state.panoMarkers || []).length,
+          gold: (state.panoMarkers || []).filter((m) => m.gold).length,
+        });
+      }
+      if (!goldPinSeen && (state.panoMarkers || []).some((m) => m.gold)) {
+        goldPinSeen = true;
+        record(`STREETVIEW gold pin at ${Math.round(state.alongM)} m :: `
+          + `${(state.panoMarkers.find((m) => m.gold) || {}).label || '(no label)'}`);
+        playLog.push(`gold pin appeared at ${Math.round(state.alongM)} m in the panorama`);
+      }
       if (!goldShotTaken && state.callouts.some((c) => c.gold)) {
         goldShotTaken = true;
         await shot('drive-gold');
@@ -674,6 +754,8 @@ async function main() {
       if (state.callouts.length >= (state.onRoute || 6)) break;
       await new Promise((r) => setTimeout(r, 400));
     }
+    checks.streetView = state?.panoStats || null;
+    checks.streetViewGoldPin = goldPinSeen;
     windows.drive = [driveStart, await pageNow()];
     checks.driveState = state;
     checks.driveCallouts = state?.callouts || [];
@@ -684,6 +766,95 @@ async function main() {
         + `${String(callout.side).padEnd(5)} ${callout.text}`);
     }
     if (!goldShotTaken) await shot('drive-gold');
+
+    /**
+     * "How big is the lot" — the view director's whole claim.
+     *
+     * The assertion is not that a camera moved. It is that the 3D scene is what
+     * is on screen (the panorama faded out), that it is framing a house rather
+     * than a block, and that the near-field layer is actually drawing the
+     * parcel and the outline — which is the thing the question was asking to
+     * see and the thing that is invisible from the kerb.
+     */
+    const beforeLotM = (await driveState())?.alongM ?? null;
+    await send('how big is the lot');
+    await new Promise((r) => setTimeout(r, 4_000));
+    checks.lotView = await page.evaluate(() => {
+      const session = window.__terraSignal;
+      const el = document.getElementById('ts-streetview');
+      return {
+        directorView: session?.viewDirector?.view ?? null,
+        shot: session?.camera?.shot ?? null,
+        focusedId: session?.focused?.id ?? null,
+        panoDriving: session?.drive?.panoDriving ?? null,
+        alongM: session?.drive?.alongM ?? null,
+        paused: session?.drive?.paused ?? null,
+        svOpacity: el ? Number(el.style.opacity) : null,
+        svHidden: el ? el.hidden : null,
+        effects: session?.visuals?.effects
+          ? {
+            active: session.visuals.effects.active,
+            count: session.visuals.effects.count,
+            parcels: session.visuals.effects.parcels,
+            surveyed: session.visuals.effects.surveyed,
+          }
+          : null,
+        savedAlongM: session?.viewDirector?.saved?.alongM ?? null,
+        alongM: session?.drive?.alongM ?? null,
+        // What the assistant actually said. A headed run once showed the lot,
+        // the parcel glowing, and "Didn't catch that. Try: reset the numbers"
+        // over the top of it — the view answered and the words did not.
+        spoken: (document.getElementById('ts-ai-prompt')?.textContent || '').trim(),
+      };
+    }).catch(() => null);
+    record(`CHECK lot view ${JSON.stringify(checks.lotView)}`);
+    playLog.push(`"how big is the lot" → ${checks.lotView?.directorView} · shot ${checks.lotView?.shot}`
+      + ` · parcel glow on ${checks.lotView?.focusedId}`
+      + ` · ${checks.lotView?.effects?.parcels ?? 0} lot lines built`);
+    await shot('drive-lot-view');
+
+    /**
+     * "Keep going" — back to the panorama, on the same metre of road.
+     *
+     * ## Why this is not "read alongM afterwards and compare"
+     *
+     * It was, and it failed a drive that was working. The drive resumes and
+     * then *keeps driving*: at the probe's 4x playback it covers 28 m a second,
+     * so a 2.5 s settle to let the cross-fade finish is 70 m of perfectly
+     * correct progress, read as 70 m of drift.
+     *
+     * The claim being tested is that the road position **survived the answer**,
+     * and that is three facts measured where they are actually still true:
+     *
+     *   1. the point saved when the question was asked is where it was asked;
+     *   2. the drive did not move a metre while the answer was on screen —
+     *      which is what makes it a detour rather than a restart, and is the
+     *      one moment when the position is stationary and can be compared;
+     *   3. coming back, the panorama is up and the drive is ahead of the saved
+     *      point by no more than the time since it resumed allows.
+     */
+    const resumeSentAt = Date.now();
+    await send('keep going');
+    await new Promise((r) => setTimeout(r, 1_400));
+    const resumedState = await driveState();
+    const resumeElapsedS = (Date.now() - resumeSentAt) / 1000;
+    checks.resumedView = resumedState
+      ? {
+        ...resumedState,
+        askedAtM: beforeLotM,
+        savedAtM: checks.lotView?.savedAlongM ?? null,
+        parkedAtM: checks.lotView?.alongM ?? null,
+        // 7 m/s of Street View playback at the probe's 4x, with half again for
+        // the round trips either side of the settle.
+        allowedForwardM: resumeElapsedS * DRIVE_SPEED_SCALE * 7 * 1.5,
+        callouts: undefined,
+      }
+      : null;
+    record(`CHECK resumed ${JSON.stringify(checks.resumedView)}`);
+    playLog.push(`"keep going" → ${checks.resumedView?.directorView}`
+      + ` at ${Math.round(checks.resumedView?.alongM ?? -1)} m`
+      + ` (saved ${Math.round(checks.lotView?.savedAlongM ?? -1)} m,`
+      + ` asked ${Math.round(beforeLotM ?? -1)} m)`);
 
     // (6) Look closer → Property Mode.
     await send('look closer');
@@ -929,6 +1100,76 @@ async function main() {
   const drivePropertyOk = !DRIVE || checks.drivePropertyMode?.mode === 'property';
   const driveRanOk = !DRIVE || Boolean(checks.drivePlan?.properties > 0);
 
+  // ---- Drive Mode v2 ----
+  /**
+   * The key either allowed a panorama or it did not, and the check says which.
+   *
+   * A refused key is not a crash — the drive falls back to the chase camera and
+   * keeps going, which is the designed behaviour — but it is also not a pass:
+   * the whole feature under test is the panorama, and a green run that silently
+   * measured the 3D drive instead would be worse than a red one.
+   */
+  const svSamples = checks.streetViewSamples || [];
+  const svPanos = new Set(svSamples.map((row) => row.panoId));
+  const streetViewUpOk = !DRIVE || Boolean(checks.streetView && !checks.driveState?.panoFailure);
+  /**
+   * Panoramas ADVANCED along the route, rather than one held for a whole lap.
+   *
+   * Eight distinct panoramas over a 1.36 km loop is a low bar deliberately: the
+   * sampler runs at 400 ms against a drive that at 4x covers 28 m in that time,
+   * so it sees a fraction of the panoramas the drive actually stood on. What it
+   * cannot see is a cadence that never fires.
+   */
+  const MIN_DISTINCT_PANOS = 8;
+  const driveStreetViewOk = !DRIVE || Boolean(
+    checks.streetView
+    && svPanos.size >= MIN_DISTINCT_PANOS
+    && checks.streetView.uniquePanos >= MIN_DISTINCT_PANOS,
+  );
+  const driveGoldPinOk = !DRIVE || Boolean(checks.streetViewGoldPin);
+  /**
+   * The lot question put the 3D scene on screen, framing the house, with the
+   * near-field layer drawing. All four, because any one of them alone can be
+   * true while the answer is still wrong: a HERO shot behind an opaque
+   * panorama, or a visible 3D scene with no parcel in it.
+   */
+  const lot = checks.lotView;
+  const driveLotViewOk = !DRIVE || Boolean(
+    lot
+    && lot.directorView === 'aerial'
+    && lot.shot === 'HERO'
+    && lot.focusedId
+    && lot.panoDriving !== null
+    && Number(lot.svOpacity) === 0
+    && lot.effects?.active
+    && (lot.effects?.count ?? 0) > 0
+    && lot.spoken === "Here's the lot.",
+  );
+  /** And "keep going" came back to the panorama on the metre it left. */
+  const resumed = checks.resumedView;
+  /** (1) The saved point is where the question was asked. */
+  const savedDriftM = resumed && Number.isFinite(resumed.savedAtM) && Number.isFinite(resumed.askedAtM)
+    ? Math.abs(resumed.savedAtM - resumed.askedAtM)
+    : null;
+  /** (2) The drive did not move while the answer was on screen. */
+  const parkDriftM = resumed && Number.isFinite(resumed.parkedAtM) && Number.isFinite(resumed.savedAtM)
+    ? Math.abs(resumed.parkedAtM - resumed.savedAtM)
+    : null;
+  /** (3) Coming back, it is ahead of the saved point and not by too much. */
+  const forwardM = resumed && Number.isFinite(resumed.savedAtM)
+    ? resumed.alongM - resumed.savedAtM
+    : null;
+  const driveResumeOk = !DRIVE || Boolean(
+    resumed
+    && resumed.running
+    && resumed.mode === 'drive'
+    && resumed.panoDriving
+    && Number(resumed.svOpacity?.opacity) === 1
+    && Number.isFinite(savedDriftM) && savedDriftM <= DRIVE_VIEW_TOLERANCE_M
+    && Number.isFinite(parkDriftM) && parkDriftM <= 1
+    && Number.isFinite(forwardM) && forwardM >= -1 && forwardM <= resumed.allowedForwardM,
+  );
+
   const markersOk = !PLAY || (checks.markersInView?.inView ?? 0) >= MIN_MARKERS_IN_VIEW;
   const half = HERO_CENTRE_FRACTION / 2;
   const heroOk = !PLAY || (checks.heroCentred
@@ -938,7 +1179,8 @@ async function main() {
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
     && framesOk && markersOk && heroOk
     && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk
-    && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk;
+    && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk
+    && streetViewUpOk && driveStreetViewOk && driveGoldPinOk && driveLotViewOk && driveResumeOk;
 
   const tileSummary = TILE_HOSTS.map((h) => {
     const row = tiles.get(h);
@@ -1007,6 +1249,31 @@ async function main() {
         + `/${checks.drivePlan?.properties ?? '?'} properties`,
       `  ${driveGoldOk ? 'PASS' : 'FAIL'}  gold call-out      `
         + `${goldCallouts.length} (expected exactly 1 — best match was requested)`,
+      `  ${streetViewUpOk ? 'PASS' : 'FAIL'}  street view        `
+        + (checks.driveState?.panoFailure
+          ? `KEY REFUSED :: ${checks.driveState.panoFailure}`
+          : `driving · ${checks.streetView?.hits ?? 0}/${checks.streetView?.requests ?? 0} `
+            + `panos found/requested · ${checks.streetView?.uniquePanos ?? 0} distinct`),
+      `  ${driveStreetViewOk ? 'PASS' : 'FAIL'}  panos advance      `
+        + `${svPanos.size} distinct panoramas sampled along the route `
+        + `(min ${MIN_DISTINCT_PANOS})`,
+      `  ${driveGoldPinOk ? 'PASS' : 'FAIL'}  gold pin in pano   `
+        + `${checks.streetViewGoldPin ? 'appeared' : 'NEVER APPEARED'}`,
+      `  ${driveLotViewOk ? 'PASS' : 'FAIL'}  "how big is the lot" `
+        + `view ${lot?.directorView ?? 'NONE'} · shot ${lot?.shot ?? 'NONE'} · `
+        + `pano opacity ${lot?.svOpacity ?? '?'} · `
+        + `parcel glow on ${lot?.focusedId ?? 'NOTHING'} `
+        + `(${lot?.effects?.parcels ?? 0} lot lines, ${lot?.effects?.count ?? 0} outlines) · `
+        + `said "${lot?.spoken ?? ''}"`,
+      `  ${driveResumeOk ? 'PASS' : 'FAIL'}  "keep going"       `
+        + `${resumed?.directorView ?? 'NONE'} · `
+        + `saved ${Math.round(resumed?.savedAtM ?? -1)} m vs asked `
+        + `${Math.round(resumed?.askedAtM ?? -1)} m `
+        + `(${savedDriftM == null ? '?' : savedDriftM.toFixed(1)} m, max ${DRIVE_VIEW_TOLERANCE_M}) · `
+        + `held still through the answer `
+        + `(${parkDriftM == null ? '?' : parkDriftM.toFixed(2)} m) · `
+        + `back on the road, ${forwardM == null ? '?' : forwardM.toFixed(0)} m on `
+        + `(allowed ${resumed?.allowedForwardM?.toFixed?.(0) ?? '?'})`,
       `  ${drivePropertyOk ? 'PASS' : 'FAIL'}  look closer        `
         + `mode ${checks.drivePropertyMode?.mode ?? 'NONE'}`,
       `  ${driveFramesOk ? 'PASS' : 'FAIL'}  frame time p95     `

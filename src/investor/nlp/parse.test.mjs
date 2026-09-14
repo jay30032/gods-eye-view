@@ -295,3 +295,20 @@ test('camera_angle is a declared intent', () => {
   assert.ok(INTENTS.includes('camera_angle'));
 });
 
+
+// ---------------------------------------------------------------------------
+// Drive Mode v2 entry
+// ---------------------------------------------------------------------------
+
+test('"drive" enters the Street View drive and "drive in 3D" keeps the chase camera', () => {
+  // The slot is set on every entry rather than only when 3D is asked for: a
+  // `start_drive` with no view slot is an older caller, and silently defaulting
+  // that to Street View is how the demo rail ends up in a view it never chose.
+  assert.equal(parseCommand('drive').slots.view, 'streetview');
+  assert.equal(parseCommand('start the drive').slots.view, 'streetview');
+  assert.equal(parseCommand('drive through this neighborhood').slots.view, 'streetview');
+  assert.equal(parseCommand('drive in 3D').slots.view, 'chase');
+  assert.equal(parseCommand('drive in 3D').intent, 'start_drive');
+  assert.equal(parseCommand('drive through the neighborhood in 3d').slots.view, 'chase');
+  assert.equal(parseCommand('drive with the chase camera').slots.view, 'chase');
+});

@@ -20,7 +20,7 @@ const M_PER_DEG_LAT = 111_320;
 const DEG = Math.PI / 180;
 
 export const SHOTS = Object.freeze([
-  'WORLD', 'STAGING', 'CRUISE', 'REVEAL', 'HERO', 'HOP', 'DRIVE',
+  'WORLD', 'STAGING', 'CRUISE', 'REVEAL', 'HERO', 'HOP', 'DRIVE', 'TOPDOWN',
 ]);
 
 /** Seconds per transition. Nothing in the product picks its own duration. */
@@ -150,6 +150,26 @@ export const HERO = Object.freeze({
   orbitDegPerSec: 5,
   /** One revolution, then stop: a parked demo must not hold the GPU forever. */
   orbitMaxDeg: 360,
+});
+
+/**
+ * Straight down over one house — the answer to "show me the roof".
+ *
+ * 120 m is not a compromise between HERO and a map: it is the height at which a
+ * suburban lot fills the frame. Oakhurst lots run 15-25 m across the street
+ * frontage and 40-60 m deep, and at 120 m with a 40 degree vertical FOV the
+ * frame is about 87 m tall, so the house and both side setbacks are in it with
+ * the neighbours' roofs at the edges for context. Higher and the subject
+ * becomes one roof among nine; lower and the lot runs off the bottom of frame.
+ *
+ * Pitch is a true -90. Everything else in the product lives inside the
+ * watchable band the pitch clamp enforces, so `TOPDOWN` has to be named in
+ * `UNCLAMPED_SHOTS` or the clamp yanks it back to -70 the moment the flight
+ * settles and the "overhead" answer arrives as an oblique.
+ */
+export const TOP_DOWN = Object.freeze({
+  altitudeM: 120,
+  pitchDeg: -90,
 });
 
 /** Between two houses: up and over, so it reads as a hop rather than a slide. */
@@ -514,6 +534,31 @@ export function driveShot(property, routeHeadingDeg = HERO.headingDeg) {
 }
 
 /**
+ * Nadir over a house at 120 m.
+ *
+ * `headingDeg` is carried from wherever the camera was rather than reset to
+ * north. At -90 the heading is the rotation of the image in frame and nothing
+ * else, and spinning the picture on the way down adds a motion the viewer has
+ * to account for to answer a question about a roof.
+ */
+export function topDownShot(property, { headingDeg = HERO.headingDeg, altitudeM = TOP_DOWN.altitudeM } = {}) {
+  return {
+    name: 'TOPDOWN',
+    lat: property.lat,
+    lng: property.lng,
+    heightM: Math.max(1, Number(altitudeM) || TOP_DOWN.altitudeM),
+    headingDeg: normalizeHeading(headingDeg),
+    pitchDeg: TOP_DOWN.pitchDeg,
+  };
+}
+
+function normalizeHeading(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return HERO.headingDeg;
+  return ((n % 360) + 360) % 360;
+}
+
+/**
  * What the WORLD button does next.
  *
  * From anywhere in the market it brings you back to the market view — the
@@ -546,5 +591,6 @@ export function durationFor(fromName, toName) {
   if (toName === 'HERO') return DURATIONS.toHero;
   if (toName === 'HOP') return DURATIONS.hop;
   if (toName === 'DRIVE') return DURATIONS.toDrive;
+  if (toName === 'TOPDOWN') return DURATIONS.toHero;
   return DURATIONS.toHero;
 }

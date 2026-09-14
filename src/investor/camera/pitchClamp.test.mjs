@@ -58,3 +58,13 @@ test('the clamp never fights a flight or a deliberately nadir shot', () => {
   }
   assert.equal(clampApplies({}), true, 'unknown settled state still clamps');
 });
+
+test('the top-down answer view is not clamped back to an oblique', () => {
+  // TOPDOWN is a settled shot the user is left sitting in, not a transient like
+  // HOP, so the clamp fires on the first `camera.changed` after it arrives.
+  // Without the exemption, "show me the roof" gets a two-second flight to nadir
+  // followed by an instant snap to -70.
+  assert.equal(clampApplies({ shot: 'TOPDOWN', flying: false }), false);
+  assert.equal(clampApplies({ shot: 'HERO', flying: false }), true);
+  assert.equal(pitchNeedsClamp(-90), true, 'nadir is outside the band the clamp enforces');
+});

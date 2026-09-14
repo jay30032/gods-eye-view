@@ -357,11 +357,24 @@ export function parseDriveCommand(normalized) {
     .test(normalized);
   const startHere = /\bstart here\b/.test(normalized)
     && /\b(surrounding|nearby|around here|these) (streets?|blocks?|area)\b/.test(normalized);
-  const bareDrive = /^(drive|start driving|let's drive|lets drive|drive mode|start the drive)$/
+  // The view suffix is part of the entry phrase rather than a separate
+  // pattern: "drive" is anchored, and without this "drive in 3D" falls past
+  // Drive Mode entirely and lands in `focus` as a search for the word "3d".
+  const bareDrive = /^(?:drive|start driving|let's drive|lets drive|drive mode|start the drive)(?:\s+(?:in\s+(?:3d|three\s*d)(?:\s+mode)?|with\s+the\s+chase\s+cam(?:era)?))?$/
     .test(normalized);
   if (driveThrough || startHere || bareDrive) {
     const slots = {};
     if (startHere) slots.fromFocused = true;
+    /**
+     * Which view drives.
+     *
+     * Drive Mode v2 makes Street View the default, so the slot is set on every
+     * entry rather than only when 3D is asked for — a `start_drive` with no
+     * view slot would be an older caller, and defaulting *that* to Street View
+     * silently is how the demo rail ends up in a view it never asked for.
+     */
+    slots.view = /\bin 3d\b|\bin three d\b|\b3d drive\b|\bchase cam(?:era)?\b|\b3d mode\b/
+      .test(normalized) ? 'chase' : 'streetview';
     const signalType = matchSignalType(normalized);
     if (signalType) slots.signalType = signalType;
     const strategy = matchStrategy(normalized);

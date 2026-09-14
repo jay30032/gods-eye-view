@@ -25,10 +25,21 @@
  *
  * ## Playback speed is not a vehicle's speed
  *
- * 9 m/s is how fast the drive plays, not how fast anyone is driving. "Slower"
- * and "faster" scale playback; approaching a house the assistant is explaining
- * slows it to 40% so the house is still on screen when the sentence ends. None
- * of that is a claim about a car.
+ * 9 m/s (7 in Street View, whose pano transitions have their own pace) is how
+ * fast the drive plays, not how fast anyone is driving. "Slower" and "faster"
+ * scale playback; approaching a house the assistant is explaining slows it to
+ * 40% so the house is still on screen when the sentence ends. None of that is a
+ * claim about a car.
+ *
+ * ## v2: the driving view is Street View
+ *
+ * The chase camera is still here and still correct — it is the fallback when
+ * there is no panorama, the view a live GPS drive gets, and what "drive in 3D"
+ * asks for. What changed is which one is the default: a `StreetViewPanorama`
+ * follows the same position source, and the 3D scene behind it becomes the
+ * **answer engine** the view director cuts to when a question needs a lot line
+ * or a roof. Both views are driven from this one function, off the same fix, so
+ * a house is announced at the same point of the route either way.
  */
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
 import { compositeScore, primarySignal } from './mock/schema.js';
@@ -55,7 +66,8 @@ import {
   resolveDiscussed,
   shouldAnnounce,
 } from './drive/narration.js';
-import { createGpsSource, createPlaybackSource } from './drive/positionSource.js';
+import { DEFAULT_SPEED_MPS, createGpsSource, createPlaybackSource } from './drive/positionSource.js';
+import { COVERAGE, STREET_VIEW_SPEED_MPS } from './drive/streetViewDrive.js';
 
 const HOLD_ID = 'investor-drive';
 const URGENT_SIGNALS = new Set(['FORECLOSURE', 'TAX_SALE']);
@@ -66,6 +78,16 @@ const DRIVE_MIN_CONFIDENCE = 0.78;
 const ON_ROUTE_MAX_OFFSET_M = 90;
 
 export const MODES = Object.freeze({ DRIVE: 'drive', PROPERTY: 'property' });
+
+/**
+ * Which view is driving.
+ *
+ * `streetview` is the default and `chase` is the 3D camera from v1. A live GPS
+ * drive is always `chase`: the phone is already at the kerb, so a panorama of
+ * where you are standing is a photograph of the view out of the window, and the
+ * overlays — outlines, columns, the route — are the thing it cannot show you.
+ */
+export const DRIVE_VIEWS = Object.freeze({ STREET_VIEW: 'streetview', CHASE: 'chase' });
 
 /** Worth a detour: a high composite, or a clock already running on the house. */
 export function isStrongDriveSignal(property) {
@@ -168,6 +190,8 @@ export function createDriveDemo({
   routeCoordinates = SIX_ROUTE,
   now = () => Date.now(),
   geolocation = globalThis.navigator?.geolocation,
+  streetView = null,
+  viewDirector = null,
 } = {}) {
   const route = buildRoute(routeCoordinates);
 
@@ -187,6 +211,10 @@ export function createDriveDemo({
   let lookActive = false;
   /** Where the drive was when it left the road for a closer look. */
   let resumePoint = null;
+  /** `streetview` or `chase`. Which view the fixes are being drawn into. */
+  let driveView = DRIVE_VIEWS.CHASE;
+  /** True while the panorama is the view; false once it falls back to chase. */
+  let panoDriving = false;
   const announced = new Set();
   const discussion = createDiscussionTracker();
   const callouts = [];
@@ -202,6 +230,9 @@ export function createDriveDemo({
       alongM: lastAlongM,
       lengthM: route.lengthM,
       selectedId,
+      view: driveView,
+      panoDriving,
+      panoId: streetView?.panoId ?? null,
       ...extra,
     });
   }
@@ -257,13 +288,13 @@ export function createDriveDemo({
 
     // Slow for the house being explained — playback, not brakes.
     const discussedId = discussion.current?.primaryId || null;
-    if (discussedId) {
-      const row = onRoute.find((r) => r.id === discussedId);
-      const ahead = row ? signedAheadM(route, projected.alongM, row.alongM) : Infinity;
-      source?.setExternalScale?.(speedScaleFor(ahead, { discussing: true }));
-    } else {
-      source?.setExternalScale?.(1);
-    }
+    const discussedRow = discussedId ? onRoute.find((r) => r.id === discussedId) : null;
+    const discussedAheadM = discussedRow
+      ? signedAheadM(route, projected.alongM, discussedRow.alongM)
+      : Infinity;
+    source?.setExternalScale?.(
+      discussedRow ? speedScaleFor(discussedAheadM, { discussing: true }) : 1,
+    );
 
     // (2) Steer.
     if (mode === MODES.DRIVE) {
@@ -271,7 +302,26 @@ export function createDriveDemo({
         const look = camera?.relaxDriveLook?.(dtSeconds);
         if (look?.settled) lookActive = false;
       }
+      /**
+       * The chase camera runs even while the panorama is what is on screen.
+       *
+       * It is tempting to skip it — nobody is looking at a camera behind an
+       * opaque element — and it is wrong: every 3D answer view is a 300 ms
+       * cross-fade away, and a camera parked where the drive was a minute ago
+       * means the first frame of "here's the lot" is the wrong block. The cost
+       * is already paid and already measured: `driveGroundHeight` samples
+       * every 20 m rather than every frame, which is what made Drive Mode fit
+       * its budget in the first place.
+       */
       camera?.updateDrive?.(fix.position, smoothedHeading);
+      if (panoDriving) {
+        streetView?.update?.(fix, {
+          alongM: projected.alongM,
+          house: discussedRow?.property || null,
+          houseAheadM: discussedAheadM,
+          dtSeconds,
+        });
+      }
     }
     emitState();
   }
@@ -330,7 +380,12 @@ export function createDriveDemo({
     return drivePlan(route, propertiesOnRoute(route, properties));
   }
 
-  function start({ live = false, gold = false, level = narrationLevel } = {}) {
+  function start({
+    live = false,
+    gold = false,
+    level = narrationLevel,
+    view = DRIVE_VIEWS.STREET_VIEW,
+  } = {}) {
     const properties = typeof getProperties === 'function' ? getProperties() : [];
     onRoute = propertiesOnRoute(route, properties);
     if (!onRoute.length) {
@@ -349,18 +404,42 @@ export function createDriveDemo({
     lookActive = false;
     resumePoint = null;
     mode = MODES.DRIVE;
+    // A live drive is never a panorama: the driver is already looking at the
+    // street, and what the phone can add is the overlay, not the photograph.
+    driveView = live || view === DRIVE_VIEWS.CHASE
+      ? DRIVE_VIEWS.CHASE
+      : DRIVE_VIEWS.STREET_VIEW;
+    panoDriving = false;
 
     source?.destroy?.();
     source = live
       ? createGpsSource({ route, geolocation, now })
-      : createPlaybackSource({ route, now });
+      : createPlaybackSource({
+        route,
+        now,
+        // Not a preference: at 9 m/s a 10 m pano step arrives before Google's
+        // own transition has finished, and the drive reads as a stutter of
+        // half-played dissolves rather than as travel.
+        speedMps: driveView === DRIVE_VIEWS.STREET_VIEW
+          ? STREET_VIEW_SPEED_MPS
+          : DEFAULT_SPEED_MPS,
+      });
     source.subscribe((fix) => onFix(fix, fixDelta(fix)));
 
     running = true;
+    /**
+     * The render hold stays up even under an opaque panorama.
+     *
+     * Playback advances on `scene.preRender`, so releasing the hold while
+     * Street View is the view would stop the frames that stop the clock that
+     * stops the drive. The hold is what keeps the position source ticking, not
+     * just what keeps the 3D scene painting.
+     */
     holdContinuousRender(HOLD_ID);
     camera?.engageDrive?.();
     visuals?.setDriveRoute?.(routeCoordinates);
     visuals?.setDriveMode?.(true);
+    if (driveView === DRIVE_VIEWS.STREET_VIEW) mountStreetView();
 
     const started = source.start((error) => {
       speak(`Could not start a live drive: ${error?.message || 'no position'}.`);
@@ -382,6 +461,64 @@ export function createDriveDemo({
     };
   }
 
+  /**
+   * Bring up the panorama, and be honest when it does not come.
+   *
+   * The mount is async and the drive is not: fixes start arriving the moment
+   * the source starts, and they must not wait for a network round trip to
+   * maps.googleapis.com. So the drive begins on the chase camera and the
+   * panorama fades in over it when it is ready, which is also exactly what
+   * happens when coverage returns mid-route — one path, not two.
+   */
+  async function mountStreetView() {
+    if (!streetView) return { ok: false, reason: 'no street view drive wired' };
+    streetView.reset?.();
+    const mounted = await streetView.mount?.();
+    if (!running) return { ok: false, reason: 'drive already stopped' };
+    if (!mounted?.ok) {
+      // A refused key, a blocked script, an origin the key does not allow:
+      // all of them are the same product outcome, and the drive keeps going.
+      driveView = DRIVE_VIEWS.CHASE;
+      panoDriving = false;
+      viewDirector?.setEnabled?.(false);
+      const why = String(mounted?.reason || '').trim();
+      speak(`Street View is unavailable — driving in 3D.${why ? ` ${why.charAt(0).toUpperCase()}${why.slice(1)}.` : ''}`, {
+        streetViewUnavailable: true,
+        reason: mounted?.reason || null,
+      });
+      emitState({ streetViewUnavailable: true });
+      return mounted || { ok: false };
+    }
+    panoDriving = true;
+    viewDirector?.setEnabled?.(true);
+    viewDirector?.restoreStreetView?.();
+    emitState();
+    return mounted;
+  }
+
+  /**
+   * Coverage came or went.
+   *
+   * Called by the Street View drive's own fallback rule — 40 m of route with no
+   * panorama within 25 m. The drive does not stop and the route position does
+   * not move; only which view is on screen changes, and the chase camera has
+   * been following along underneath the whole time so the cut has somewhere to
+   * land.
+   */
+  function onCoverage(coverageMode, detail = {}) {
+    if (coverageMode === COVERAGE.CHASE) {
+      if (!panoDriving) return;
+      panoDriving = false;
+      viewDirector?.fallbackToChase?.();
+      emitState({ coverage: 'chase', ...detail });
+      return;
+    }
+    if (panoDriving || driveView !== DRIVE_VIEWS.STREET_VIEW) return;
+    panoDriving = true;
+    viewDirector?.restoreStreetView?.();
+    emitState({ coverage: 'streetview', ...detail });
+  }
+
   let previousFixAt = null;
   function fixDelta(fix) {
     const stamp = Number(fix?.timestamp);
@@ -394,7 +531,11 @@ export function createDriveDemo({
   function stop() {
     running = false;
     mode = MODES.DRIVE;
+    panoDriving = false;
     source?.stop?.();
+    streetView?.clearMarkers?.();
+    viewDirector?.setEnabled?.(false);
+    viewDirector?.destroy?.();
     releaseContinuousRender(HOLD_ID);
     camera?.releaseDrive?.();
     visuals?.setDriveMode?.(false);
@@ -466,24 +607,60 @@ export function createDriveDemo({
     };
   }
 
-  /** (6) Back to the road, where and how we left it. */
-  function keepGoing() {
-    if (mode !== MODES.PROPERTY) {
-      return resume();
-    }
+  /**
+   * Leave the road for an answer, without focusing anything.
+   *
+   * `lookCloser` is the same manoeuvre with a house attached; this is what the
+   * view director calls when the answer is a block or a lot rather than a
+   * property mode. Both save the same two facts, because both have to come
+   * back to the same metre of road facing the same way — the thing that makes
+   * a question feel like a question rather than a restart.
+   */
+  function parkForAnswer() {
+    if (mode === MODES.PROPERTY) return resumePoint;
+    resumePoint = { alongM: lastAlongM, headingDeg: smoothedHeading };
+    mode = MODES.PROPERTY;
+    source?.pause?.();
+    camera?.releaseDrive?.();
+    visuals?.setDriveMode?.(false);
+    emitState();
+    return resumePoint;
+  }
+
+  /**
+   * Back onto the road after an answer view.
+   *
+   * Takes the saved point the view director held rather than reading
+   * `resumePoint`, so the two stay in step even when the user asked three
+   * questions in a row and only the first of them left the road.
+   */
+  function resumeFromAnswer(saved = null) {
+    const point = saved || resumePoint;
     mode = MODES.DRIVE;
     selectedId = null;
     visuals?.setFocused?.(null);
     visuals?.setDriveMode?.(true);
     camera?.engageDrive?.();
-    if (resumePoint) {
-      source?.seek?.(resumePoint.alongM);
-      smoothedHeading = resumePoint.headingDeg;
+    if (point) {
+      if (Number.isFinite(point.alongM)) source?.seek?.(point.alongM);
+      if (Number.isFinite(point.headingDeg)) smoothedHeading = point.headingDeg;
+      // The panorama has to re-resolve where it now is rather than wait for
+      // the next 10 m step, or the first thing the user sees on coming back is
+      // the pano they left from.
+      streetView?.reseat?.();
       resumePoint = null;
     }
     source?.resume?.();
     emitState();
     return { ok: true, action: 'keep_going', spoken: 'Back on the route.' };
+  }
+
+  /** (6) Back to the road, where and how we left it. */
+  function keepGoing() {
+    if (mode !== MODES.PROPERTY) {
+      return resume();
+    }
+    return resumeFromAnswer(resumePoint);
   }
 
   /** (5) "Show me the best match along this route." */
@@ -577,6 +754,17 @@ export function createDriveDemo({
     get discussed() { return discussion.current; },
     get source() { return source; },
     get onRoute() { return onRoute.slice(); },
+    /** The smoothed travel bearing — the view director restores it verbatim. */
+    get headingDeg() { return smoothedHeading; },
+    /** `streetview` or `chase`: which view the drive was asked for. */
+    get view() { return driveView; },
+    /** Whether a panorama is actually on screen right now. */
+    get panoDriving() { return panoDriving; },
+    get streetView() { return streetView; },
+    /** The loop, for an answer view that wants to frame the whole route. */
+    routePoints() {
+      return onRoute.map((row) => row.property);
+    },
     get current() {
       const id = discussion.current?.primaryId;
       return id ? onRoute.find((r) => r.id === id)?.property || null : null;
@@ -592,6 +780,9 @@ export function createDriveDemo({
     look,
     lookCloser,
     keepGoing,
+    parkForAnswer,
+    resumeFromAnswer,
+    onCoverage,
     requestBestMatch,
     setNarrationLevel,
     resolve,

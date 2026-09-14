@@ -42,6 +42,9 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
       hero flight, ties to the street, cached per property
 - [x] A ring around the top pick and a scan wave across the scene, both
       shader-animated off the one shared clock
+- [x] Drive Mode v2: Street View is the driving view, the 3D scene is the
+      answer engine; view director maps questions to views over a 300 ms
+      cross-fade; route position survives every answer
 - [x] Drive Mode v1: a committed road-following loop, a chase camera on a
       spline, activation by distance ahead, narration that speaks only when
       useful, and a pluggable position source with a live GPS implementation
@@ -61,7 +64,8 @@ src/investor/
   visuals/               governor-held Cesium primitives
   visuals/effects/       building outline, lot line, tint, columns, ground pulses
   camera/                shot list, director, front-side derivation, best angle
-  drive/                 route spline, activation, narration, position sources
+  drive/                 route spline, activation, narration, position sources,
+                         Street View drive, view director
   scenes/                ?scene=six — the six-house near-field scene
   mock/parcel.js         tangent-plane geometry helpers (its synthetic parcel
                          is data only — nothing renders it)
@@ -221,7 +225,7 @@ npm run smoke:investor-keyless   # spawns its own :4174 with the Google key
                                  # blanked in env only — never touches .env
 npm run smoke:demo               # drives the whole acceptance conversation
 npm run smoke:six                # the six-house near-field scene
-npm run smoke:drive              # Drive Mode v1, the whole loop at 4x
+npm run smoke:drive              # Drive Mode v2, the whole loop at 4x
 ```
 
 Geometry is refreshed by hand, never by `npm test`:
@@ -1157,6 +1161,289 @@ naive `watchPosition` does not:
 
 The GPS path is unit-tested against the real route with noisy fixes; it has not
 been exercised headed, because that needs a device and a location permission.
+
+## Drive Mode v2 — Street View drives, the 3D scene answers
+
+Drive Mode v1's chase camera reads as a drive. It is a drive nobody has ever
+taken: 55 m over the road, above the canopy, looking down. What an investor
+actually reads on a street — the roofline, the porch, the fence, whether the
+grass has been cut — is not legible from there.
+
+So the driving view is a `StreetViewPanorama` following the same position
+source, and the 3D scene stops being the view. It becomes the **answer engine**:
+what the product cuts to when a question needs a lot line, a roof or a block.
+
+The chase camera is not gone and is not a legacy path. It is the fallback when
+there is no panorama, the view a live GPS drive gets, and what "drive in 3D"
+asks for.
+
+### The panorama follows the position source, like everything else
+
+`streetViewDrive.js` is a consumer of fixes, exactly as the chase camera is. It
+decides nothing about narration, activation or which house is being discussed —
+`driveDemo.js` still owns all of that, and still reads the source rather than
+the spline, so a GPS drive and a playback drive resolve the same panoramas in
+the same order.
+
+**The imagery is Google's and is never touched.** Nothing reads a pixel: no
+canvas, no `toDataURL`, no tile fetch, no store of a panorama beyond the id
+currently displayed, no derived product of any frame. The only thing sent to
+Google is a coordinate and a heading. The panorama renders its own attribution
+and Terms link, and `ATTRIBUTION_GUARD_CSS` exists to make it impossible for a
+drive stylesheet to hide them — the drive hides the standing HUD with one broad
+class on `<body>`, and catching Google's logo with it is the easiest possible
+mistake.
+
+### Cadence is distance, not time
+
+A request per fix is sixty a second; a request per second steps in metres that
+depend on playback speed. Panoramas on a residential street sit roughly 10 m
+apart, so a new one is resolved every **10 m of route progress**, within
+**25 m**, `source: 'outdoor'`, `preference: 'nearest'` — which asks for each
+pano about once, at any speed, and asks for none at all while paused. The move
+is `setPano`, which plays Google's own animated transition; `setPosition` would
+jump.
+
+The comparison is a **signed** distance along the loop and not a subtraction,
+for two reasons that both bite: 5 m past the start is 10.2 m after 1,355 m and
+not 1,350 m before it, and a GPS fix can land slightly behind the last one,
+which a forward-only wrap scores as almost a full lap and treats as instantly
+due. Either direction counts as progress — "keep going" after a detour seeks
+backwards, and the panorama where the drive now is should be resolved at once
+rather than 10 m later.
+
+One request in flight at a time. The cadence is distance-based and the network
+is not, so at 4x playback a second request comes due before the first answers,
+and letting both run hops the panorama to whichever resolves last.
+
+### Coverage, and falling back
+
+**No panorama within 25 m for 40 m of route** and the drive falls back to the
+3D chase camera until coverage returns. What accumulates is route distance
+across consecutive misses, not a count of failed requests: counting requests
+would make the rule depend on the cadence, and a drive that fell back after four
+misses at 10 m and after four misses at 2 m would be two different products. One
+hit clears the debt.
+
+The drive does not stop and the route position does not move — only which view
+is on screen changes. The chase camera has been following along underneath the
+whole time, which is what gives the cut somewhere to land.
+
+**Measured on the Oakhurst loop: 137 of 137 sample points, every 10 m, have a
+panorama within 25 m. Longest gap: zero.** The fallback has never fired on this
+route; it exists for the next one.
+
+### POV
+
+Travel bearing by default, easing towards a house being discussed as it comes
+within **60 m**, and back to the road over the **25 m** past it.
+
+The blend is applied to the *signed shortest turn* off the travel bearing, not
+to two absolute headings — averaging 359 and 1 the naive way points the camera
+south. The release is a ramp rather than a switch because the **target** has to
+be continuous: the filter would smooth a step, but it would smooth it into a
+second-and-a-half swing back through the windscreen, and the house is gone by
+then.
+
+The look is clamped to **85 degrees** off travel. A panorama looking backwards
+while the drive moves forwards is disorienting in a way a 3D camera is not —
+the next transition then arrives from behind the viewer. 85 is a hard look out
+of the side window, which is the most a driver actually does.
+
+The filter's time constant is **0.55 s**, shorter than the chase camera's 0.9.
+A panorama POV has no inertia to sell: it is a head turning, not a vehicle, and
+a slow filter reads as the view lagging the road rather than as a smooth pan.
+
+### Playback is 7 m/s, and that number is not comfort
+
+At the chase camera's 9 m/s a 10 m pano step arrives before Google's own
+transition has finished, so the drive reads as a stutter of half-played
+dissolves rather than as travel. It is still a playback rate and still not a
+claim about a vehicle.
+
+### Markers inside the panorama
+
+Signal properties within **120 m**: a gold pin with the address for the top
+pick, signal-coloured pins for the rest. 120 m rather than the whole route
+because a panorama will happily place a marker a kilometre away and render it as
+a speck on the horizon over a house that is not the house. The label is the top
+pick's alone — a street of labelled pins is a map legend, and the one thing
+worth reading at speed is which of them is the answer. Nearest is appended last
+so the closest pin is not behind the ones further off.
+
+### The view director
+
+`viewDirector.js` is two things: a **mapping** from a question to a view, and
+the **transition** between the panorama and the Cesium canvas.
+
+| question | view |
+|---|---|
+| why · flagged · how recent | a card over the current view |
+| lot · parcel · how big · boundaries | 3D aerial at HERO, parcel and outline glow |
+| roof · overhead · from above | 3D top-down at 120 m |
+| back · front · side · from the north | the existing any-angle shots |
+| neighborhood · what's around it · comps | CRUISE over the route |
+| numbers · deal · run it | a card with the analysis |
+| keep going · resume | Street View, at the saved position |
+
+Every switch is announced in one short spoken clause — "Here's the lot.", "From
+above.", "Back on the road." Short is the requirement rather than a preference:
+the line lands while the 300 ms cross-fade is still running, and anything longer
+is still being spoken once the answer is already on screen, which reads as the
+assistant narrating a view the user is looking at rather than handing it over.
+
+**Why the mapping is not just the parser.** `nlp/parse.js` has no vocabulary for
+the words that pick a view: "lot", "parcel", "boundaries", "roof", "what's
+around it", "comps" all fall through it to `focus` or `unknown`. Adding them
+there would mean "how big is the lot" stopped being a question about a property
+and started being a camera command, which is the wrong shape. So the view
+vocabulary lives in the director, runs first, and falls back to an intent map.
+
+**The order of the table is load-bearing.** `back` appears in two of the
+product's own rules — "show me the back" is a wall and "back on the road" is a
+resume — so resume runs first and nothing else can claim the word. The land rule
+runs before the overhead rule, so "how big is the lot from above" stays a
+question about the lot. Sides run last and only when the sentence reads as a
+request to look at something, the same guard `parseCameraCommand` uses, so "the
+front of the deal" is not a camera move.
+
+**Null is a real answer and the common one.** "Pause here", "slower", "save that
+one" and "narration off" change no view, and a director that insisted on one for
+every utterance would cut away from the road to acknowledge a volume change.
+
+### The cross-fade, and the position that survives it
+
+300 ms, smoothstep, between the Street View element and the Cesium canvas.
+Linear alpha between two photographic images reads as a wipe with a hard start
+and stop; at 300 ms the eased ends are what make it read as a dissolve at all.
+
+The two opacities are complementary because the panorama is stacked **over** the
+canvas: "the Cesium canvas's opacity" is how much of the frame is the 3D scene,
+which is exactly one minus the panorama's alpha. Nothing writes an opacity to
+the Cesium container — that would put a compositing layer between the render
+governor and the screen for no change on screen.
+
+Every 3D view leaves the road, so the drive is **paused and its position and
+heading saved**; "keep going" seeks back to that metre and resumes facing the
+same way. Three questions in a row save the position once, at the first one. A
+card is not one of these: it is drawn over the driving view and the drive keeps
+rolling underneath, which is the whole reason why / flagged / how recent are
+cards.
+
+Coming back, the panorama is re-seated rather than left to wait for the next
+10 m step — otherwise the first thing on screen is the pano the drive left from.
+
+### The render hold stays up under an opaque panorama
+
+Playback advances on `scene.preRender`. Releasing the continuous-render hold
+while Street View is the view would stop the frames that stop the clock that
+stops the drive. The hold is what keeps the position source ticking, not just
+what keeps the 3D scene painting.
+
+The chase camera also keeps running behind the panorama. It is tempting to skip
+it and it is wrong: every 3D answer is a 300 ms cross-fade away, and a camera
+parked where the drive was a minute ago means the first frame of "here's the
+lot" is the wrong block. The cost was already paid — `driveGroundHeight` samples
+every 20 m rather than every frame, which is what made Drive Mode fit its budget
+in the first place.
+
+### Two bugs the headed check found, and one it could not have
+
+**The panorama that rendered nothing.** The Maps JavaScript API writes
+`position: relative` **inline** onto whatever container it is given, and an
+inline style beats a stylesheet. The host's `position: fixed` became `relative`,
+`top: 0; bottom: 0` stopped stretching anything, and the box collapsed to its
+content — which is zero, because everything Google puts inside is absolutely
+positioned. The result was a full-width, **zero-height** element that was
+present, opaque, and correct in every property a probe could read: 125 panoramas
+resolved, five images loaded, `getVisible()` true, a real position — and the
+screen showed the 3D scene straight through it. Nothing failed. The screenshot
+is what caught it.
+
+The fix is an inner element for Google to rewrite, explicit `100vw/100vh` on the
+host as well as insets, and `position: fixed !important`. Plus a `resize`
+trigger whenever the panorama comes back from `display: none`, because a
+panorama measured inside a hidden ancestor has been measured as zero.
+
+**The answer that arrived with the wrong words.** "How big is the lot" has no
+vocabulary in `parse.js` and never will, so it arrives as `unknown`. The view
+director answered it correctly — aerial, HERO, parcel glowing — and then the
+session's fallback overwrote the spoken line. A headed run showed the lot, the
+outline lit, and the assistant saying *"Didn't catch that. Try: reset the
+numbers"* over the top of it. When the view **is** the answer, the session now
+stops there. `smoke:drive` asserts the spoken line, not just the camera.
+
+**And the one no probe can catch:** the frame budget is fine because the chase
+camera's `sampleHeight` fix from v1 still holds. A panorama costs the GPU
+nothing the 3D scene was not already spending.
+
+### Entry
+
+- **"drive"** — Street View, the default.
+- **"drive in 3D"** (also "with the chase camera") — the v1 chase camera.
+- **`?drive=live`** — GPS, and **never** Street View. The phone is already at
+  the kerb: a panorama of where the driver is standing is a photograph of the
+  view out of their own window, and the overlays are the one thing it cannot
+  show them.
+
+The view slot is set on **every** entry rather than only when 3D is asked for. A
+`start_drive` with no view slot is an older caller, and silently defaulting that
+to Street View is how the demo rail ends up in a view it never chose.
+
+### The HUD
+
+Street View fills the frame. Progress becomes a **thin 3 px bar** at the top
+edge rather than a kilometre readout — over a photograph the number is a HUD
+element competing with the street, and the only question it answers at a glance
+is "how far through are we". The property card **slides in over the bottom
+third**: the bottom of a panorama is road surface, the one part of the frame
+nothing is ever lost behind. Mic, pause and exit are unchanged and are never
+covered by anything — the card sits clear of the bar at 9.6 rem, and the bar
+outranks it.
+
+Two attributions, both required, neither on top of the other: the 3D scene's
+Cesium/Google credit sits bottom-left at 36 px, exactly where the panorama
+renders Google's own logo, so in Street View it moves up to 74 px. The tileset
+is still loaded and the imagery is still Google's; both stay visible.
+
+### When the key refuses
+
+A blocked script, an origin the key does not allow, `InvalidKeyMapError` — all
+the same product outcome. `gm_authFailure` and a 12 s timeout catch it (Google
+does not reject the bootstrap request for a bad key; the script loads and fails
+at the point of use, which is why a broken key presents as a grey box rather
+than an error). The drive **keeps going on the chase camera**, the bar reads 3D,
+and the assistant says why. Verified headed by aborting the Maps bootstrap: the
+drive kept running and the route kept advancing.
+
+### `npm run smoke:drive`
+
+Everything v1 asserted, plus:
+
+- the panorama came up at all, and the key did not refuse — a green run that
+  silently measured the 3D drive instead would be worse than a red one;
+- **panoramas advanced** along the route, sampled through the lap rather than
+  read once. One pano held for a whole loop looks identical to a working drive
+  in a single reading;
+- the **gold pin appeared** in the panorama;
+- **"how big is the lot"** put the 3D scene on screen (pano at opacity 0),
+  framing a house at HERO, with the near-field layer drawing the parcel — and
+  said "Here's the lot.";
+- **"keep going"** came back to the panorama on the metre it left.
+
+That last one is measured in three facts rather than one, because the obvious
+check fails a drive that is working: the drive resumes and then *keeps driving*,
+so at 4x a 2.5 s settle to let the cross-fade finish is 70 m of perfectly
+correct progress read as 70 m of drift. What is asserted instead is that the
+saved point is where the question was asked, that the drive did not move **a
+single metre** while the answer was on screen, and that coming back it is ahead
+of the saved point by no more than the time since it resumed allows.
+
+It writes `drive-streetview.png` and `drive-lot-view.png` alongside v1's three.
+
+Measured: **124/124 panoramas found, 122 distinct, 106 sampled along the lap,
+p95 18.7-33.4 ms against a 37.3 ms budget** across six consecutive runs.
+
 
 ## The six-house scene
 

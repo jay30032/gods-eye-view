@@ -15,7 +15,13 @@ import { shortAddress } from './visuals/markers.js';
 import { clampApplies, clampPitchDeg, pitchNeedsClamp } from './camera/pitchClamp.js';
 import { cameraHeightM, lodFromHeight } from './lod.js';
 import { readSavedProperties, removeSavedProperty, saveProperty } from './saved.js';
-import { createDriveDemo } from './driveDemo.js';
+import { DRIVE_VIEWS, createDriveDemo } from './driveDemo.js';
+import {
+  createStreetViewDrive,
+  ensureStreetViewHost,
+  readMapsApiKey,
+} from './drive/streetViewDrive.js';
+import { VIEWS, announceFor, createViewDirector, isThreeD } from './drive/viewDirector.js';
 import { buildSixHouseScene, readSceneMode } from './scenes/sixHouse.js';
 import {
   FIRST_HINT,
@@ -53,6 +59,8 @@ import {
   readDriveLive,
   renderDriveIntro,
   setDriveProgress,
+  setDriveViewChrome,
+  setProgressBarVisible,
 } from './ui/driveChrome.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
 
@@ -181,11 +189,54 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
    * road and dim the rest of the street to answer a question nobody asked.
    * Focus happens on "look closer" and nowhere else.
    */
-  const drive = createDriveDemo({
+  /**
+   * Drive Mode v2: Street View drives, the 3D scene answers.
+   *
+   * The three pieces are built here, in the order they depend on each other —
+   * the panorama needs the route and the drive's rows; the view director needs
+   * the panorama's element and the drive; the drive needs both. The cycle is
+   * broken with a late binding rather than with a fourth object: `drive` is
+   * assigned before anything can call into it, because nothing here runs until
+   * a fix arrives.
+   */
+  const streetViewHost = ensureStreetViewHost();
+  let drive = null;
+  const streetView = createStreetViewDrive({
+    getRoute: () => drive?.route || null,
+    host: streetViewHost,
+    apiKey: readMapsApiKey(),
+    getRows: () => drive?.onRoute || [],
+    getTopPickId: () => drive?.goldId || conversation.topPickId || null,
+    onCoverage: (mode, detail) => drive?.onCoverage?.(mode, detail),
+    onPano: ({ panoId }) => { lastPanoId = panoId; panoAdvances += 1; },
+    onError: (reason) => console.warn('[TerraSignal] Street View unavailable:', reason),
+  });
+  let lastPanoId = null;
+  let panoAdvances = 0;
+
+  const viewDirector = createViewDirector({
+    element: streetViewHost,
+    streetView,
+    camera,
+    visuals,
+    drive: {
+      get alongM() { return drive?.alongM ?? 0; },
+      get headingDeg() { return drive?.headingDeg ?? null; },
+      parkForAnswer: () => drive?.parkForAnswer?.(),
+      resumeFromAnswer: (saved) => drive?.resumeFromAnswer?.(saved),
+      routePoints: () => drive?.routePoints?.() || null,
+    },
+    onAnnounce: (clause) => setAiPrompt(clause),
+    onView: (view, detail) => setDriveViewChrome(view, detail),
+  });
+
+  drive = createDriveDemo({
     viewer,
     Cesium,
     camera,
     visuals,
+    streetView,
+    viewDirector,
     getProperties: () => properties,
     onAnnounce: (event) => {
       if (event.property && event.detail !== true) driveCard(event.property, event);
@@ -235,8 +286,17 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       bar.dataset.mode = state.mode || 'drive';
       bar.dataset.paused = String(Boolean(state.paused));
     }
-    if (state.running) setDriveProgress(state.alongM, state.lengthM);
-    else hideDriveIntro();
+    setProgressBarVisible(Boolean(state.running));
+    if (state.running) {
+      setDriveProgress(state.alongM, state.lengthM);
+      // `panoDriving` and not `view`: what the chrome has to match is what is
+      // actually on screen, and a Street View drive with no coverage under it
+      // is showing the chase camera however it was started.
+      setDriveViewChrome(state.panoDriving ? 'streetview' : '3d');
+    } else {
+      hideDriveIntro();
+      setDriveViewChrome('3d', { chase: true });
+    }
   }
 
   /**
@@ -293,6 +353,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     visuals,
     camera,
     drive,
+    streetView,
+    viewDirector,
     get focused() { return focused; },
     get lastAnalysis() { return lastAnalysis; },
     getById(id) {
@@ -410,6 +472,31 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const parsed = parseDemoIntent(text);
       if (!parsed) return { ok: false, spoken: 'Say find me money.' };
       const slots = parsed.slots || {};
+
+      // Drive Mode v2: decide what the answer is *shown on* before working out
+      // what the answer is. The view director runs first and only while a
+      // Street View drive is up — it returns null for everything that does not
+      // change the view, which is most of what is said during a drive.
+      const viewDecision = this.routeView(text, parsed);
+      /**
+       * When the view IS the answer, stop here.
+       *
+       * "How big is the lot" has no vocabulary in `parse.js` and never will —
+       * it is a question about land, not a camera command — so it arrives as
+       * `unknown`, and "show me the roof" arrives as a `focus` on the word
+       * "roof". Both were answered correctly by the view director and then had
+       * their spoken line overwritten by the fallback: a headed run showed the
+       * lot, the parcel glowing, and the assistant saying "Didn't catch that.
+       * Try: reset the numbers" over the top of it.
+       */
+      if (viewDecision && isThreeD(viewDecision.view) && viewDecision.view !== VIEWS.ANGLE) {
+        const unanswerable = parsed.intent === 'unknown'
+          || (parsed.intent === 'focus' && slots.query);
+        if (unanswerable) {
+          const spoken = announceFor(viewDecision.view, viewDecision.reason);
+          return { ok: true, action: 'view', view: viewDecision.view, spoken };
+        }
+      }
 
       if (parsed.intent === 'find_money') {
         if (this.drive.running) this.drive.stop();
@@ -603,6 +690,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
 
       if (parsed.intent === 'camera_angle') {
+        // The view director has already brought the 3D scene up and run the
+        // re-framing through its `angle` callback; doing it again would cancel
+        // that flight mid-arc and land the camera somewhere between the two.
+        if (viewDecision?.view === VIEWS.ANGLE) {
+          return { ok: true, action: 'camera_angle', view: VIEWS.ANGLE, ...slots, spoken: '' };
+        }
         return this.cameraAngle(slots);
       }
 
@@ -615,6 +708,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
       if (parsed.intent === 'drive_resume') {
         if (!drive.running) return { ok: false, spoken: 'No drive running.' };
+        // The view director has already put the panorama back at the saved
+        // position; calling `keepGoing` as well would resume a drive that is
+        // already running and overwrite "Back on the road." with a second line.
+        if (viewDecision?.view === VIEWS.STREET_VIEW) {
+          return { ok: true, action: 'drive_resume', view: VIEWS.STREET_VIEW, spoken: 'Back on the road.' };
+        }
         const result = drive.keepGoing();
         setAiPrompt(result.spoken);
         return result;
@@ -813,8 +912,18 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       if (drive.running) return { ok: true, action: 'start_drive', spoken: 'Already driving.' };
       const plan = drive.plan();
       const live = slots.live ?? readDriveLive();
-      renderDriveIntro(plan, { live });
-      const result = drive.start({ live, gold: Boolean(slots.gold) });
+      /**
+       * "drive" is a Street View drive; "drive in 3D" keeps the chase camera.
+       *
+       * A live drive is neither: `?drive=live` puts the phone's own position on
+       * the 3D overlays and talks, because the windscreen is already showing
+       * the street better than any panorama of it could.
+       */
+      const view = live
+        ? DRIVE_VIEWS.CHASE
+        : (slots.view === 'chase' ? DRIVE_VIEWS.CHASE : DRIVE_VIEWS.STREET_VIEW);
+      renderDriveIntro(plan, { live, view });
+      const result = drive.start({ live, gold: Boolean(slots.gold), view });
       if (result.ok) {
         setNavActive('drive');
         setDriveChrome(true);
@@ -822,6 +931,48 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
       setAiPrompt(result.spoken);
       return result;
+    },
+
+    /**
+     * Put the right view behind the answer.
+     *
+     * Deliberately fire-and-forget. The camera move and the cross-fade take
+     * 300 ms and two seconds respectively, and the answer itself — the card,
+     * the underwriting, the spoken line — must not wait on either: the user
+     * asked a question, and a product that stays silent for two seconds while
+     * a camera flies has answered late even if it answers well.
+     */
+    routeView(text, parsed) {
+      if (!drive.running || !viewDirector.enabled) return null;
+      const decision = viewDirector.route(text, parsed);
+      if (!decision) return null;
+      // A 3D answer needs a subject. The house being discussed is the one the
+      // question is about; with nothing discussed, a lot view is a lot view of
+      // nowhere, so the view stays where it is and the answer still lands.
+      const property = focused
+        || drive.current
+        || (drive.goldId ? this.getById(drive.goldId) : null);
+      if (isThreeD(decision.view) && decision.view !== VIEWS.CRUISE && !property) return null;
+      const angle = decision.view === VIEWS.ANGLE
+        ? () => {
+          focused = property;
+          conversation.focusedId = property?.id || null;
+          return this.cameraAngle(parsed.slots || {});
+        }
+        : null;
+      if (property && decision.view !== VIEWS.CRUISE) {
+        focused = property;
+        conversation.focusedId = property.id;
+      }
+      viewDirector.show(decision.view, {
+        property,
+        reason: decision.reason,
+        angle,
+        // "look closer" has flown its own HERO since v1 and opens Property
+        // Mode with it; the director takes the fade and leaves the flight.
+        moveCamera: parsed.intent !== 'look_closer',
+      });
+      return decision;
     },
 
     world() {

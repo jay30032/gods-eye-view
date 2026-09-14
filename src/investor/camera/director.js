@@ -42,6 +42,7 @@ import {
   hopApexShot,
   revealShot,
   stagingShot,
+  topDownShot,
   worldShot,
   driveShot,
 } from './shots.js';
@@ -728,6 +729,17 @@ export function createCameraDirector({
           }
           return flyToShot(heroShot(target, options), options);
         }
+        case 'TOPDOWN': {
+          // Straight down over the house, carrying the heading the camera
+          // already had. The pose is recorded like HERO's so "closer" and
+          // "show me the back" after an overhead answer still have a subject.
+          if (!target) return Promise.resolve({ cancelled: true, shot: 'TOPDOWN' });
+          const heading = Number.isFinite(options.headingDeg)
+            ? options.headingDeg
+            : (heroPose?.headingDeg ?? currentHeadingDeg());
+          heroPose = { ...defaultPose(target), headingDeg: heading };
+          return flyToShot(topDownShot(target, { headingDeg: heading }), options);
+        }
         case 'DRIVE':
           return flyToShot(driveShot(target, options.headingDeg), options);
         default:
@@ -867,6 +879,15 @@ export function createCameraDirector({
       flightListeners.clear();
     },
   };
+
+  function currentHeadingDeg() {
+    try {
+      const degrees = Cesium.Math.toDegrees(viewer.camera.heading);
+      return Number.isFinite(degrees) ? degrees : HERO.headingDeg;
+    } catch {
+      return HERO.headingDeg;
+    }
+  }
 
   function currentHeightM() {
     try {

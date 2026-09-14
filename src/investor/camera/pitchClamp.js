@@ -8,8 +8,16 @@
  * run, and the parked globe and staging shots are deliberately nadir.
  */
 
-/** Shots whose framing is intentionally outside the band. */
-export const UNCLAMPED_SHOTS = Object.freeze(['WORLD', 'STAGING', 'HOP']);
+/**
+ * Shots whose framing is intentionally outside the band.
+ *
+ * `TOPDOWN` is here for a reason worth writing down: it is a settled shot the
+ * user is left sitting in, not a transient like HOP, so the clamp fires on the
+ * very first `camera.changed` after it arrives. Without this entry, asking for
+ * the roof gets a two-second flight to nadir followed by an instant snap to
+ * -70, which reads as the product refusing the question it just answered.
+ */
+export const UNCLAMPED_SHOTS = Object.freeze(['WORLD', 'STAGING', 'HOP', 'TOPDOWN']);
 
 export const PITCH_MIN_DEG = -70;
 export const PITCH_MAX_DEG = -20;
