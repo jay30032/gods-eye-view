@@ -21,7 +21,7 @@ export const INTENTS = Object.freeze([
   'stop_drive', 'drive_next', 'drive_skip', 'world', 'vision_on', 'vision_off',
   'camera_angle', 'drive_pause', 'drive_resume', 'drive_speed', 'drive_look',
   'look_closer', 'drive_best', 'drive_narration', 'how_recent', 'more_like_it',
-  'help', 'unknown',
+  'clear_view', 'photo_view', 'help', 'unknown',
 ]);
 
 /** The five that must never stop working, matched before any pattern. */
@@ -122,6 +122,7 @@ const SUGGESTIONS = Object.freeze([
   'closer',
   'orbit',
   'zoom out',
+  'trees off',
   'help',
 ]);
 
@@ -528,6 +529,22 @@ export function parseCommand(text, options = {}) {
   }
   if (/^reset$/.test(normalized)) {
     return result('reset_assumptions', {}, raw, normalized, 0.9);
+  }
+  /**
+   * Clear View, before the vision toggle.
+   *
+   * "Opportunity Vision" and "clear view" are two different switches with one
+   * shared word, and the vision rule below claims any sentence containing
+   * "vision". The specific phrase has to run first or "clear view" turns the
+   * signal overlay off instead of taking the trees out.
+   */
+  if (/\bclear view\b|\bclearview\b|\btrees off\b|\bno trees\b|\bhide the trees\b|\bremove the trees\b|\blose the trees\b|\bx[\s-]?ray\b/
+    .test(normalized)) {
+    return result('clear_view', {}, raw, normalized, 0.95);
+  }
+  if (/\bphoto view\b|\btrees on\b|\bbring the trees back\b|\bshow the trees\b|\breal world\b|\bphoto world\b/
+    .test(normalized)) {
+    return result('photo_view', {}, raw, normalized, 0.95);
   }
   if (/\bvision\b/.test(normalized) || /opportunity vision/.test(normalized)) {
     if (/\b(off|hide|stop|disable)\b/.test(normalized)) return result('vision_off', {}, raw, normalized, 0.95);

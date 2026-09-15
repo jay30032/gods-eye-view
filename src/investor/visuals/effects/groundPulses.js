@@ -155,7 +155,7 @@ export function createGroundPulses({ viewer, Cesium, market, reduced = () => fal
         translucent: true,
         materialSupport: Cesium.MaterialAppearance.MaterialSupport.TEXTURED,
       }),
-      classificationType: Cesium.ClassificationType.CESIUM_3D_TILE,
+      classificationType: Cesium.ClassificationType.BOTH,
       asynchronous: true,
       show: false,
     });
@@ -230,7 +230,7 @@ export function createGroundPulses({ viewer, Cesium, market, reduced = () => fal
           color: new Cesium.Color(1, 1, 1, 0.22),
         }),
       }),
-      classificationType: Cesium.ClassificationType.CESIUM_3D_TILE,
+      classificationType: Cesium.ClassificationType.BOTH,
       asynchronous: true,
       show: false,
     });

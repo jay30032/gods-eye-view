@@ -22,6 +22,7 @@ import {
   readMapsApiKey,
 } from './drive/streetViewDrive.js';
 import { VIEWS, announceFor, createViewDirector, isThreeD } from './drive/viewDirector.js';
+import { WORLDS, createClearView, readWorldPreference } from './world/clearView.js';
 import { buildSixHouseScene, readSceneMode } from './scenes/sixHouse.js';
 import {
   FIRST_HINT,
@@ -49,7 +50,14 @@ import {
   releaseInvestorBootHolds,
   waitForFirstInvestorFrame,
 } from './ensureBasemap.js';
-import { applyInvestorChrome, relocateVoiceControl, setAiPrompt, setLodChip, setNavActive } from './ui/chrome.js';
+import {
+  applyInvestorChrome,
+  relocateVoiceControl,
+  setAiPrompt,
+  setLodChip,
+  setNavActive,
+  setTreesChip,
+} from './ui/chrome.js';
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
 import { hideFocusCard, renderFocusCard } from './ui/focusCard.js';
@@ -199,6 +207,25 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
    * assigned before anything can call into it, because nothing here runs until
    * a fix arrives.
    */
+  /**
+   * Clear View — the same board with the trees taken out.
+   *
+   * Built before the drive because the drive's camera heights were tuned
+   * against a canopy: the chase camera clears Oakhurst's oaks at 55 m, and in
+   * a world with no oaks that is simply a height. Nothing downstream is told
+   * which world it got, which is the point — the effects, the parcels, the
+   * shots and the narration are identical in both.
+   */
+  const clearView = createClearView({
+    viewer,
+    Cesium,
+    mapStackController,
+    getProperties: () => properties,
+    getTopPickId: () => conversation.topPickId || scene?.goldId || null,
+    getFocusedId: () => focused?.id || null,
+    onWorld: (world) => setTreesChip(world === WORLDS.PHOTO),
+  });
+
   const streetViewHost = ensureStreetViewHost();
   let drive = null;
   const streetView = createStreetViewDrive({
@@ -357,6 +384,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     drive,
     streetView,
     viewDirector,
+    clearView,
     get focused() { return focused; },
     get lastAnalysis() { return lastAnalysis; },
     getById(id) {
@@ -369,6 +397,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       focused = property;
       conversation.focusedId = property.id;
       visuals.setFocused(property.id);
+      // The building tint is the same answer as the marker and the outline.
+      clearView.repaint();
       const analysisForCard = lastAnalysisId === property.id ? lastAnalysis : null;
       const paintCard = () => renderFocusCard(property, {
         analysis: analysisForCard,
@@ -511,6 +541,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         visuals.setSaved(null);
         visuals.setShortlist(result.candidateIds);
         visuals.startScan();
+        clearView.repaint();
         // REVEAL fits the whole shortlist; the gold halo is the payoff of that
         // shot, so it appears when the shot settles — not while still flying.
         const shortlist = result.candidateIds
@@ -519,6 +550,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         camera.fly('REVEAL', shortlist).then(async (reveal) => {
           if (reveal.cancelled) return;
           visuals.setTopPick(result.topPickId);
+          conversation.topPickId = result.topPickId;
+          clearView.repaint();
           await camera.dwell(DURATIONS.revealDwell);
           if (result.focusId) this.focus(result.focusId);
         });
@@ -660,6 +693,10 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
 
       if (parsed.intent === 'vision_on' || parsed.intent === 'vision_off') {
         return this.setOpportunityVision(parsed.intent === 'vision_on');
+      }
+
+      if (parsed.intent === 'clear_view' || parsed.intent === 'photo_view') {
+        return this.setWorld(parsed.intent === 'clear_view' ? WORLDS.CLEAR : WORLDS.PHOTO);
       }
 
       if (parsed.intent === 'world') {
@@ -995,6 +1032,26 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       return decision;
     },
 
+    /**
+     * Swap worlds, keeping the camera and everything on the board.
+     *
+     * Not a reload and not a different scene: the same properties, the same
+     * scores, the same shot. What changes is what the ground and the roofs are
+     * made of.
+     */
+    setWorld(next) {
+      const target = next === WORLDS.CLEAR ? WORLDS.CLEAR : WORLDS.PHOTO;
+      const already = clearView.world === target;
+      clearView.setWorld(target);
+      const spoken = target === WORLDS.CLEAR
+        ? 'Clear view — trees off.'
+        : 'Trees back on.';
+      setAiPrompt(spoken);
+      return {
+        ok: true, action: 'set_world', world: target, changed: !already, spoken,
+      };
+    },
+
     world() {
       hideSavedSheet();
       hideFocusCard();
@@ -1140,7 +1197,22 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     if (scene?.goldId) {
       visuals.setTopPick(scene.goldId);
       conversation.topPickId = scene.goldId;
+      clearView.repaint();
     }
+    /**
+     * The remembered world, applied after the descent rather than before it.
+     *
+     * Switching worlds changes the terrain provider, and doing that while the
+     * opening flight is in the air leaves the camera at an altitude measured
+     * against a surface that has since moved. After CRUISE has settled the
+     * camera is stationary and the swap is the dip in the scrim and nothing
+     * else. `fade: false` because the user has not seen the other world — there
+     * is nothing to cross-fade *from*, and a 600 ms dim on a first load reads
+     * as the page still loading.
+     */
+    const remembered = readWorldPreference(WORLDS.PHOTO);
+    setTreesChip(remembered === WORLDS.PHOTO);
+    if (remembered === WORLDS.CLEAR) await clearView.setWorld(WORLDS.CLEAR, { fade: false });
     setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
     const banner = document.getElementById('ts-globe-error');
     if (!banner || banner.hidden) {
@@ -1182,6 +1254,10 @@ function compareCaption(result, runnerUp) {
 function bindUi(session) {
   document.getElementById('ts-opportunity-vision')?.addEventListener('change', (event) => {
     session.setOpportunityVision(event.target.checked);
+  });
+
+  document.getElementById('ts-trees-chip')?.addEventListener('click', () => {
+    session.setWorld(session.clearView.world === WORLDS.CLEAR ? WORLDS.PHOTO : WORLDS.CLEAR);
   });
 
   document.getElementById('ts-bottom-nav')?.addEventListener('click', (event) => {

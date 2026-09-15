@@ -16,7 +16,7 @@
  * Four rules hold the whole design together:
  *
  *   1. **Draped, never drawn over.** Every ground primitive is a
- *      `GroundPolylinePrimitive` with `classificationType` CESIUM_3D_TILE, so
+ *      `GroundPolylinePrimitive` with `classificationType` BOTH, so
  *      the outline is projected onto Google's photogrammetry. Drawn as ordinary
  *      geometry it would be buried under a street tree or sliced by a porch
  *      roof — the tiles are real surfaces, not a backdrop.
@@ -235,7 +235,7 @@ export function createNearFieldEffects({
       }),
       appearance: new Cesium.PolylineMaterialAppearance({ material }),
       // The whole reason this layer exists: the outline belongs ON the tiles.
-      classificationType: Cesium.ClassificationType.CESIUM_3D_TILE,
+      classificationType: Cesium.ClassificationType.BOTH,
       asynchronous: true,
       show: false,
     });
@@ -332,7 +332,7 @@ export function createNearFieldEffects({
         id: pickId,
       }),
       appearance: new Cesium.PerInstanceColorAppearance({ flat: true, translucent: true }),
-      classificationType: Cesium.ClassificationType.CESIUM_3D_TILE,
+      classificationType: Cesium.ClassificationType.BOTH,
       asynchronous: true,
       show: false,
     });

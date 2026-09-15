@@ -76,6 +76,27 @@ const SIX = HAS('six');
  */
 const DRIVE = HAS('drive');
 /**
+ * Clear View: the six-house scene with the trees taken out.
+ *
+ * The same scene and the same shots as `--six`, on ion terrain, Bing aerial and
+ * OSM Buildings instead of Google's photogrammetry. What it is actually asking
+ * is whether every one of our own layers still lands: the draped parcels and
+ * outlines have no tileset to classify onto in this world, the markers have a
+ * different ground under them, and the gold answer is a building tint rather
+ * than a photograph of a roof.
+ */
+const CLEAR = HAS('clear');
+const CLEAR_RUN_MS = 150_000;
+/** How much of the loop to drive before calling it a lap. */
+const CLEAR_DRIVE_MS = 26_000;
+/**
+ * Every house in the scene, because the scene is six houses.
+ *
+ * `MIN_MARKERS_IN_VIEW` is 20, which is the right bar for the thirty-row
+ * market and an impossible one here — the six-house scene has six.
+ */
+const CLEAR_MIN_MARKERS = 6;
+/**
  * Drive Mode v2 adds three things the v1 check could not have caught, all of
  * which look identical to a working drive from the outside:
  *
@@ -204,10 +225,11 @@ const HERO_CENTRE_FRACTION = 0.30;
 const FRAME_P95_BUDGET_MS = 120;
 const URL_ARG = arg('url', SPAWN_KEYLESS
   ? `http://localhost:${KEYLESS_PORT}/?demo=1&welcome=1`
-  : ((SIX || DRIVE) ? 'http://localhost:4173/?scene=six' : 'http://localhost:4173/?demo=1&welcome=1'));
+  : ((SIX || DRIVE || CLEAR) ? `http://localhost:4173/?scene=six${CLEAR ? '&world=clear' : ''}`
+    : 'http://localhost:4173/?demo=1&welcome=1'));
 const LABEL = arg('label', SPAWN_KEYLESS
   ? 'investor-keyless'
-  : (DRIVE ? 'drive' : (SIX ? 'six' : (PLAY ? 'demo' : 'investor'))));
+  : (CLEAR ? 'clear' : (DRIVE ? 'drive' : (SIX ? 'six' : (PLAY ? 'demo' : 'investor')))));
 const LOG_PATH = arg('log', null);
 
 const log = [];
@@ -483,6 +505,10 @@ async function main() {
     streetView: null,
     stopView: null,
     streetResume: null,
+    clearWorld: null,
+    clearCruise: null,
+    clearHero: null,
+    clearDrive: null,
     panoSwap: null,
     lotView: null,
     resumedView: null,
@@ -661,6 +687,139 @@ async function main() {
         + `, house at ${frame ? `${(frame.fx * 100).toFixed(0)}%, ${(frame.fy * 100).toFixed(0)}%` : 'OFF SCREEN'}`);
       await shot(angle.shot);
     }
+  }
+
+  if (CLEAR) {
+    /**
+     * Clear View: the same scene, a different world underneath it.
+     *
+     * The page opens on `?world=clear`, so the first thing to establish is that
+     * it actually got there — a remembered-preference bug or a refused ion
+     * asset would leave the run measuring the photo world and passing.
+     */
+    const worldState = () => page.evaluate(() => {
+      const session = window.__terraSignal;
+      const cv = session?.clearView;
+      const viewer = window.__godsEyeView?.viewer;
+      const tileset = window.__godsEyeView?.tileset || null;
+      return {
+        world: cv?.world ?? null,
+        buildingsReady: Boolean(cv?.ready),
+        match: cv?.matchReport ?? null,
+        googleShown: tileset ? Boolean(tileset.show) : null,
+        globeShown: Boolean(viewer?.scene?.globe?.show),
+        imageryLayers: viewer?.imageryLayers?.length ?? 0,
+        terrain: viewer?.scene?.globe?.terrainProvider?.constructor?.name ?? null,
+        shot: session?.camera?.shot ?? null,
+        effects: session?.visuals?.effects
+          ? {
+            active: session.visuals.effects.active,
+            count: session.visuals.effects.count,
+            surveyed: (session.visuals.effects.surveyed || []).length,
+            parcels: session.visuals.effects.parcels,
+          }
+          : null,
+        markers: session?.visuals?.markerCount ?? 0,
+        chip: document.getElementById('ts-trees-chip')?.textContent ?? null,
+      };
+    }).catch(() => null);
+
+    const cruised = await waitForShot('CRUISE', 45_000);
+    playLog.push(`CRUISE over the cluster settled: ${cruised}`);
+    if (!cruised) errors.push({ t: Date.now() - started, kind: 'clear', text: 'CRUISE never settled' });
+
+    // OSM Buildings stream like any tileset; give them a moment to arrive.
+    const buildingDeadline = Date.now() + 30_000;
+    while (Date.now() < buildingDeadline) {
+      const state = await worldState();
+      if (state?.buildingsReady && (state.match?.matched ?? 0) > 0) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    await new Promise((r) => setTimeout(r, 2_000));
+
+    const cruiseStart = await pageNow();
+    await new Promise((r) => setTimeout(r, 3_000));
+    windows.clearCruise = [cruiseStart, await pageNow()];
+    checks.clearWorld = await worldState();
+    checks.clearCruise = await markersInView();
+    record(`CHECK clear world ${JSON.stringify({ ...checks.clearWorld, match: undefined })}`);
+    record(`CHECK clear match ${JSON.stringify(checks.clearWorld?.match)}`);
+    playLog.push(`world ${checks.clearWorld?.world} · globe ${checks.clearWorld?.globeShown}`
+      + ` · google tileset shown ${checks.clearWorld?.googleShown}`
+      + ` · terrain ${checks.clearWorld?.terrain}`);
+    playLog.push(`at CRUISE: ${checks.clearWorld?.match?.matched ?? 0}`
+      + `/${checks.clearWorld?.match?.anchored ?? 0} buildings matched so far`
+      + ` from ${checks.clearWorld?.match?.featuresSeen ?? 0} features seen`
+      + ' (they refine as the camera drops)');
+    await shot('clear-cruise');
+
+    // The gold house, and the building tint that is this world's answer.
+    const heroStart = await pageNow();
+    const sent = await page.evaluate(() => {
+      const input = document.getElementById('ts-demo-input');
+      const form = document.getElementById('ts-demo-form');
+      input.value = 'show me the best one';
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      return 'typed-bar';
+    }).catch(() => 'failed');
+    playLog.push(`"show me the best one" → ${sent}`);
+    await waitForShot('HERO', 30_000);
+    await new Promise((r) => setTimeout(r, 4_000));
+    windows.clearHero = [heroStart, await pageNow()];
+    checks.clearHero = await page.evaluate(() => {
+      const session = window.__terraSignal;
+      const cv = session?.clearView;
+      const goldId = session?.scene?.goldId ?? session?.conversation?.topPickId ?? null;
+      const report = cv?.matchReport ?? null;
+      return {
+        shot: session?.camera?.shot ?? null,
+        focusedId: session?.focused?.id ?? null,
+        goldId,
+        goldMatched: Boolean(report?.rows?.some((row) => row.id === goldId)),
+        goldDistanceM: report?.rows?.find((row) => row.id === goldId)?.distanceM ?? null,
+        match: report,
+        effects: session?.visuals?.effects
+          ? { active: session.visuals.effects.active, count: session.visuals.effects.count }
+          : null,
+      };
+    }).catch(() => null);
+    record(`CHECK clear hero ${JSON.stringify({ ...checks.clearHero, match: undefined })}`);
+    playLog.push(`HERO on ${checks.clearHero?.focusedId}`
+      + ` · gold building ${checks.clearHero?.goldMatched ? 'tinted' : 'NOT MATCHED'}`
+      + `${checks.clearHero?.goldDistanceM != null ? ` (${checks.clearHero.goldDistanceM} m)` : ''}`);
+    await shot('clear-hero');
+
+    // And one lap of the drive, in a world with no canopy to clear.
+    const driveStart = await pageNow();
+    await page.evaluate(() => {
+      const input = document.getElementById('ts-demo-input');
+      const form = document.getElementById('ts-demo-form');
+      input.value = 'drive';
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1_500));
+    await page.evaluate(() => {
+      window.__terraSignal?.drive?.source?.setSpeedScale?.(4);
+    }).catch(() => {});
+    await new Promise((r) => setTimeout(r, CLEAR_DRIVE_MS));
+    windows.clearDrive = [driveStart, await pageNow()];
+    checks.clearDrive = await page.evaluate(() => {
+      const session = window.__terraSignal;
+      return {
+        running: Boolean(session?.drive?.running),
+        alongM: Math.round(session?.drive?.alongM ?? 0),
+        callouts: (session?.drive?.callouts || []).length,
+        world: session?.clearView?.world ?? null,
+        match: session?.clearView?.matchReport ?? null,
+        effects: session?.visuals?.effects
+          ? { active: session.visuals.effects.active, count: session.visuals.effects.count }
+          : null,
+      };
+    }).catch(() => null);
+    record(`CHECK clear drive ${JSON.stringify({ ...checks.clearDrive, match: undefined })}`);
+    playLog.push(`drive in clear view: ${checks.clearDrive?.alongM} m · `
+      + `${checks.clearDrive?.callouts} call-outs · world ${checks.clearDrive?.world}`);
+    await shot('clear-drive');
   }
 
   if (DRIVE) {
@@ -1122,7 +1281,7 @@ async function main() {
 
   // Responsiveness is measured at a fixed mark, not opportunistically: the
   // question is whether the thread is answering once the page should be idle.
-  const respondAt = (PLAY || SIX || DRIVE) ? Date.now() - started + 2_000 : RESPOND_AT_MS;
+  const respondAt = (PLAY || SIX || DRIVE || CLEAR) ? Date.now() - started + 2_000 : RESPOND_AT_MS;
   await new Promise((r) => setTimeout(r, Math.max(0, respondAt - (Date.now() - started))));
   const askedAt = Date.now();
   let respondTimer;
@@ -1141,7 +1300,8 @@ async function main() {
   const respondMs = Date.now() - askedAt;
   record(`RESPOND at ${respondAt}ms: ${state.blocked ? 'BLOCKED' : `${respondMs}ms ${JSON.stringify(state)}`}`);
 
-  const runMs = PLAY ? PLAY_RUN_MS : (DRIVE ? DRIVE_RUN_MS : (SIX ? SIX_RUN_MS : RUN_MS));
+  const runMs = PLAY ? PLAY_RUN_MS
+    : (CLEAR ? CLEAR_RUN_MS : (DRIVE ? DRIVE_RUN_MS : (SIX ? SIX_RUN_MS : RUN_MS)));
   await new Promise((r) => setTimeout(r, Math.max(0, runMs - (Date.now() - started))));
   clearInterval(pixelTimer);
 
@@ -1229,6 +1389,64 @@ async function main() {
     && Object.keys(checks.angleChoice.angles).length > 0,
   );
 
+
+  // ---- clear view verdict ----
+  const clearBudgetMs = frameBudgetFor(targetFrameRate);
+  const clearCruiseFrames = frameStats(frames, windows.clearCruise);
+  const clearHeroFrames = frameStats(frames, windows.clearHero);
+  const clearDriveFrames = frameStats(frames, windows.clearDrive);
+  const cw = checks.clearWorld;
+  /**
+   * It is actually the tree-free world, and not the photo world with a chip
+   * that says otherwise. Four separate facts because each can be true alone:
+   * the module can believe it switched while the stack did not, and the globe
+   * can be showing with Google's tileset still drawn over it.
+   */
+  const clearWorldOk = !CLEAR || Boolean(
+    cw
+    && cw.world === 'clear'
+    && cw.globeShown === true
+    && cw.googleShown !== true
+    && cw.buildingsReady === true,
+  );
+  /** Our own layers still land on a ground that is terrain rather than tiles. */
+  const clearEffectsOk = !CLEAR || Boolean(
+    cw?.effects?.active && (cw.effects.count ?? 0) >= 6 && (cw.markers ?? 0) > 0,
+  );
+  const clearMarkersOk = !CLEAR || (checks.clearCruise?.inView ?? 0) >= CLEAR_MIN_MARKERS;
+  /**
+   * The match rate, read at the END of the run.
+   *
+   * Matching happens as building tiles become visible, and at the 900 m cruise
+   * the tiles covering the cluster have not been refined far enough to carry
+   * the houses yet. Reading the report there measured 0/6 while every one of
+   * them matched a few seconds later — a true number about the wrong moment.
+   */
+  const clearMatch = [checks.clearDrive?.match, checks.clearHero?.match, cw?.match]
+    .find((report) => (report?.matched ?? 0) > 0) || cw?.match || null;
+  const clearMatchOk = !CLEAR || Boolean(
+    clearMatch && clearMatch.anchored > 0 && clearMatch.matched === clearMatch.anchored,
+  );
+  /** The gold answer is a tinted building, which needs a matched building. */
+  const clearGoldOk = !CLEAR || Boolean(
+    checks.clearHero
+    && checks.clearHero.shot === 'HERO'
+    && checks.clearHero.focusedId
+    && checks.clearHero.focusedId === checks.clearHero.goldId
+    && checks.clearHero.goldMatched,
+  );
+  const clearDriveOk = !CLEAR || Boolean(
+    checks.clearDrive?.running
+    && checks.clearDrive.alongM > 0
+    && checks.clearDrive.callouts > 0
+    && checks.clearDrive.world === 'clear',
+  );
+  const clearFramesOk = !CLEAR || Boolean(
+    clearCruiseFrames && clearHeroFrames && clearDriveFrames
+    && clearCruiseFrames.p95 <= clearBudgetMs
+    && clearHeroFrames.p95 <= clearBudgetMs
+    && clearDriveFrames.p95 <= clearBudgetMs,
+  );
 
   // ---- drive verdict ----
   const driveFrames = frameStats(frames, windows.drive);
@@ -1345,7 +1563,9 @@ async function main() {
     && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk
     && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk
     && driveLotViewOk && driveResumeOk
-    && driveStopViewOk && driveLazyMapsOk && driveStreetResumeOk && drivePanoSwapOk;
+    && driveStopViewOk && driveLazyMapsOk && driveStreetResumeOk && drivePanoSwapOk
+    && clearWorldOk && clearEffectsOk && clearMarkersOk && clearGoldOk && clearDriveOk
+    && clearFramesOk && clearMatchOk;
 
   const failureSummary = [...failures.entries()]
     .sort((a, b) => b[1].n - a[1].n)
@@ -1409,6 +1629,35 @@ async function main() {
         + `${checks.cruiseEffects?.parcels ?? 0} surveyed lot lines · `
         + `tint ${checks.heroEffects?.classification ? 'classified' : 'UNAVAILABLE'}`
         + ` on [${(checks.heroEffects?.tinted || []).join(', ') || 'none'}]`,
+    ] : []),
+    ...(CLEAR ? [
+      `  ${clearWorldOk ? 'PASS' : 'FAIL'}  clear view world   `
+        + `${cw?.world ?? '?'} · globe ${cw?.globeShown} · `
+        + `google tileset ${cw?.googleShown === true ? 'STILL SHOWN' : 'hidden'} · `
+        + `terrain ${cw?.terrain ?? '?'} · buildings ${cw?.buildingsReady ? 'loaded' : 'MISSING'}`,
+      `  ${clearEffectsOk ? 'PASS' : 'FAIL'}  effects on terrain `
+        + `near-field active=${cw?.effects?.active} · ${cw?.effects?.count ?? 0} outlines · `
+        + `${cw?.effects?.parcels ?? 0} lot lines · ${cw?.markers ?? 0} markers`,
+      `  ${clearMarkersOk ? 'PASS' : 'FAIL'}  markers at CRUISE  `
+        + `${checks.clearCruise?.inView ?? 0} of ${checks.clearCruise?.count ?? 0} in view `
+        + `(min ${CLEAR_MIN_MARKERS})`,
+      `  ${clearGoldOk ? 'PASS' : 'FAIL'}  gold building      `
+        + `HERO on ${checks.clearHero?.focusedId ?? 'NONE'} (gold ${checks.clearHero?.goldId ?? 'NONE'}) · `
+        + `tint ${checks.clearHero?.goldMatched ? 'on the building' : 'FOOTPRINT FILL ONLY'}`
+        + `${checks.clearHero?.goldDistanceM != null ? ` · matched at ${checks.clearHero.goldDistanceM} m` : ''}`,
+      `  ${clearDriveOk ? 'PASS' : 'FAIL'}  drive in clear view `
+        + `${checks.clearDrive?.alongM ?? 0} m · ${checks.clearDrive?.callouts ?? 0} call-outs · `
+        + `world ${checks.clearDrive?.world ?? '?'}`,
+      `  ${clearFramesOk ? 'PASS' : 'FAIL'}  frame time p95     `
+        + `cruise ${clearCruiseFrames ? `${clearCruiseFrames.p95}ms` : 'no data'} · `
+        + `hero ${clearHeroFrames ? `${clearHeroFrames.p95}ms` : 'no data'} · `
+        + `drive ${clearDriveFrames ? `${clearDriveFrames.p95}ms` : 'no data'} `
+        + `(budget ${clearBudgetMs.toFixed(1)}ms`
+        + `${Number.isFinite(targetFrameRate) ? ` — viewer capped at ${targetFrameRate} fps` : ''})`,
+      `  ${clearMatchOk ? 'PASS' : 'FAIL'}  building match     `
+        + `${clearMatch?.matched ?? 0}/${clearMatch?.anchored ?? 0} footprints `
+        + `(${clearMatch?.rate ?? 0}%) from ${clearMatch?.featuresSeen ?? 0} OSM features`
+        + `${clearMatch?.unmatched?.length ? ` · unmatched [${clearMatch.unmatched.join(', ')}]` : ''}`,
     ] : []),
     ...(DRIVE ? [
       `  ${driveRanOk ? 'PASS' : 'FAIL'}  route              `
@@ -1480,6 +1729,27 @@ async function main() {
     `        governor           mode=${state.mode ?? '?'} holds=[${(state.holds || []).join(', ')}]`,
     '='.repeat(74),
   ];
+  if (CLEAR) {
+    for (const [label, stat] of [
+      ['cruise over cluster', clearCruiseFrames],
+      ['fly to gold + hero', clearHeroFrames],
+      ['drive lap', clearDriveFrames],
+    ]) {
+      if (!stat) { out.push(`  frames ${label}: no data`); continue; }
+      out.push(`  frames ${label}: n=${stat.n} over ${stat.seconds}s  `
+        + `p50 ${stat.p50}ms  p95 ${stat.p95}ms  worst ${stat.worst}ms`);
+    }
+    const rows = clearMatch?.rows || [];
+    for (const row of rows) {
+      out.push(`  matched ${row.id} → OSM ${row.elementId ?? '?'} at ${row.distanceM} m`);
+    }
+    if (shots.length) {
+      out.push('  screenshots:');
+      for (const file of shots) out.push(`    ${file}`);
+    }
+    out.push('  sequence:');
+    for (const line of playLog) out.push(`    ${line}`);
+  }
   if (DRIVE) {
     if (driveFrames) {
       out.push(`  frames driving: n=${driveFrames.n} over ${driveFrames.seconds}s  `
