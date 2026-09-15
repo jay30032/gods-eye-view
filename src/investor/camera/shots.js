@@ -14,7 +14,6 @@
  * it says.
  */
 
-import { MARKER_HEIGHT_M } from '../visuals/markers.js';
 
 const M_PER_DEG_LAT = 111_320;
 const DEG = Math.PI / 180;
@@ -133,19 +132,6 @@ export const HERO = Object.freeze({
    * a lower third put the house behind the chrome.
    */
   subjectFrameFraction: 0.55,
-  /**
-   * How much of the marker's rise the framing gives away, 0..1.
-   *
-   * Two things want the same place on screen. Aim purely at the house and the
-   * marker floating 14 m above it climbs towards the HUD; aim purely at the
-   * marker — which is what this did — and the *house* drops to 70% down the
-   * frame, all but touching the command bar, with a third of the shot spent on
-   * sky. A headed six-house run measured exactly that: 50/69%.
-   *
-   * Splitting the difference puts the house at about 61% and the marker at
-   * about 49%, so the composition holds both and neither is against an edge.
-   */
-  markerRiseShare: 0.5,
   /** 72-second lap: 2 deg/s was too slow to read as motion at all. */
   orbitDegPerSec: 5,
   /** One revolution, then stop: a parked demo must not hold the GPU forever. */
@@ -444,15 +430,6 @@ export function subjectTiltDeg(fovRad = 60 * DEG, fraction = HERO.subjectFrameFr
 }
 
 /**
- * How far up the frame the floating marker sits relative to the house it marks.
- * The marker, not the roof, is what the eye tracks, so the framing has to aim
- * at the marker or the subject reads as sitting high in frame.
- */
-export function markerRiseDeg(rangeM = HERO.rangeM, riseM = MARKER_HEIGHT_M) {
-  return Math.atan2(riseM, rangeM) / DEG;
-}
-
-/**
  * The focused house: 150 m out, just below centre, never looking at the sky.
  *
  * `headingDeg`, `rangeM` and `pitchDeg` are all overridable because the
@@ -476,19 +453,11 @@ export function heroShot(property, {
     pitchDeg,
     rangeM: range,
   });
-  // Two tilts, both upward. The subject tilt drops the target down the frame;
-  // the marker tilt accounts for the marker floating ABOVE the roof, which makes
-  // it appear HIGHER in frame than the house — so the lens has to come up to
-  // meet it, not go down. The marker tilt is measured at the RANGE actually
-  // being flown: 14 m of clearance subtends 5 degrees at 150 m and under 1 at
-  // 900, and using the 150 m figure at 900 would tip the house out of frame.
-  //
-  // Only PART of that rise is taken. Taking all of it centres the marker and
-  // pushes the house itself to 70% down the frame — see HERO.markerRiseShare.
-  const framed = Math.min(
-    -1,
-    pose.pitchDeg + subjectTiltDeg(fovRad) + markerRiseDeg(range) * HERO.markerRiseShare,
-  );
+  // One tilt, upward: the subject tilt drops the target down the frame. There
+  // used to be a second one for a marker floating 14 m above the roof; the
+  // marker now stands on the roof — on the same anchor as the outline and the
+  // tint — so the house and its sprite are one target.
+  const framed = Math.min(-1, pose.pitchDeg + subjectTiltDeg(fovRad));
   return {
     name: 'HERO',
     ...pose,

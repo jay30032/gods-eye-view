@@ -6,6 +6,7 @@ import {
 import { cameraHeightM, isNearMarket, lodFromHeight } from '../lod.js';
 import { createMarkerLayer } from './markers.js';
 import { createNearFieldEffects } from './effects/nearFieldEffects.js';
+import { createGroundSource } from './ground.js';
 import { createGroundPulses } from './effects/groundPulses.js';
 import { createReducedMotionPolicy } from './reducedMotionPolicy.js';
 
@@ -49,8 +50,28 @@ export function createOpportunityVisualManager({
     return reducedPolicy.reduced;
   }
 
-  const layer = createMarkerLayer({ viewer, Cesium, market, getProperties, reduced });
-  const effects = createNearFieldEffects({ viewer, Cesium, market, getProperties, reduced });
+  /**
+   * The one ground every layer stands on. Sampled from the tiles at each
+   * property's anchor, re-sampled once the camera is in the near field, and
+   * the layers are re-placed when it moves — see `ground.js` for the bug this
+   * closes. The marker and effect collections are excluded from the sample so
+   * a sprite standing on the anchor cannot be mistaken for the ground.
+   */
+  let layer = null;
+  let effects = null;
+  const ground = createGroundSource({
+    Cesium,
+    scene: viewer.scene,
+    market,
+    getProperties,
+    getCameraAglM: () => {
+      const height = cameraHeightM(viewer);
+      return Number.isFinite(height) ? height - (Number(market?.groundElevationM) || 0) : null;
+    },
+    excluded: () => [...(layer?.collections || []), ...(effects?.collections || [])],
+  });
+  layer = createMarkerLayer({ viewer, Cesium, ground, getProperties, reduced });
+  effects = createNearFieldEffects({ viewer, Cesium, market, ground, getProperties, reduced });
   /**
    * The two draped pulses — the top pick's ring and the scan wave.
    *
@@ -89,14 +110,17 @@ export function createOpportunityVisualManager({
 
   function refresh() {
     if (destroyed) return;
+    // Whatever ground can still improve, improves here; whoever stood on the
+    // old number moves. The first refresh places everything.
+    const moved = ground.refresh();
     if (!built) {
       built = true;
       layer.build();
-    } else if (!isSpace() && layer.groundIsEstimated) {
-      // The first build ran before tiles streamed in, so ground heights were
-      // guessed. Now that there is geometry underneath, place them properly —
-      // markers and camera must agree on where the ground is.
-      layer.refreshGround();
+    } else if (moved.length) {
+      layer.build();
+      // The near field only builds in the near field, where samples are already
+      // fine, so this is a safety net rather than the usual path.
+      if (effects.count > 0) effects.rebuild();
     }
     layer.setEnabled(enabled && !isSpace());
     // The effects layer decides for itself whether the camera is low enough;
@@ -153,8 +177,19 @@ export function createOpportunityVisualManager({
     },
     /** Screen positions of shown markers — used by the headed smoke check. */
     screenPositions() { return layer.screenPositions(); },
-    /** Where one house's footprint centroid lands on screen, in pixels. */
-    footprintScreenPosition(id) { return effects.screenPositionFor(id); },
+    /**
+     * Where one house's footprint centroid lands on screen, in pixels — from
+     * the ground source, not from the effects layer, so it exists at any
+     * altitude and is the anchor the sprite is supposed to stand on. Null for
+     * a row with no footprint: there is no centroid to compare against.
+     */
+    footprintScreenPosition(id) {
+      const property = (getProperties() || []).find((row) => row.id === id);
+      if (!property || !ground.hasFootprint(property)) return null;
+      return ground.screenPositionFor(property);
+    },
+    /** The shared height source's own account of itself. */
+    get ground() { return ground.report; },
 
     setEnabled(next) {
       enabled = Boolean(next);
@@ -264,6 +299,7 @@ export function createOpportunityVisualManager({
     },
     rebuild() {
       built = false;
+      ground.reset();
       effects.rebuild();
       refresh();
     },

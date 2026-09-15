@@ -107,17 +107,22 @@ export function primarySignalType(property) {
 }
 
 /**
- * @param {{viewer:object, Cesium:object, market:object, getProperties:Function,
- *   reduced:Function, getGeometry:Function}} deps
+ * @param {{viewer:object, Cesium:object, market:object, ground:object,
+ *   getProperties:Function, reduced:Function, getGeometry:Function}} deps
+ *   `ground` is the shared height source (`visuals/ground.js`): the column,
+ *   the tint volumes and this layer's anchor stand on the same number the
+ *   far-field sprite stands on. This layer samples nothing itself.
  */
 export function createNearFieldEffects({
   viewer,
   Cesium,
   market,
+  ground,
   getProperties,
   reduced = () => false,
   getGeometry = geometryFor,
 }) {
+  if (!ground?.heightFor) throw new TypeError('createNearFieldEffects needs the shared ground source');
   const scene = viewer.scene;
   const clock = createEffectClock();
   const goldColor = new Cesium.Color(EFFECT_GOLD[0], EFFECT_GOLD[1], EFFECT_GOLD[2], 1);
@@ -161,21 +166,6 @@ export function createNearFieldEffects({
       return false;
     }
   })();
-
-  function groundHeightM(lat, lng) {
-    try {
-      const carto = Cesium.Cartographic.fromDegrees(lng, lat);
-      if (scene.sampleHeightSupported) {
-        const sampled = scene.sampleHeight(carto);
-        if (Number.isFinite(sampled)) return sampled;
-      }
-      const terrain = scene.globe?.getHeight?.(carto);
-      if (Number.isFinite(terrain)) return terrain;
-    } catch {
-      // Nothing loaded under that point yet.
-    }
-    return Number(market?.groundElevationM) || 0;
-  }
 
   /**
    * Camera height **above ground**, which is the only reading the 1,500 m
@@ -357,7 +347,9 @@ export function createNearFieldEffects({
       const motion = motionFor(type);
       const [r, g, b] = colorFor(type);
       const pickId = { terrasignalPropertyId: property.id };
-      const ground = groundHeightM(property.lat, property.lng);
+      // One ground, shared with the sprite that marks this house.
+      const anchor = ground.anchorFor(property);
+      const groundM = anchor.heightM;
 
       // Both colours are built once and assigned by reference every frame.
       // Allocating a Cesium.Color per entry per frame is 60 objects a frame at
@@ -393,7 +385,7 @@ export function createNearFieldEffects({
         color: signalColor,
         wavePerSec: motion.wavePerSec,
       });
-      const column = columnPrimitive(footprint, ground, columnMaterial, pickId);
+      const column = columnPrimitive(footprint, groundM, columnMaterial, pickId);
       collection.add(column);
 
       // The tint that lights the house itself. Built for every row so that
@@ -409,11 +401,11 @@ export function createNearFieldEffects({
         if (inner) {
           // Fill the middle, band the rim. The two volumes share an edge and
           // never overlap, so neither alpha stacks on the other.
-          tintFill = tintVolume(inner, null, ground, gold(TINT_FILL_ALPHA), pickId);
-          tintEdge = tintVolume(footprint, inner, ground, gold(TINT_EDGE_ALPHA), pickId);
+          tintFill = tintVolume(inner, null, groundM, gold(TINT_FILL_ALPHA), pickId);
+          tintEdge = tintVolume(footprint, inner, groundM, gold(TINT_EDGE_ALPHA), pickId);
         } else {
           // Too small to carry a 1.6 m band: one flat wash over the whole roof.
-          tintFill = tintVolume(footprint, null, ground, gold(TINT_FILL_ALPHA), pickId);
+          tintFill = tintVolume(footprint, null, groundM, gold(TINT_FILL_ALPHA), pickId);
         }
         collection.add(tintFill);
         if (tintEdge) collection.add(tintEdge);
@@ -433,7 +425,7 @@ export function createNearFieldEffects({
         columnMaterial,
         tintFill,
         tintEdge,
-        position: Cesium.Cartesian3.fromDegrees(property.lng, property.lat, ground),
+        position: Cesium.Cartesian3.fromDegrees(anchor.lng, anchor.lat, groundM),
       });
     }
     built = true;
@@ -575,6 +567,8 @@ export function createNearFieldEffects({
   return {
     get supported() { return supported; },
     get active() { return active; },
+    /** The primitive collection, so the ground sample can skip it. */
+    get collections() { return [collection]; },
     /** The shared effect clock, in seconds. One clock for every effect. */
     get seconds() { return lastSeconds; },
     get count() { return entries.size; },

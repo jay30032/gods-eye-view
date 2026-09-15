@@ -14,10 +14,18 @@
  *      camera climbs. A marker has to hold its size on screen, not on the map.
  *
  * So: billboards, points, labels and polylines in primitive collections, placed
- * at sampled ground height + a roofline clearance, with depth testing disabled
- * so tiles can never hide them. Pulsing is a per-frame **scale** write on an
- * existing billboard — there is no geometry rebuild anywhere in this file after
- * `build()`, which is what keeps it cheap enough to run every frame.
+ * ON the property's anchor — the footprint centroid at the one ground height
+ * `visuals/ground.js` holds for that row — with depth testing disabled so tiles
+ * can never hide them. Pulsing is a per-frame **scale** write on an existing
+ * billboard; the only geometry rebuild after `build()` is the manager calling
+ * `build()` again when the ground source reports a height moved.
+ *
+ * The marker used to sample its own ground and float 14 m above it. Two
+ * samples (this layer's from space, the near-field layer's from the near
+ * field) put the sprite and the tint on different grounds — see ground.js —
+ * and the 14 m rise was a second offset the hero framing then had to tilt for.
+ * The sprite now stands exactly where the outline, the tint and the lot line
+ * stand, and the smoke check measures that they do.
  *
  * The pure half (tempos, alpha rules, label text) is exported for unit tests;
  * the Cesium half takes `Cesium` as an argument so this module imports nothing
@@ -29,7 +37,7 @@ import { GOLD } from './goldHalo.js';
 export const SPRITE_PX = 48;
 export const CORE_PX = 12;
 /** Clearance above the roofline so a marker reads as floating, not painted on. */
-export const MARKER_HEIGHT_M = 14;
+/** The beacon rises from the anchor; nothing else is lifted off it. */
 export const BEACON_HEIGHT_M = 120;
 export const BEACON_WIDTH_PX = 3;
 export const EMPHASIS_SCALE = 1.5;
@@ -136,10 +144,11 @@ function spriteCanvas(rgba, size = SPRITE_PX) {
 }
 
 /**
- * @param {{viewer:object, Cesium:object, market:object, getProperties:Function,
+ * @param {{viewer:object, Cesium:object, ground:object, getProperties:Function,
  *   reduced:Function}} deps
  */
-export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduced = () => false }) {
+export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduced = () => false }) {
+  if (!ground?.positionFor) throw new TypeError('createMarkerLayer needs the shared ground source');
   const scene = viewer.scene;
   const billboards = scene.primitives.add(new Cesium.BillboardCollection({ scene }));
   const points = scene.primitives.add(new Cesium.PointPrimitiveCollection());
@@ -151,15 +160,6 @@ export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduc
   let epoch = null;
   let frozenSeconds = null;
   let destroyed = false;
-  /**
-   * True when `build()` had to fall back to the market's ground constant
-   * because no geometry was loaded under a property yet. That matters: the
-   * camera samples the real surface a moment later, and if the two disagree the
-   * marker sits metres above or below where the framing expects it — which is
-   * exactly how the hero subject ended up a quarter of the way up the frame.
-   */
-  let usedGroundFallback = false;
-  let groundAttempts = 0;
 
   let focusedId = null;
   let topPickId = null;
@@ -182,27 +182,6 @@ export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduc
     return sprites.get('__gold');
   }
 
-  /**
-   * Ground height under a property. Sampled from the loaded scene so markers
-   * clear real rooftops, with the market constant as the pre-tile fallback —
-   * the same correction the camera needed.
-   */
-  function groundHeightM(lat, lng) {
-    try {
-      const carto = Cesium.Cartographic.fromDegrees(lng, lat);
-      if (scene.sampleHeightSupported) {
-        const sampled = scene.sampleHeight(carto);
-        if (Number.isFinite(sampled)) return sampled;
-      }
-      const terrain = scene.globe?.getHeight?.(carto);
-      if (Number.isFinite(terrain)) return terrain;
-    } catch {
-      // No geometry loaded under that point yet.
-    }
-    usedGroundFallback = true;
-    return Number(market?.groundElevationM) || 0;
-  }
-
   function primarySignalType(property) {
     const ranked = ['FORECLOSURE', 'TAX_SALE', 'PREFORECLOSURE', 'DISTRESS', 'LISTED_OPPORTUNITY'];
     for (const type of ranked) {
@@ -214,12 +193,11 @@ export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduc
   function build() {
     clear();
     if (destroyed) return;
-    usedGroundFallback = false;
-    groundAttempts += 1;
     for (const property of getProperties() || []) {
-      const ground = groundHeightM(property.lat, property.lng);
-      const base = Cesium.Cartesian3.fromDegrees(property.lng, property.lat, ground + MARKER_HEIGHT_M);
-      const top = Cesium.Cartesian3.fromDegrees(property.lng, property.lat, ground + MARKER_HEIGHT_M + BEACON_HEIGHT_M);
+      // The one anchor every layer shares: footprint centroid, one ground.
+      const base = ground.positionFor(property);
+      const top = ground.positionFor(property, BEACON_HEIGHT_M);
+      if (!base || !top) continue;
       const type = primarySignalType(property);
       const [r, g, b] = colorForSignal(type);
       const pickId = { terrasignalPropertyId: property.id };
@@ -351,19 +329,9 @@ export function createMarkerLayer({ viewer, Cesium, market, getProperties, reduc
   return {
     get count() { return markers.size; },
     get ids() { return [...markers.keys()]; },
+    /** The primitive collections, so the ground sample can skip them. */
+    get collections() { return [billboards, points, labels, polylines]; },
     build,
-    /** Did the last build guess at ground height anywhere? */
-    get groundIsEstimated() { return usedGroundFallback; },
-    /**
-     * Re-place the markers once real geometry is under them. Bounded, because
-     * on the keyless path `sampleHeight` never succeeds and retrying forever
-     * would rebuild 30 primitives on every camera move.
-     */
-    refreshGround(maxAttempts = 5) {
-      if (destroyed || !usedGroundFallback || groundAttempts >= maxAttempts) return false;
-      build();
-      return true;
-    },
     setEnabled(next) {
       enabled = Boolean(next);
       applyState();

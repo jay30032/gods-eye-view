@@ -47,6 +47,13 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
       a photo. Kept behind `?world=clear` for experiments only: no chip, no
       spoken command, no remembered choice. The photo world is the only
       shipped world.
+- [x] One ground (`visuals/ground.js`): every property has one anchor (its
+      footprint centroid) at one height sampled from the tiles, re-sampled once
+      the camera is in the near field; sprites, beacons, columns and tint
+      volumes all stand on it. Replaces two independent samples that put the
+      far-field sprites on a coarse-LOD ground above their roofs. `smoke:six`
+      and `smoke:demo` gate every visible sprite to within 24 px of its
+      footprint centroid at CRUISE and at HERO
 - [x] X-ray: on "look closer" / any focus / "show me the lot", and on demand
       with "x-ray" / "see through", Google's tileset style goes translucent
       white at 35% for 2.5 s and eases back to opaque over 600 ms; "solid"

@@ -231,6 +231,13 @@ const SHOT_DIR = arg('shots', '/tmp/shots');
 const MIN_MARKERS_IN_VIEW = 20;
 /** The focused house must land near the middle of the frame, not under chrome. */
 const HERO_CENTRE_FRACTION = 0.30;
+/**
+ * A sprite stands on its house: at most this far, on screen, from the
+ * footprint centroid the outline and the tint are drawn around. This is the
+ * gate that would have caught the markers floating a coarse-LOD ground above
+ * their roofs while the draped effects sat on the fine one.
+ */
+const SPRITE_FOOTPRINT_MAX_PX = 24;
 /** A dropped frame is anything the eye reads as a stutter on this hardware. */
 const FRAME_P95_BUDGET_MS = 120;
 const URL_ARG = arg('url', SPAWN_KEYLESS
@@ -535,6 +542,47 @@ async function main() {
     return { total: positions.length, inView: inside.length, count: visuals?.markerCount ?? 0 };
   }).catch(() => ({ total: 0, inView: 0, count: 0 }));
 
+  /**
+   * Every visible sprite against its own footprint centroid, in pixels.
+   *
+   * Both points come from the page: the sprite's world position projected,
+   * and the ground source's anchor for the same row projected. A row with no
+   * footprint has no centroid and is skipped; a pair is only judged when both
+   * points are inside the viewport.
+   */
+  const spriteAlignment = () => page.evaluate(() => {
+    const visuals = window.__terraSignal?.visuals;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const inside = (p) => p && p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h;
+    const pairs = [];
+    let noFootprint = 0;
+    for (const sprite of visuals?.screenPositions?.() || []) {
+      const footprint = visuals.footprintScreenPosition(sprite.id);
+      if (!footprint) { noFootprint += 1; continue; }
+      if (!inside(sprite) || !inside(footprint)) continue;
+      pairs.push({
+        id: sprite.id,
+        gapPx: Math.round(Math.hypot(sprite.x - footprint.x, sprite.y - footprint.y) * 10) / 10,
+        dyPx: Math.round((sprite.y - footprint.y) * 10) / 10,
+      });
+    }
+    const worst = pairs.reduce((a, b) => (b.gapPx > (a?.gapPx ?? -1) ? b : a), null);
+    return {
+      judged: pairs.length,
+      noFootprint,
+      worstPx: worst?.gapPx ?? null,
+      worstId: worst?.id ?? null,
+      pairs,
+      ground: visuals?.ground
+        ? { fine: visuals.ground.fine, coarse: visuals.ground.coarse, market: visuals.ground.market, samples: visuals.ground.samples }
+        : null,
+    };
+  }).catch(() => null);
+
+  /** The ground source's full account: every entry and the last samples. */
+  const groundReport = () => page.evaluate(() => window.__terraSignal?.visuals?.ground ?? null).catch(() => null);
+
   /** Where the focused marker sits in the frame, 0..1 from the top left. */
   const focusedMarkerFrame = () => page.evaluate(() => {
     const session = window.__terraSignal;
@@ -659,6 +707,8 @@ async function main() {
     const cruiseStart = await pageNow();
     await new Promise((r) => setTimeout(r, 4_000));
     windows.sixCruise = [cruiseStart, await pageNow()];
+    checks.alignCruise = await spriteAlignment();
+    record(`CHECK sprite/footprint at CRUISE ${JSON.stringify(checks.alignCruise)}`);
     await shot('cruise-six');
 
     // "show me the best one" — the same words a reviewer says out loud.
@@ -687,6 +737,10 @@ async function main() {
     checks.heroScene = await sceneState();
     checks.heroEffects = await effectsState();
     record(`CHECK effects at HERO ${JSON.stringify(checks.heroEffects)}`);
+    checks.alignHero = await spriteAlignment();
+    record(`CHECK sprite/footprint at HERO ${JSON.stringify(checks.alignHero)}`);
+    checks.ground = await groundReport();
+    record(`CHECK ground ${JSON.stringify(checks.ground)}`);
     await shot('hero-six');
 
     // Four more seconds parked on the house: the orbit runs, the gold outline
@@ -1301,6 +1355,8 @@ async function main() {
     checks.markersInView = await markersInView();
     record(`CHECK markers in view at CRUISE: ${JSON.stringify(checks.markersInView)}`);
     playLog.push(`markers in view at CRUISE: ${checks.markersInView.inView}/${checks.markersInView.count}`);
+    checks.alignCruise = await spriteAlignment();
+    record(`CHECK sprite/footprint at CRUISE ${JSON.stringify(checks.alignCruise)}`);
     await shot('1-cruise-settled');
 
     // Find me money: REVEAL settles (halo appears), then HERO.
@@ -1325,6 +1381,10 @@ async function main() {
     playLog.push(`hero settled: ${heroed}`);
     checks.heroCentred = await focusedMarkerFrame();
     record(`CHECK focused marker frame position: ${JSON.stringify(checks.heroCentred)}`);
+    checks.alignHero = await spriteAlignment();
+    record(`CHECK sprite/footprint at HERO ${JSON.stringify(checks.alignHero)}`);
+    checks.ground = await groundReport();
+    record(`CHECK ground ${JSON.stringify(checks.ground)}`);
     await shot('3-hero-settled');
 
     const orbitStart = await pageNow();
@@ -1507,6 +1567,23 @@ async function main() {
   const sixXrayFramesOk = !SIX || Boolean(sixXrayFrames && sixXrayFrames.p95 <= sixBudgetMs);
   const sixXrayOk = sixXrayTookOk && sixXrayBackOk && sixXrayFramesOk;
 
+  /**
+   * Sprites stand on their houses, at CRUISE and at HERO.
+   *
+   * Judged for every property whose sprite and footprint centroid are both on
+   * screen, and there has to be at least one at each shot or the gate has
+   * measured nothing. The far field and the near field share one ground now;
+   * this is what proves they do.
+   */
+  const alignedAt = (state) => Boolean(
+    state && state.judged >= 1 && state.pairs.every((pair) => pair.gapPx <= SPRITE_FOOTPRINT_MAX_PX),
+  );
+  const alignOk = !(SIX || PLAY) || (alignedAt(checks.alignCruise) && alignedAt(checks.alignHero));
+  const alignLine = (label, state) => `${label} ${state
+    ? `${state.judged} judged · worst ${state.worstPx ?? '?'}px${state.worstId ? ` (${state.worstId})` : ''}`
+      + `${state.noFootprint ? ` · ${state.noFootprint} without footprint` : ''}`
+    : 'no data'}`;
+
 
   // ---- clear view verdict ----
   const clearBudgetMs = frameBudgetFor(targetFrameRate);
@@ -1679,6 +1756,7 @@ async function main() {
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
     && framesOk && markersOk && heroOk
     && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk && sixXrayOk
+    && alignOk
     && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk
     && driveLotViewOk && driveResumeOk
     && driveStopViewOk && driveLazyMapsOk && driveStreetResumeOk && drivePanoSwapOk
@@ -1748,6 +1826,11 @@ async function main() {
         + `solid → ${checks.xraySolid?.styleAlpha ?? 'no data'} · `
         + `p95 ${sixXrayFrames ? `${sixXrayFrames.p95}ms` : 'no data'}`
         + ` (budget ${sixBudgetMs.toFixed(1)}ms) · auto runs ${checks.xrayBefore?.runs ?? '?'}`,
+      `  ${alignOk ? 'PASS' : 'FAIL'}  sprite on house    `
+        + `${alignLine('cruise', checks.alignCruise)} · ${alignLine('hero', checks.alignHero)}`
+        + ` (max ${SPRITE_FOOTPRINT_MAX_PX}px) · ground ${checks.ground
+          ? `${checks.ground.fine} fine / ${checks.ground.coarse} coarse / ${checks.ground.market} market, ${checks.ground.samples} samples`
+          : 'no data'}`,
       `        ground pulses      `
         + `ring on ${checks.angleChoice?.pulses?.ringId ?? 'NONE'}`
         + ` · supported=${checks.angleChoice?.pulses?.supported ?? '?'}`,
@@ -1845,6 +1928,11 @@ async function main() {
           ? `x ${(checks.heroCentred.fx * 100).toFixed(0)}% y ${(checks.heroCentred.fy * 100).toFixed(0)}%`
           : 'focused marker not on screen')
         + ` (centre ${HERO_CENTRE_FRACTION * 100}%)`,
+      `  ${alignOk ? 'PASS' : 'FAIL'}  sprite on house    `
+        + `${alignLine('cruise', checks.alignCruise)} · ${alignLine('hero', checks.alignHero)}`
+        + ` (max ${SPRITE_FOOTPRINT_MAX_PX}px) · ground ${checks.ground
+          ? `${checks.ground.fine} fine / ${checks.ground.coarse} coarse / ${checks.ground.market} market, ${checks.ground.samples} samples`
+          : 'no data'}`,
       `  ${framesOk ? 'PASS' : 'FAIL'}  frame time p95     `
         + `descent ${descentFrames ? `${descentFrames.p95}ms` : 'no data'} · `
         + `hero ${heroFrames ? `${heroFrames.p95}ms` : 'no data'} `
