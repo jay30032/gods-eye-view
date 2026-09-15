@@ -7,10 +7,10 @@ import {
   buildDriveRoute,
   createDriveDemo,
   isStrongDriveSignal,
+  plural,
 } from './driveDemo.js';
 import { SIX_ROUTE } from './mock/sixRoute.js';
 import { DEFAULT_SPEED_MPS } from './drive/positionSource.js';
-import { STREET_VIEW_SPEED_MPS } from './drive/streetViewDrive.js';
 
 const NOW = Date.UTC(2026, 8, 10);
 const properties = createMockPropertyProvider({ now: NOW }).list();
@@ -81,6 +81,9 @@ function stubStreetView() {
     mount() { calls.push('mount'); return Promise.resolve({ ok: true }); },
     update() { calls.push('update'); return null; },
     reseat() { calls.push('reseat'); },
+    settle() { calls.push('settle'); return true; },
+    ready: false,
+    showAt() { calls.push('showAt'); return Promise.resolve({ ok: true, panoId: 'p1' }); },
     clearMarkers() { calls.push('clearMarkers'); },
     setVisible() {},
   };
@@ -100,21 +103,25 @@ function driveFor(options = {}) {
   return { drive, streetView };
 }
 
-test('"drive" enters the Street View drive by default', async () => {
+test('the drive is the 3D chase camera, and mounts no panorama', async () => {
+  /**
+   * Street View was the driving view for one revision. The double-buffered
+   * cross-fade made each join between panoramas continuous and could not make
+   * the motion continuous, because there is none between two fixed points.
+   */
   const { drive, streetView } = driveFor();
   const result = drive.start();
   assert.equal(result.ok, true);
-  assert.equal(drive.view, DRIVE_VIEWS.STREET_VIEW);
-  // The mount is async and the drive is not: fixes start arriving immediately,
-  // and must not wait on a round trip to maps.googleapis.com.
-  assert.equal(drive.panoDriving, false, 'the drive begins before the panorama does');
+  assert.equal(drive.view, DRIVE_VIEWS.CHASE);
+  assert.equal(drive.panoStopped, false);
   await Promise.resolve();
   await Promise.resolve();
-  assert.ok(streetView.calls.includes('mount'));
+  assert.equal(streetView.calls.includes('mount'), false,
+    'a drive nobody asks "from the street" on should not load 300 KB of Maps API');
   drive.destroy();
 });
 
-test('"drive in 3D" keeps the chase camera and never mounts a panorama', async () => {
+test('"drive in 3D" still parses and means what "drive" already does', async () => {
   const { drive, streetView } = driveFor();
   drive.start({ view: DRIVE_VIEWS.CHASE });
   assert.equal(drive.view, DRIVE_VIEWS.CHASE);
@@ -123,39 +130,23 @@ test('"drive in 3D" keeps the chase camera and never mounts a panorama', async (
   drive.destroy();
 });
 
-test('a live GPS drive is never a panorama', async () => {
-  /**
-   * The phone is already at the kerb. A panorama of where the driver is
-   * standing is a photograph of the view out of their own window, and the
-   * overlays are the one thing it cannot show them.
-   */
-  const { drive, streetView } = driveFor({
-    geolocation: { watchPosition: () => 1, clearWatch: () => {} },
-  });
-  drive.start({ live: true, view: DRIVE_VIEWS.STREET_VIEW });
-  assert.equal(drive.view, DRIVE_VIEWS.CHASE, 'live asked for Street View and must not get it');
-  await Promise.resolve();
-  assert.equal(streetView.calls.includes('mount'), false);
+test('the panorama is mounted the first time something asks for it, once', async () => {
+  const { drive, streetView } = driveFor();
+  drive.start();
+  const first = await drive.mountStreetView();
+  assert.equal(first.ok, true);
+  assert.equal(streetView.calls.filter((c) => c === 'mount').length, 1);
+  streetView.ready = true;
+  await drive.mountStreetView();
+  assert.equal(streetView.calls.filter((c) => c === 'mount').length, 1, 'mounted once, not per question');
   drive.destroy();
 });
 
-test('a Street View drive plays slower than the chase camera', () => {
-  // Not a preference: at 9 m/s a 10 m pano step arrives before Google's own
-  // transition has finished, and the drive reads as a stutter of half-played
-  // dissolves rather than as travel.
-  const streetViewDrive = driveFor();
-  streetViewDrive.drive.start();
-  const svSpeed = streetViewDrive.drive.source.speedMps;
-  streetViewDrive.drive.destroy();
-
-  const chaseDrive = driveFor();
-  chaseDrive.drive.start({ view: DRIVE_VIEWS.CHASE });
-  const chaseSpeed = chaseDrive.drive.source.speedMps;
-  chaseDrive.drive.destroy();
-
-  assert.equal(svSpeed, STREET_VIEW_SPEED_MPS);
-  assert.equal(chaseSpeed, DEFAULT_SPEED_MPS);
-  assert.ok(svSpeed < chaseSpeed);
+test('the drive plays at the chase camera speed', () => {
+  const { drive } = driveFor();
+  drive.start();
+  assert.equal(drive.source.speedMps, DEFAULT_SPEED_MPS);
+  drive.destroy();
 });
 
 test('leaving the road for an answer saves the position and holds it', () => {
@@ -189,5 +180,42 @@ test('coming back from an answer re-seats the panorama rather than waiting a ste
   streetView.calls.length = 0;
   drive.resumeFromAnswer(parked);
   assert.ok(streetView.calls.includes('reseat'));
+  drive.destroy();
+});
+
+test('"1 flagged properties" is not a sentence anyone should hear', () => {
+  const rows = createMockPropertyProvider({ now: NOW, dataset: 'six' }).list();
+  const drive = createDriveDemo({
+    getProperties: () => [rows[0]],
+    onAnnounce: () => {},
+    onStop: () => {},
+    streetView: stubStreetView(),
+    routeCoordinates: SIX_ROUTE,
+  });
+  const single = drive.start({ view: DRIVE_VIEWS.CHASE });
+  assert.match(single.spoken, /\b1 flagged property\b/);
+  assert.doesNotMatch(single.spoken, /1 flagged properties/);
+  drive.destroy();
+
+  const many = driveFor().drive;
+  const all = many.start({ view: DRIVE_VIEWS.CHASE });
+  assert.match(all.spoken, /\b6 flagged properties\b/);
+  many.destroy();
+});
+
+test('plural counts by the number, not by whether there is a list', () => {
+  assert.equal(plural(0, 'house', 'houses'), '0 houses');
+  assert.equal(plural(1, 'house', 'houses'), '1 house');
+  assert.equal(plural(2, 'house', 'houses'), '2 houses');
+});
+
+test('a pause settles a cross-fade rather than freezing it half way', () => {
+  // The hop advances on fixes and a paused source emits none, so a pause
+  // landing mid-fade would leave both buffers at half opacity.
+  const { drive, streetView } = driveFor();
+  drive.start({ view: DRIVE_VIEWS.CHASE });
+  streetView.calls.length = 0;
+  drive.pause();
+  assert.ok(streetView.calls.includes('settle'));
   drive.destroy();
 });

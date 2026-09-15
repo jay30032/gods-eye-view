@@ -44,7 +44,18 @@ import { normalizeUtterance } from '../nlp/parse.js';
 
 /** Every view the drive can be showing. */
 export const VIEWS = Object.freeze({
-  /** The panorama: the driving view. */
+  /** The 3D chase camera: the moving view, and what every answer returns to. */
+  DRIVE: 'drive',
+  /**
+   * The panorama, standing still.
+   *
+   * Street View was the driving view for one revision and is not any more. A
+   * panorama is a still photograph of one point, and a drive assembled out of
+   * them is a sequence of cuts however carefully they are cross-faded — the
+   * double buffer made each join continuous and could not make the *motion*
+   * continuous, because there is none between two fixed points. The 3D scene
+   * moves; the panorama is what you look at when you have stopped.
+   */
   STREET_VIEW: 'streetview',
   /** A card over whatever is already on screen. No camera move. */
   CARD: 'card',
@@ -62,6 +73,9 @@ export const VIEWS = Object.freeze({
 
 /** Views drawn by Cesium rather than by the panorama. */
 const THREE_D_VIEWS = new Set([VIEWS.AERIAL, VIEWS.TOPDOWN, VIEWS.ANGLE, VIEWS.CRUISE]);
+
+/** Views that park the drive: everything except the moving view and the cards. */
+const STOP_VIEWS = new Set([...THREE_D_VIEWS, VIEWS.STREET_VIEW]);
 
 /** Is this view rendered by the 3D scene? */
 export function isThreeD(view) {
@@ -81,7 +95,7 @@ export function isThreeD(view) {
  * how recent are cards: they are answerable without stopping.
  */
 export function leavesTheRoad(view) {
-  return isThreeD(view);
+  return STOP_VIEWS.has(view);
 }
 
 /** The cross-fade, in milliseconds. */
@@ -97,8 +111,19 @@ export const CROSS_FADE_MS = 300;
 const VIEW_PATTERNS = Object.freeze([
   // 1. Resume. First, and only first, because "back on the road" contains
   //    "back" and rule 7 would otherwise read it as a request for a rear wall.
-  [/\bkeep going\b|\bresume\b|\bcarry on\b|\bback on (?:the )?(?:road|route)\b|\bdrive on\b|\bback to (?:the )?(?:drive|street|road)\b/,
-    VIEWS.STREET_VIEW, 'resume'],
+  //    It returns to the 3D chase camera, which is the drive.
+  [/\bkeep going\b|\bresume\b|\bcarry on\b|\bback on (?:the )?(?:road|route)\b|\bdrive on\b|\bback to (?:the )?(?:drive|road)\b/,
+    VIEWS.DRIVE, 'resume'],
+
+  // 1b. The panorama, on demand. Ahead of the sides rule because "from the
+  //     street" contains neither a side nor a compass point but does read as a
+  //     request to look at something, and rule 7 would claim it on `from`.
+  //
+  //     This is what "from the street" now means. It used to be a 3D camera
+  //     placed at the kerb looking at the front wall — a reconstruction of a
+  //     view Google has an actual photograph of, taken from the actual street.
+  [/\bstreet view\b|\bfrom the street\b|\bstreet[\s-]?side\b|\bfrom the (?:curb|kerb)\b|\bon the street\b/,
+    VIEWS.STREET_VIEW, 'streetview'],
 
   // 2. The land. Ahead of the overhead rule because "how big is the lot from
   //    above" is a question about the lot; the aerial answers it either way,
@@ -151,7 +176,7 @@ const INTENT_VIEWS = Object.freeze({
   compare: [VIEWS.ANALYSIS, 'numbers'],
   reset_assumptions: [VIEWS.ANALYSIS, 'numbers'],
   camera_angle: [VIEWS.ANGLE, 'angle'],
-  drive_resume: [VIEWS.STREET_VIEW, 'resume'],
+  drive_resume: [VIEWS.DRIVE, 'resume'],
   look_closer: [VIEWS.AERIAL, 'lot'],
 });
 
@@ -197,7 +222,8 @@ export function viewForQuestion(text, { intent = null, slots = null } = {}) {
  */
 export function announceFor(view, reason = null) {
   switch (view) {
-    case VIEWS.STREET_VIEW: return 'Back on the road.';
+    case VIEWS.DRIVE: return 'Back on the road.';
+    case VIEWS.STREET_VIEW: return 'From the street.';
     case VIEWS.AERIAL: return 'Here\'s the lot.';
     case VIEWS.TOPDOWN: return 'From above.';
     case VIEWS.CRUISE: return 'Here\'s the block.';
@@ -273,8 +299,8 @@ export function createViewDirector({
   timers = globalThis,
   now = () => Date.now(),
 } = {}) {
-  let view = VIEWS.STREET_VIEW;
-  let fadeTo = VIEWS.STREET_VIEW;
+  let view = VIEWS.DRIVE;
+  let fadeTo = VIEWS.DRIVE;
   let fadeStartedAt = now() - CROSS_FADE_MS;
   let fadeTimer = null;
   /** Where the drive was when it last left the road, and facing which way. */
@@ -322,13 +348,16 @@ export function createViewDirector({
     get fade() { return crossFadeState(now() - fadeStartedAt, { to: fadeTo }); },
 
     /**
-     * Street View is available and driving. Until this is true every view
-     * decision still resolves, and every one of them is already on screen.
+     * A drive is running, so there is a road to leave and come back to.
+     *
+     * Before this is true every view decision still resolves — the mapping is
+     * pure and the tests exercise it directly — and none of them is acted on,
+     * because there is no route position to save and nothing to return to.
      */
     setEnabled(next) {
       enabled = Boolean(next);
       if (!enabled) {
-        view = VIEWS.STREET_VIEW;
+        view = VIEWS.DRIVE;
         saved = null;
       }
       return enabled;
@@ -356,20 +385,54 @@ export function createViewDirector({
     async show(next, {
       property = null, reason = null, angle = null, moveCamera = true,
     } = {}) {
-      if (!enabled) return { ok: false, view, reason: 'street view is not driving' };
+      if (!enabled) return { ok: false, view, reason: 'no drive running' };
       const announce = announceFor(next, reason);
       if (announce) onAnnounce?.(announce);
 
-      if (next === VIEWS.STREET_VIEW) {
+      if (next === VIEWS.DRIVE) {
         const resumed = saved;
         saved = null;
-        view = VIEWS.STREET_VIEW;
-        applyFade(VIEWS.STREET_VIEW);
-        // Position and direction first, then the fade reveals a panorama that
-        // is already where it was rather than one that arrives and then moves.
+        view = VIEWS.DRIVE;
+        applyFade(VIEWS.DRIVE);
+        // Position and direction first, then the fade reveals a scene that is
+        // already where it was rather than one that arrives and then moves.
         drive?.resumeFromAnswer?.(resumed);
         onView?.(view, { reason, resumed });
         return { ok: true, view, announce, resumed };
+      }
+
+      /**
+       * The panorama, standing still at the point the drive stopped.
+       *
+       * It parks like every other answer, and unlike every other answer the
+       * thing it shows is a photograph rather than a camera move — so the fade
+       * waits on the imagery. Revealing an empty grey layer and letting the
+       * panorama arrive into it is the break this whole view exists to avoid.
+       */
+      if (next === VIEWS.STREET_VIEW) {
+        parkOnTheRoad();
+        view = VIEWS.STREET_VIEW;
+        onView?.(view, { reason, property });
+        const at = property && Number.isFinite(property.lat)
+          ? { lat: property.lat, lng: property.lng }
+          : drive?.position?.() || null;
+        const shown = await streetView?.showAt?.(at, drive?.headingDeg ?? null);
+        if (!shown?.ok) {
+          // No coverage here is a fact about the street, not a failure. Put the
+          // 3D scene back rather than fading to a grey rectangle.
+          view = VIEWS.AERIAL;
+          applyFade(VIEWS.AERIAL);
+          if (property) {
+            visuals?.setFocused?.(property.id);
+            await camera?.fly?.('HERO', property);
+          }
+          const why = 'No Street View along this stretch — here it is from the air.';
+          onAnnounce?.(why);
+          onView?.(view, { reason: 'no-coverage' });
+          return { ok: false, view, announce: why, reason: shown?.reason || 'no coverage' };
+        }
+        applyFade(VIEWS.STREET_VIEW);
+        return { ok: true, view, announce, panoId: shown.panoId };
       }
 
       if (next === VIEWS.CARD || next === VIEWS.ANALYSIS) {
@@ -405,25 +468,9 @@ export function createViewDirector({
       return { ok: true, view, announce };
     },
 
-    /** Back to the panorama, wherever the drive left it. */
+    /** Back to the road, wherever the drive left it. */
     resume() {
-      return this.show(VIEWS.STREET_VIEW, { reason: 'resume' });
-    },
-
-    /** Fall back to the 3D chase camera — no coverage, or a refused key. */
-    fallbackToChase() {
-      if (view === VIEWS.STREET_VIEW) applyFade(VIEWS.AERIAL);
-      view = VIEWS.STREET_VIEW;
-      enabled = false;
-      onView?.(VIEWS.STREET_VIEW, { reason: 'no-coverage', chase: true });
-    },
-
-    /** Coverage returned: the panorama is the driving view again. */
-    restoreStreetView() {
-      enabled = true;
-      view = VIEWS.STREET_VIEW;
-      applyFade(VIEWS.STREET_VIEW);
-      onView?.(VIEWS.STREET_VIEW, { reason: 'coverage-returned' });
+      return this.show(VIEWS.DRIVE, { reason: 'resume' });
     },
 
     destroy() {

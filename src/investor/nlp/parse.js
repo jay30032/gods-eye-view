@@ -325,8 +325,17 @@ export function parseCameraCommand(normalized) {
   const compass = COMPASS_PATTERN.exec(normalized);
   if (compass) return { compass: compass[1].replace(/[\s-]/g, '') };
 
+  /**
+   * "From the street" is Street View, and is claimed before the sides.
+   *
+   * It used to mean a 3D camera placed at the kerb looking at the front wall —
+   * a reconstruction of a view Google has an actual photograph of, taken from
+   * the actual street. The panorama is the better answer to the question, so
+   * the phrase now routes to it through the view director and this returns the
+   * front-wall framing only as the fallback for a house with no coverage.
+   */
   if (/\bfrom the street\b|\bstreet view\b|\bstreet[\s-]?side\b|\bfrom the curb\b|\bkerb\b/.test(normalized)) {
-    return { side: 'front', viaStreet: true };
+    return { side: 'front', viaStreet: true, streetView: true };
   }
 
   // A side only counts when the sentence is asking to look at something. That
@@ -365,16 +374,10 @@ export function parseDriveCommand(normalized) {
   if (driveThrough || startHere || bareDrive) {
     const slots = {};
     if (startHere) slots.fromFocused = true;
-    /**
-     * Which view drives.
-     *
-     * Drive Mode v2 makes Street View the default, so the slot is set on every
-     * entry rather than only when 3D is asked for — a `start_drive` with no
-     * view slot would be an older caller, and defaulting *that* to Street View
-     * silently is how the demo rail ends up in a view it never asked for.
-     */
-    slots.view = /\bin 3d\b|\bin three d\b|\b3d drive\b|\bchase cam(?:era)?\b|\b3d mode\b/
-      .test(normalized) ? 'chase' : 'streetview';
+    // There is one driving view — the 3D chase camera — so "drive in 3D" is
+    // still accepted and means what "drive" already does. The phrase is kept
+    // because people say it, not because it selects anything.
+    slots.view = 'chase';
     const signalType = matchSignalType(normalized);
     if (signalType) slots.signalType = signalType;
     const strategy = matchStrategy(normalized);

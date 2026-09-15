@@ -207,7 +207,6 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     apiKey: readMapsApiKey(),
     getRows: () => drive?.onRoute || [],
     getTopPickId: () => drive?.goldId || conversation.topPickId || null,
-    onCoverage: (mode, detail) => drive?.onCoverage?.(mode, detail),
     onPano: ({ panoId }) => { lastPanoId = panoId; panoAdvances += 1; },
     onError: (reason) => console.warn('[TerraSignal] Street View unavailable:', reason),
   });
@@ -222,12 +221,16 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     drive: {
       get alongM() { return drive?.alongM ?? 0; },
       get headingDeg() { return drive?.headingDeg ?? null; },
+      position: () => drive?.position?.() || null,
       parkForAnswer: () => drive?.parkForAnswer?.(),
       resumeFromAnswer: (saved) => drive?.resumeFromAnswer?.(saved),
       routePoints: () => drive?.routePoints?.() || null,
     },
     onAnnounce: (clause) => setAiPrompt(clause),
-    onView: (view, detail) => setDriveViewChrome(view, detail),
+    onView: (view, detail) => {
+      drive?.setPanoStopped?.(view === VIEWS.STREET_VIEW);
+      setDriveViewChrome(view, detail);
+    },
   });
 
   drive = createDriveDemo({
@@ -289,10 +292,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     setProgressBarVisible(Boolean(state.running));
     if (state.running) {
       setDriveProgress(state.alongM, state.lengthM);
-      // `panoDriving` and not `view`: what the chrome has to match is what is
-      // actually on screen, and a Street View drive with no coverage under it
-      // is showing the chase camera however it was started.
-      setDriveViewChrome(state.panoDriving ? 'streetview' : '3d');
+      // What the chrome has to match is what is actually on screen, which is
+      // the panorama only while it is parked there as an answer.
+      setDriveViewChrome(state.panoStopped ? 'streetview' : '3d');
     } else {
       hideDriveIntro();
       setDriveViewChrome('3d', { chase: true });
@@ -696,6 +698,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         if (viewDecision?.view === VIEWS.ANGLE) {
           return { ok: true, action: 'camera_angle', view: VIEWS.ANGLE, ...slots, spoken: '' };
         }
+        // "From the street" while a drive is running is the panorama, which
+        // `routeView` has already put up; standing still it is still the 3D
+        // front-wall framing, which is what `cameraAngle` does below.
+        if (viewDecision?.view === VIEWS.STREET_VIEW) {
+          return { ok: true, action: 'camera_angle', view: VIEWS.STREET_VIEW, ...slots, spoken: '' };
+        }
         return this.cameraAngle(slots);
       }
 
@@ -711,8 +719,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         // The view director has already put the panorama back at the saved
         // position; calling `keepGoing` as well would resume a drive that is
         // already running and overwrite "Back on the road." with a second line.
-        if (viewDecision?.view === VIEWS.STREET_VIEW) {
-          return { ok: true, action: 'drive_resume', view: VIEWS.STREET_VIEW, spoken: 'Back on the road.' };
+        if (viewDecision?.view === VIEWS.DRIVE) {
+          return { ok: true, action: 'drive_resume', view: VIEWS.DRIVE, spoken: 'Back on the road.' };
         }
         const result = drive.keepGoing();
         setAiPrompt(result.spoken);
@@ -913,17 +921,11 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const plan = drive.plan();
       const live = slots.live ?? readDriveLive();
       /**
-       * "drive" is a Street View drive; "drive in 3D" keeps the chase camera.
-       *
-       * A live drive is neither: `?drive=live` puts the phone's own position on
-       * the 3D overlays and talks, because the windscreen is already showing
-       * the street better than any panorama of it could.
+       * One driving view: the 3D chase camera. "Drive in 3D" still parses and
+       * means what "drive" already does.
        */
-      const view = live
-        ? DRIVE_VIEWS.CHASE
-        : (slots.view === 'chase' ? DRIVE_VIEWS.CHASE : DRIVE_VIEWS.STREET_VIEW);
-      renderDriveIntro(plan, { live, view });
-      const result = drive.start({ live, gold: Boolean(slots.gold), view });
+      renderDriveIntro(plan, { live, view: DRIVE_VIEWS.CHASE });
+      const result = drive.start({ live, gold: Boolean(slots.gold) });
       if (result.ok) {
         setNavActive('drive');
         setDriveChrome(true);
@@ -952,7 +954,25 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const property = focused
         || drive.current
         || (drive.goldId ? this.getById(drive.goldId) : null);
-      if (isThreeD(decision.view) && decision.view !== VIEWS.CRUISE && !property) return null;
+      if ((isThreeD(decision.view) || decision.view === VIEWS.STREET_VIEW)
+        && decision.view !== VIEWS.CRUISE && !property) {
+        // The panorama is the one answer that works without a house: it shows
+        // the street the drive is standing on.
+        if (decision.view !== VIEWS.STREET_VIEW) return null;
+      }
+      // The Maps JavaScript API is only loaded when something asks to see a
+      // photograph, which on most drives is never.
+      if (decision.view === VIEWS.STREET_VIEW) {
+        drive.mountStreetView().then((mounted) => {
+          if (!mounted?.ok) return;
+          viewDirector.show(VIEWS.STREET_VIEW, { property, reason: decision.reason });
+        });
+        if (property) {
+          focused = property;
+          conversation.focusedId = property.id;
+        }
+        return decision;
+      }
       const angle = decision.view === VIEWS.ANGLE
         ? () => {
           focused = property;

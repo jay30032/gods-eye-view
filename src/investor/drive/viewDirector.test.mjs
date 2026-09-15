@@ -86,18 +86,37 @@ test('numbers / deal / run it are the analysis card', () => {
   assert.equal(leavesTheRoad(VIEWS.ANALYSIS), false);
 });
 
-test('keep going / resume return to Street View', () => {
+test('keep going / resume return to the road — the 3D chase camera', () => {
   for (const phrase of ['keep going', 'resume', 'carry on', 'back on the road', 'drive on']) {
-    assert.deepEqual(route(phrase), { view: VIEWS.STREET_VIEW, reason: 'resume' }, phrase);
+    assert.deepEqual(route(phrase), { view: VIEWS.DRIVE, reason: 'resume' }, phrase);
   }
+});
+
+test('"from the street" is the panorama, standing still', () => {
+  /**
+   * It used to be a 3D camera placed at the kerb looking at the front wall — a
+   * reconstruction of a view Google has an actual photograph of, taken from
+   * the actual street. The photograph is the better answer to the question.
+   */
+  for (const phrase of ['from the street', 'street view', 'show me it from the curb', 'streetside']) {
+    assert.deepEqual(route(phrase), { view: VIEWS.STREET_VIEW, reason: 'streetview' }, phrase);
+  }
+});
+
+test('the panorama parks the drive like every other answer', () => {
+  // It is a still photograph of one point. Showing it while the drive moves is
+  // the thing that could not be made continuous however well the joins were
+  // dissolved, because there is no motion between two fixed points.
+  assert.equal(leavesTheRoad(VIEWS.STREET_VIEW), true);
+  assert.equal(leavesTheRoad(VIEWS.DRIVE), false);
 });
 
 test('"back on the road" is a resume and "show me the back" is a wall', () => {
   // The two rules share the word, and only the ordering of the table keeps both
   // readings alive. This is the assertion that fails if anyone reorders it.
-  assert.equal(route('back on the road').view, VIEWS.STREET_VIEW);
+  assert.equal(route('back on the road').view, VIEWS.DRIVE);
   assert.equal(route('show me the back').view, VIEWS.ANGLE);
-  assert.equal(route('back to the drive').view, VIEWS.STREET_VIEW);
+  assert.equal(route('back to the drive').view, VIEWS.DRIVE);
 });
 
 test('a question about the lot from above is still about the lot', () => {
@@ -136,11 +155,16 @@ test('the 3D views are exactly the ones that leave the road', () => {
     [true, true, true, true],
   );
   assert.deepEqual(
-    [VIEWS.STREET_VIEW, VIEWS.CARD, VIEWS.ANALYSIS].map(isThreeD),
-    [false, false, false],
+    [VIEWS.DRIVE, VIEWS.STREET_VIEW, VIEWS.CARD, VIEWS.ANALYSIS].map(isThreeD),
+    [false, false, false, false],
   );
-  for (const view of Object.values(VIEWS)) {
-    assert.equal(leavesTheRoad(view), isThreeD(view), view);
+  // Leaving the road is a wider set than being 3D: the panorama is not drawn by
+  // Cesium and still parks the drive.
+  for (const view of [VIEWS.DRIVE, VIEWS.CARD, VIEWS.ANALYSIS]) {
+    assert.equal(leavesTheRoad(view), false, view);
+  }
+  for (const view of [VIEWS.AERIAL, VIEWS.TOPDOWN, VIEWS.ANGLE, VIEWS.CRUISE, VIEWS.STREET_VIEW]) {
+    assert.equal(leavesTheRoad(view), true, view);
   }
 });
 
@@ -220,7 +244,7 @@ test('time past the end and nonsense both clamp rather than overshoot', () => {
 // The director's state
 // ---------------------------------------------------------------------------
 
-function harness() {
+function harness({ streetView = { showAt: async () => ({ ok: true, panoId: 'p1' }) } } = {}) {
   const element = {
     hidden: true, dataset: {}, style: {},
   };
@@ -237,6 +261,7 @@ function harness() {
   const director = createViewDirector({
     element,
     drive,
+    streetView,
     camera: { fly: (name, target) => { calls.push(['fly', name, target?.id ?? null]); } },
     visuals: { setFocused: (id) => calls.push(['focus', id]) },
     onAnnounce: (clause) => calls.push(['say', clause]),
@@ -257,7 +282,7 @@ test('a 3D answer parks the drive and a resume puts it back on the same metre', 
 
   h.move(999); // nothing may move the saved point while the answer is up
   const resumed = await h.director.resume();
-  assert.equal(h.director.view, VIEWS.STREET_VIEW);
+  assert.equal(h.director.view, VIEWS.DRIVE);
   assert.deepEqual(resumed.resumed, { alongM: 420, headingDeg: 271 });
   assert.equal(h.director.saved, null);
   assert.deepEqual(h.calls.at(-1), ['resume', { alongM: 420, headingDeg: 271 }]);
@@ -304,11 +329,31 @@ test('with Street View not driving, the director changes nothing', async () => {
   assert.equal(h.calls.length, 0, 'no announcement for a view switch that did not happen');
 });
 
-test('losing coverage disables the director rather than leaving it half-armed', () => {
+test('with no drive running the director is disarmed and shows the road', () => {
   const h = harness();
-  h.director.fallbackToChase();
+  h.director.setEnabled(false);
   assert.equal(h.director.enabled, false);
-  h.director.restoreStreetView();
-  assert.equal(h.director.enabled, true);
+  assert.equal(h.director.view, VIEWS.DRIVE);
+  assert.equal(h.director.saved, null, 'a saved point with no drive to return it to is a leak');
+});
+
+test('a street-view answer with no coverage falls back to the air, and says so', async () => {
+  // A grey rectangle is not an answer. No panorama within 25 m is a fact about
+  // the street, and the aerial is the honest second-best.
+  const h = harness({ streetView: { showAt: async () => ({ ok: false, reason: 'no panorama within 25 m' }) } });
+  const result = await h.director.show(VIEWS.STREET_VIEW, { property: { id: 'A', lat: 33.75, lng: -84.3 } });
+  assert.equal(result.ok, false);
+  assert.equal(h.director.view, VIEWS.AERIAL);
+  assert.match(result.announce, /from the air/i);
+  assert.ok(h.calls.some((c) => Array.isArray(c) && c[0] === 'fly' && c[1] === 'HERO'));
+});
+
+test('a street-view answer that finds a panorama fades to it', async () => {
+  const h = harness({ streetView: { showAt: async () => ({ ok: true, panoId: 'p1', faded: true }) } });
+  const result = await h.director.show(VIEWS.STREET_VIEW, { property: { id: 'A', lat: 33.75, lng: -84.3 } });
+  assert.equal(result.ok, true);
+  assert.equal(result.panoId, 'p1');
   assert.equal(h.director.view, VIEWS.STREET_VIEW);
+  assert.ok(h.calls.includes('park'), 'the panorama is a stop view');
+  assert.deepEqual(h.calls[0], ['say', 'From the street.']);
 });

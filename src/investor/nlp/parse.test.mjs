@@ -300,15 +300,25 @@ test('camera_angle is a declared intent', () => {
 // Drive Mode v2 entry
 // ---------------------------------------------------------------------------
 
-test('"drive" enters the Street View drive and "drive in 3D" keeps the chase camera', () => {
-  // The slot is set on every entry rather than only when 3D is asked for: a
-  // `start_drive` with no view slot is an older caller, and silently defaulting
-  // that to Street View is how the demo rail ends up in a view it never chose.
-  assert.equal(parseCommand('drive').slots.view, 'streetview');
-  assert.equal(parseCommand('start the drive').slots.view, 'streetview');
-  assert.equal(parseCommand('drive through this neighborhood').slots.view, 'streetview');
-  assert.equal(parseCommand('drive in 3D').slots.view, 'chase');
-  assert.equal(parseCommand('drive in 3D').intent, 'start_drive');
-  assert.equal(parseCommand('drive through the neighborhood in 3d').slots.view, 'chase');
-  assert.equal(parseCommand('drive with the chase camera').slots.view, 'chase');
+test('every entry is the 3D chase drive, including "drive in 3D"', () => {
+  // There is one driving view. The 3D phrases are still accepted because
+  // people say them, not because they select anything.
+  for (const phrase of [
+    'drive', 'start the drive', 'drive through this neighborhood',
+    'drive in 3D', 'drive through the neighborhood in 3d', 'drive with the chase camera',
+  ]) {
+    const parsed = parseCommand(phrase);
+    assert.equal(parsed.intent, 'start_drive', phrase);
+    assert.equal(parsed.slots.view, 'chase', phrase);
+  }
+});
+
+test('"from the street" is a street-view request, not just a front wall', () => {
+  const parsed = parseCommand('from the street');
+  assert.equal(parsed.intent, 'camera_angle');
+  assert.equal(parsed.slots.streetView, true);
+  // The front-wall framing is kept as the fallback for a house with no
+  // panorama coverage, so the slot still carries it.
+  assert.equal(parsed.slots.side, 'front');
+  assert.equal(parseCommand('street view').slots.streetView, true);
 });
