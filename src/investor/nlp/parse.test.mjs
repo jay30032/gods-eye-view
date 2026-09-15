@@ -115,6 +115,22 @@ const TABLE = Object.freeze([
   ['turn on opportunity vision', 'vision_on', {}],
   ['start drive', 'start_drive', {}],
   ['stop drive', 'stop_drive', {}],
+  // --- x-ray: see through the photo world, and end it early ---
+  ['x-ray', 'xray', {}],
+  ['xray', 'xray', {}],
+  ['x ray it', 'xray', {}],
+  ['see through', 'xray', {}],
+  ['x-ray vision', 'xray', {}],
+  ['solid', 'solid', {}],
+  ['go solid', 'solid', {}],
+  ['make it solid', 'solid', {}],
+  ['x-ray off', 'solid', {}],
+  ['stop the x-ray', 'solid', {}],
+  // --- the lot, standing still ---
+  ['show me the lot', 'show_lot', {}],
+  ['show me the parcel', 'show_lot', {}],
+  ['where is the lot', 'show_lot', {}],
+  ['lot lines', 'show_lot', {}],
   ['help', 'help', {}],
   ['what can i say', 'help', {}],
 ]);
@@ -321,4 +337,22 @@ test('"from the street" is a street-view request, not just a front wall', () => 
   // panorama coverage, so the slot still carries it.
   assert.equal(parsed.slots.side, 'front');
   assert.equal(parseCommand('street view').slots.streetView, true);
+});
+
+test('x-ray does not collide with Opportunity Vision or with "solid deal"', () => {
+  // "x-ray vision" contains "vision"; the vision toggle must not claim it.
+  assert.equal(parseCommand('x-ray vision').intent, 'xray');
+  assert.equal(parseCommand('vision off').intent, 'vision_off');
+  // "solid" is a command only on its own; a question with the word in it is
+  // still whatever question it was.
+  assert.notEqual(parseCommand('is it a solid deal').intent, 'solid');
+  // "how big is the lot" is a question about land, not a camera command —
+  // the drive's view director answers it, the parser does not.
+  assert.equal(parseCommand('how big is the lot').intent, 'unknown');
+  // Clear View's vocabulary is gone from the product.
+  for (const gone of ['trees off', 'clear view', 'trees on', 'photo view']) {
+    assert.equal(parseCommand(gone).intent, 'unknown', gone);
+  }
+  for (const intent of ['xray', 'solid', 'show_lot']) assert.ok(INTENTS.includes(intent), intent);
+  for (const intent of ['clear_view', 'photo_view']) assert.ok(!INTENTS.includes(intent), intent);
 });

@@ -9756,7 +9756,6 @@ body.terrasignal-investor #cesiumContainer canvas {
 }
 
 #ts-lod-chip,
-#ts-trees-chip,
 #ts-demo-chip {
   margin-left: 0.4rem;
   padding: 0.18rem 0.45rem;
@@ -9766,15 +9765,6 @@ body.terrasignal-investor #cesiumContainer canvas {
   letter-spacing: 0.12em;
 }
 
-/* Trees OFF is the state worth seeing at a glance, so that is the lit one. */
-#ts-trees-chip[data-on="false"] {
-  color: #0c0a06;
-  background: rgba(237, 189, 56, 0.92);
-  border-color: rgba(237, 189, 56, 0.92);
-}
-
-
-#ts-trees-chip,
 #ts-demo-chip {
   background: transparent;
   color: #e0b84a;

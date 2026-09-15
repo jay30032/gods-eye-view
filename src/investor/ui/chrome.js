@@ -67,8 +67,6 @@ function ensureInvestorShell(productName, tagline) {
         <span>Opportunity Vision</span>
       </label>
       <div id="ts-lod-chip" aria-live="polite">CITY</div>
-      <button type="button" id="ts-trees-chip" aria-pressed="true"
-        title="Trees on: Google's photo world. Trees off: Clear View.">TREES</button>
       <button type="button" id="ts-demo-chip">DEMO</button>
     </header>
     <div id="ts-vignette" aria-hidden="true"></div>
@@ -132,22 +130,6 @@ function ensureInvestorShell(productName, tagline) {
 export function setAiPrompt(text) {
   const el = document.getElementById('ts-ai-prompt');
   if (el) el.textContent = text;
-}
-
-/**
- * The TREES chip: on is the photo world, off is Clear View.
- *
- * Named for what it removes rather than for what it is. "Clear View" is our
- * word and means nothing to someone seeing the globe for the first time;
- * "trees" is the thing they can see, and turning it off does visibly that.
- */
-export function setTreesChip(on) {
-  const el = document.getElementById('ts-trees-chip');
-  if (!el) return null;
-  el.setAttribute('aria-pressed', String(Boolean(on)));
-  el.dataset.on = String(Boolean(on));
-  el.textContent = on ? 'TREES' : 'TREES OFF';
-  return el;
 }
 
 export function setLodChip(lodId) {

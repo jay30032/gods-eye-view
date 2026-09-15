@@ -1,5 +1,19 @@
 /**
- * Clear View — the same neighbourhood with the trees taken out.
+ * Clear View — the same neighbourhood with the trees taken out. PARKED.
+ *
+ * ## Status: an experiment behind `?world=clear`, not the product
+ *
+ * Reviewed headed, this world looked flat and cheap — untextured OSM boxes on
+ * an aerial photo — and it is not shipped. The photo world (Google 3D Tiles)
+ * is the only world the product has. What shipped instead is X-ray
+ * (`visuals/effects/xray.js`): the photo world goes translucent for a moment
+ * so the subject house reads, and comes back.
+ *
+ * The module is kept whole so the experiment can be reopened from a URL. It
+ * has no chip, no spoken command and no remembered choice: `?world=clear` is
+ * the only way in, and `readWorldFromLocation` is the only thing outside this
+ * file that knows the name. Everything below this heading is the design as
+ * it was, kept accurate for whoever reopens it.
  *
  * ## The problem the photo world cannot solve
  *
@@ -59,8 +73,6 @@ export const WORLDS = Object.freeze({ PHOTO: 'photo', CLEAR: 'clear' });
 
 /** How the two worlds trade places. */
 export const WORLD_FADE_MS = 600;
-
-export const CLEAR_VIEW_STORAGE_KEY = 'terrasignal:clear-view:v1';
 
 /**
  * How close a building's own position must be to our footprint centroid.
@@ -155,38 +167,22 @@ export function buildingColorFor(id, { topPickId = null, focusedId = null } = {}
   return BUILDING_BASE_CSS;
 }
 
-/** `?world=clear` / `?trees=off`, for a link that opens straight into it. */
+/**
+ * `?world=clear`, for a link that opens straight into the experiment.
+ *
+ * The URL is the only way in. There is no stored preference: a world that is
+ * not the product must not follow someone from one session into the next.
+ */
 export function readWorldFromLocation(location = globalThis.location) {
   try {
     const params = new URLSearchParams(location?.search || '');
     const world = String(params.get('world') || '').trim().toLowerCase();
     if (world === 'clear' || world === 'clearview') return WORLDS.CLEAR;
     if (world === 'photo' || world === 'google') return WORLDS.PHOTO;
-    const trees = String(params.get('trees') || '').trim().toLowerCase();
-    if (trees === 'off' || trees === '0' || trees === 'false') return WORLDS.CLEAR;
-    if (trees === 'on' || trees === '1' || trees === 'true') return WORLDS.PHOTO;
   } catch {
     // no window
   }
   return null;
-}
-
-/** The remembered choice, or the default. A URL always wins over storage. */
-export function readWorldPreference(defaultWorld = WORLDS.PHOTO, storage = globalThis.localStorage) {
-  const fromUrl = readWorldFromLocation();
-  if (fromUrl) return fromUrl;
-  try {
-    const raw = storage?.getItem?.(CLEAR_VIEW_STORAGE_KEY);
-    if (raw === WORLDS.CLEAR || raw === WORLDS.PHOTO) return raw;
-  } catch {
-    // private mode, blocked storage
-  }
-  return defaultWorld;
-}
-
-export function writeWorldPreference(world, storage = globalThis.localStorage) {
-  try { storage?.setItem?.(CLEAR_VIEW_STORAGE_KEY, world); } catch { /* ignore */ }
-  return world;
 }
 
 /**
@@ -459,7 +455,6 @@ export function createClearView({
     const swap = async () => {
       world = target;
       if (buildings) buildings.show = target === WORLDS.CLEAR;
-      writeWorldPreference(target);
       onWorld?.(target);
       try {
         await mapStackController?.setStack?.(WORLD_STACKS[target], { silent: true });

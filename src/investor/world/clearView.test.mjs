@@ -14,7 +14,6 @@ import {
   BUILDING_FOCUS_CSS,
   BUILDING_GOLD_CSS,
   BUILDING_MATCH_RADIUS_M,
-  CLEAR_VIEW_STORAGE_KEY,
   OSM_BUILDINGS_ASSET_ID,
   WORLDS,
   WORLD_FADE_MS,
@@ -23,9 +22,8 @@ import {
   buildingColorFor,
   matchBuilding,
   metresBetween,
-  readWorldPreference,
+  readWorldFromLocation,
   worldFadeState,
-  writeWorldPreference,
 } from './clearView.js';
 
 test('the two worlds are the two map stacks the controller already owns', () => {
@@ -172,36 +170,24 @@ test('the dip is symmetric and never overshoots', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Remembering the choice
+// The way in: a URL, and only a URL
 // ---------------------------------------------------------------------------
 
-function fakeStorage(initial = null) {
-  let value = initial;
-  return {
-    getItem: (key) => (key === CLEAR_VIEW_STORAGE_KEY ? value : null),
-    setItem: (key, next) => { if (key === CLEAR_VIEW_STORAGE_KEY) value = next; },
-    get value() { return value; },
-  };
-}
-
-test('the remembered world survives a reload', () => {
-  const storage = fakeStorage();
-  writeWorldPreference(WORLDS.CLEAR, storage);
-  assert.equal(storage.value, WORLDS.CLEAR);
-  assert.equal(readWorldPreference(WORLDS.PHOTO, storage), WORLDS.CLEAR);
+test('?world=clear opens the experiment; nothing else does', () => {
+  assert.equal(readWorldFromLocation({ search: '?scene=six&world=clear' }), WORLDS.CLEAR);
+  assert.equal(readWorldFromLocation({ search: '?world=ClearView' }), WORLDS.CLEAR);
+  assert.equal(readWorldFromLocation({ search: '?world=photo' }), WORLDS.PHOTO);
+  assert.equal(readWorldFromLocation({ search: '?scene=six' }), null);
+  // The TREES chip and `?trees=off` are gone from the product with it.
+  assert.equal(readWorldFromLocation({ search: '?trees=off' }), null);
+  assert.equal(readWorldFromLocation({ search: '?trees=0' }), null);
+  assert.equal(readWorldFromLocation({ search: '' }), null);
+  assert.equal(readWorldFromLocation(undefined), null);
 });
 
-test('nothing remembered is the photo world', () => {
-  assert.equal(readWorldPreference(WORLDS.PHOTO, fakeStorage()), WORLDS.PHOTO);
-  assert.equal(readWorldPreference(WORLDS.PHOTO, fakeStorage('nonsense')), WORLDS.PHOTO);
-});
-
-test('blocked storage is a default, not a crash', () => {
-  // A private window throws on both accessors.
-  const hostile = {
-    getItem() { throw new Error('denied'); },
-    setItem() { throw new Error('denied'); },
-  };
-  assert.equal(readWorldPreference(WORLDS.PHOTO, hostile), WORLDS.PHOTO);
-  assert.equal(writeWorldPreference(WORLDS.CLEAR, hostile), WORLDS.CLEAR);
+test('no remembered choice: the module exports no storage at all', async () => {
+  const exported = await import('./clearView.js');
+  for (const name of ['CLEAR_VIEW_STORAGE_KEY', 'readWorldPreference', 'writeWorldPreference']) {
+    assert.equal(name in exported, false, `${name} should be gone`);
+  }
 });

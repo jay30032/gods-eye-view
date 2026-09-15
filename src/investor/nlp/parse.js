@@ -21,7 +21,7 @@ export const INTENTS = Object.freeze([
   'stop_drive', 'drive_next', 'drive_skip', 'world', 'vision_on', 'vision_off',
   'camera_angle', 'drive_pause', 'drive_resume', 'drive_speed', 'drive_look',
   'look_closer', 'drive_best', 'drive_narration', 'how_recent', 'more_like_it',
-  'clear_view', 'photo_view', 'help', 'unknown',
+  'xray', 'solid', 'show_lot', 'help', 'unknown',
 ]);
 
 /** The five that must never stop working, matched before any pattern. */
@@ -122,7 +122,8 @@ const SUGGESTIONS = Object.freeze([
   'closer',
   'orbit',
   'zoom out',
-  'trees off',
+  'x-ray',
+  'show me the lot',
   'help',
 ]);
 
@@ -531,20 +532,36 @@ export function parseCommand(text, options = {}) {
     return result('reset_assumptions', {}, raw, normalized, 0.9);
   }
   /**
-   * Clear View, before the vision toggle.
+   * X-ray, before the vision toggle.
    *
-   * "Opportunity Vision" and "clear view" are two different switches with one
+   * "Opportunity Vision" and "x-ray vision" are two different things with one
    * shared word, and the vision rule below claims any sentence containing
-   * "vision". The specific phrase has to run first or "clear view" turns the
-   * signal overlay off instead of taking the trees out.
+   * "vision". The specific phrase has to run first or "x-ray vision" turns the
+   * signal overlay on instead of seeing through the world.
+   *
+   * "Solid" runs first of the three: "x-ray off" and "stop the x-ray" contain
+   * the word x-ray and mean the opposite of it.
    */
-  if (/\bclear view\b|\bclearview\b|\btrees off\b|\bno trees\b|\bhide the trees\b|\bremove the trees\b|\blose the trees\b|\bx[\s-]?ray\b/
-    .test(normalized)) {
-    return result('clear_view', {}, raw, normalized, 0.95);
+  if (/^(?:go |make it |back to |get )?solid(?: again)?$/.test(normalized)
+    || /\bx[\s-]?ray (?:off|done|over)\b|\b(?:stop|end|kill|cancel) (?:the )?x[\s-]?ray\b|\bstop seeing through\b|\bopaque\b/
+      .test(normalized)) {
+    return result('solid', {}, raw, normalized, 0.95);
   }
-  if (/\bphoto view\b|\btrees on\b|\bbring the trees back\b|\bshow the trees\b|\breal world\b|\bphoto world\b/
-    .test(normalized)) {
-    return result('photo_view', {}, raw, normalized, 0.95);
+  if (/\bx[\s-]?ray\b|\bsee[\s-]?through\b|\bsee thru\b/.test(normalized)) {
+    return result('xray', {}, raw, normalized, 0.95);
+  }
+  /**
+   * The lot, standing still.
+   *
+   * On a drive the view director already answers "show me the lot" with the
+   * aerial and the parcel glow; this is the same sentence with no drive running,
+   * which used to fall through to `focus` as a search for a house called "lot".
+   * The guard is a verb of looking plus the land word — "how big is the lot"
+   * is still a question about land and still not vocabulary here.
+   */
+  if (/\b(?:show|see|view|look at|give me|where'?s|where is|frame|highlight)\b[^.]*\b(?:the )?(?:lot|parcel|lot lines?|property lines?|boundar(?:y|ies))\b/
+    .test(normalized) || /^(?:the )?(?:lot|parcel|lot lines?)$/.test(normalized)) {
+    return result('show_lot', {}, raw, normalized, 0.9);
   }
   if (/\bvision\b/.test(normalized) || /opportunity vision/.test(normalized)) {
     if (/\b(off|hide|stop|disable)\b/.test(normalized)) return result('vision_off', {}, raw, normalized, 0.95);

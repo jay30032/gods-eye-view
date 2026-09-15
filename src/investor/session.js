@@ -22,7 +22,8 @@ import {
   readMapsApiKey,
 } from './drive/streetViewDrive.js';
 import { VIEWS, announceFor, createViewDirector, isThreeD } from './drive/viewDirector.js';
-import { WORLDS, createClearView, readWorldPreference } from './world/clearView.js';
+import { WORLDS, createClearView, readWorldFromLocation } from './world/clearView.js';
+import { createXray } from './visuals/effects/xray.js';
 import { buildSixHouseScene, readSceneMode } from './scenes/sixHouse.js';
 import {
   FIRST_HINT,
@@ -42,7 +43,11 @@ import {
   overridesFor,
   parseDemoIntent,
 } from './conversation.js';
-import { governorRequestRender } from '../renderGovernor.js';
+import {
+  governorRequestRender,
+  holdContinuousRender,
+  releaseContinuousRender,
+} from '../renderGovernor.js';
 import { setScopeMaskEnabled } from '../scopeMask.js';
 import {
   ensureKeylessVisibleBasemap,
@@ -56,7 +61,6 @@ import {
   setAiPrompt,
   setLodChip,
   setNavActive,
-  setTreesChip,
 } from './ui/chrome.js';
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
@@ -208,13 +212,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
    * a fix arrives.
    */
   /**
-   * Clear View — the same board with the trees taken out.
+   * Clear View — parked. `?world=clear` only, for experiments.
    *
-   * Built before the drive because the drive's camera heights were tuned
-   * against a canopy: the chase camera clears Oakhurst's oaks at 55 m, and in
-   * a world with no oaks that is simply a height. Nothing downstream is told
-   * which world it got, which is the point — the effects, the parcels, the
-   * shots and the narration are identical in both.
+   * The tree-free world (ion terrain, Bing aerial, OSM building boxes) is not
+   * shipped: reviewed headed it was untextured boxes on a photo. The module
+   * stays so the experiment can be reopened from a URL, and nothing else in the
+   * product — no chip, no spoken command, no remembered choice — leads to it.
    */
   const clearView = createClearView({
     viewer,
@@ -223,8 +226,29 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     getProperties: () => properties,
     getTopPickId: () => conversation.topPickId || scene?.goldId || null,
     getFocusedId: () => focused?.id || null,
-    onWorld: (world) => setTreesChip(world === WORLDS.PHOTO),
+    // A world swap ends any x-ray: the effect belongs to the photo world.
+    onWorld: () => xray.end(),
   });
+
+  /**
+   * X-ray — the photo world goes translucent for a moment so the subject reads.
+   *
+   * Fires automatically when a flight lands on a house ("look closer", any
+   * focus, "show me the lot") and on demand with "x-ray"; "solid" ends it
+   * early. The tileset is read at trigger time: a keyless boot has none, and
+   * the parked Clear View hides it, and both are simply "nothing to see
+   * through" rather than a style on nothing.
+   */
+  const xray = createXray({
+    Cesium,
+    scene: viewer.scene,
+    getTileset: () => (clearView.active ? null : (globalThis.__godsEyeView?.tileset || tileset)),
+    holdRender: holdContinuousRender,
+    releaseRender: releaseContinuousRender,
+    requestRender: () => governorRequestRender('investor-xray'),
+    reduced: () => prefersReducedMotion(),
+  });
+  camera.onFlight((state) => xray.onFlight(state));
 
   const streetViewHost = ensureStreetViewHost();
   let drive = null;
@@ -257,6 +281,12 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     onView: (view, detail) => {
       drive?.setPanoStopped?.(view === VIEWS.STREET_VIEW);
       setDriveViewChrome(view, detail);
+      // "Show me the lot" on a drive: the director starts the hero flight
+      // right after this callback returns, so the arm is deferred a microtask
+      // to read the flight as in the air and fire when it lands.
+      if (view === VIEWS.AERIAL && detail?.property) {
+        queueMicrotask(() => xray.arm({ flying: camera.flying }));
+      }
     },
   });
 
@@ -385,6 +415,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     streetView,
     viewDirector,
     clearView,
+    xray,
     get focused() { return focused; },
     get lastAnalysis() { return lastAnalysis; },
     getById(id) {
@@ -416,10 +447,13 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           // orbit or open a card on a house the user has already left.
           if (result.cancelled || focused?.id !== property.id) return;
           paintCard();
+          // The house is in frame: see through the block to it.
+          xray.arm({ flying: camera.flying });
           camera.orbit(property);
         });
       } else {
         paintCard();
+        xray.arm({ flying: camera.flying });
       }
       hideSavedSheet();
       setNavActive('world');
@@ -695,8 +729,16 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         return this.setOpportunityVision(parsed.intent === 'vision_on');
       }
 
-      if (parsed.intent === 'clear_view' || parsed.intent === 'photo_view') {
-        return this.setWorld(parsed.intent === 'clear_view' ? WORLDS.CLEAR : WORLDS.PHOTO);
+      if (parsed.intent === 'xray') return this.seeThrough();
+      if (parsed.intent === 'solid') return this.goSolid();
+      if (parsed.intent === 'show_lot') {
+        // On a drive the view director has already put the aerial up and the
+        // flight it started arms the x-ray through `onView`.
+        if (viewDecision?.view === VIEWS.AERIAL) {
+          const spoken = announceFor(VIEWS.AERIAL, viewDecision.reason);
+          return { ok: true, action: 'show_lot', view: VIEWS.AERIAL, spoken };
+        }
+        return this.showLot();
       }
 
       if (parsed.intent === 'world') {
@@ -791,6 +833,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           focused = result.property;
           conversation.focusedId = result.id;
           renderFocusCard(result.property);
+          xray.arm({ flying: camera.flying });
         }
         setAiPrompt(result.spoken);
         return result;
@@ -1044,12 +1087,54 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const already = clearView.world === target;
       clearView.setWorld(target);
       const spoken = target === WORLDS.CLEAR
-        ? 'Clear view — trees off.'
-        : 'Trees back on.';
+        ? 'Clear View — an experiment, not the product.'
+        : 'Photo world.';
       setAiPrompt(spoken);
       return {
         ok: true, action: 'set_world', world: target, changed: !already, spoken,
       };
+    },
+
+    /** "x-ray" / "see through": the photo world goes translucent now. */
+    seeThrough() {
+      const result = xray.trigger();
+      const spoken = result.ok
+        ? 'X-ray.'
+        : (result.reason === 'tileset hidden'
+          ? 'X-ray needs the photo world.'
+          : 'No photo world to see through.');
+      setAiPrompt(spoken);
+      return { ok: result.ok, action: 'xray', spoken, ...result };
+    },
+
+    /** "solid": end the x-ray early, easing back rather than snapping. */
+    goSolid() {
+      const result = xray.end();
+      const spoken = result.wasRunning ? 'Solid.' : 'Already solid.';
+      setAiPrompt(spoken);
+      return { ok: true, action: 'solid', spoken, ...result };
+    },
+
+    /**
+     * "show me the lot", standing still: the hero framing on the focused house
+     * with the lot line and the outline, and an x-ray once the flight lands.
+     */
+    showLot() {
+      if (!focused) {
+        const spoken = 'Nothing focused. Say show me the best one.';
+        setAiPrompt(spoken);
+        return { ok: false, action: 'show_lot', spoken };
+      }
+      const property = focused;
+      hideSavedSheet();
+      setNavActive('world');
+      camera.fly('HERO', property).then((result) => {
+        if (result.cancelled || focused?.id !== property.id) return;
+        xray.arm({ flying: camera.flying });
+      });
+      const spoken = 'Here\'s the lot.';
+      setAiPrompt(spoken);
+      return { ok: true, action: 'show_lot', id: property.id, spoken };
     },
 
     world() {
@@ -1200,19 +1285,17 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       clearView.repaint();
     }
     /**
-     * The remembered world, applied after the descent rather than before it.
+     * The experiment world, from the URL only, applied after the descent.
      *
      * Switching worlds changes the terrain provider, and doing that while the
      * opening flight is in the air leaves the camera at an altitude measured
      * against a surface that has since moved. After CRUISE has settled the
-     * camera is stationary and the swap is the dip in the scrim and nothing
-     * else. `fade: false` because the user has not seen the other world — there
-     * is nothing to cross-fade *from*, and a 600 ms dim on a first load reads
-     * as the page still loading.
+     * camera is stationary. `fade: false` because there is nothing to
+     * cross-fade *from* on a first load.
      */
-    const remembered = readWorldPreference(WORLDS.PHOTO);
-    setTreesChip(remembered === WORLDS.PHOTO);
-    if (remembered === WORLDS.CLEAR) await clearView.setWorld(WORLDS.CLEAR, { fade: false });
+    if (readWorldFromLocation() === WORLDS.CLEAR) {
+      await clearView.setWorld(WORLDS.CLEAR, { fade: false });
+    }
     setLodChip(lodFromHeight(cameraHeightM(viewer)).id);
     const banner = document.getElementById('ts-globe-error');
     if (!banner || banner.hidden) {
@@ -1254,10 +1337,6 @@ function compareCaption(result, runnerUp) {
 function bindUi(session) {
   document.getElementById('ts-opportunity-vision')?.addEventListener('change', (event) => {
     session.setOpportunityVision(event.target.checked);
-  });
-
-  document.getElementById('ts-trees-chip')?.addEventListener('click', () => {
-    session.setWorld(session.clearView.world === WORLDS.CLEAR ? WORLDS.PHOTO : WORLDS.CLEAR);
   });
 
   document.getElementById('ts-bottom-nav')?.addEventListener('click', (event) => {

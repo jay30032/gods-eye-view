@@ -30,8 +30,8 @@ test('the static shell in index.html carries every chip the JS shell does', () =
    * before any module evaluates, and `ensureInvestorShell` **returns early when
    * it finds one** — so a control added only to the JS template is a control
    * that exists in the bundle, passes every import, and is not in the DOM. That
-   * is exactly how the TREES chip shipped invisible: the source had it, the
-   * built bundle had it, and the page did not.
+   * is exactly how the (since removed) TREES chip shipped invisible: the source
+   * had it, the built bundle had it, and the page did not.
    */
   const html = readFileSync(join(here, '../../index.html'), 'utf8');
   const chrome = readFileSync(join(here, 'ui/chrome.js'), 'utf8');

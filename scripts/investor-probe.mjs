@@ -76,7 +76,9 @@ const SIX = HAS('six');
  */
 const DRIVE = HAS('drive');
 /**
- * Clear View: the six-house scene with the trees taken out.
+ * Clear View: the six-house scene with the trees taken out. PARKED — an
+ * experiment behind `?world=clear`, not the product; this check is kept so
+ * the experiment can be re-measured, and is not part of the shipped gates.
  *
  * The same scene and the same shots as `--six`, on ion terrain, Bing aerial and
  * OSM Buildings instead of Google's photogrammetry. What it is actually asking
@@ -184,6 +186,14 @@ function frameBudgetFor(targetFrameRate) {
 }
 const SIX_RUN_MS = 70_000;
 /**
+ * The x-ray envelope, as the probe expects it: 200 ms attack, at the floor to
+ * 2.5 s, 600 ms release. Mid is read deep in the hold; "after" is read once
+ * the whole envelope plus a margin has elapsed on the page clock.
+ */
+const XRAY_MID_MS = 1_000;
+const XRAY_TOTAL_MS = 3_100;
+
+/**
  * The any-angle moves the six-house check drives, in order.
  *
  * These are the two that have to hold framing: "show me the back" swings the
@@ -254,17 +264,18 @@ function frameStats(frames, window) {
   const [start, end] = window;
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   const excluded = (stamp) => frameExclusions.some(([from, to]) => stamp >= from && stamp <= to);
-  const gaps = frames
-    .filter(([stamp]) => stamp >= start && stamp <= end && !excluded(stamp))
-    .map(([, gap]) => gap)
-    .sort((a, b) => a - b);
+  const rows = frames.filter(([stamp]) => stamp >= start && stamp <= end && !excluded(stamp));
+  const gaps = rows.map(([, gap]) => gap).sort((a, b) => a - b);
   if (gaps.length < 5) return null;
   const at = (q) => gaps[Math.min(gaps.length - 1, Math.floor(q * gaps.length))];
+  const worstRow = rows.reduce((a, b) => (b[1] > a[1] ? b : a));
   return {
     n: gaps.length,
     p50: at(0.50),
     p95: at(0.95),
     worst: gaps.at(-1),
+    /** Page-clock stamp of the worst gap, so a hitch can be attributed. */
+    worstAt: worstRow[0],
     seconds: Math.round((end - start) / 100) / 10,
   };
 }
@@ -581,6 +592,44 @@ async function main() {
     pulses: window.__terraSignal?.visuals?.pulses ?? null,
   })).catch(() => ({ pose: null, angles: {}, pulses: null }));
 
+  /** Say something through the typed bar, the way a reviewer would. */
+  const sendPhrase = (text) => page.evaluate((phrase) => {
+    const input = document.getElementById('ts-demo-input');
+    const form = document.getElementById('ts-demo-form');
+    if (input && form) {
+      input.value = phrase;
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      return 'typed-bar';
+    }
+    window.__terraSignal?.handleIntent?.(phrase);
+    return 'handleIntent';
+  }, text).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
+
+  /**
+   * What the x-ray is doing, read off Google's tileset itself.
+   *
+   * `styleAlpha` evaluates the style object actually sitting on the tileset;
+   * `tilesetStyled` is whether there is one at all. Our controller's own
+   * `alpha` is recorded beside them so a disagreement is visible.
+   */
+  const xrayState = () => page.evaluate(() => {
+    const session = window.__terraSignal;
+    const x = session?.xray || null;
+    const tileset = window.__godsEyeView?.tileset || null;
+    return {
+      running: x?.running ?? null,
+      phase: x?.phase ?? null,
+      alpha: x?.alpha ?? null,
+      styleAlpha: x?.styleAlpha ?? null,
+      tilesetStyled: tileset ? Boolean(tileset.style) : null,
+      tilesetShown: tileset ? Boolean(tileset.show) : null,
+      runs: x?.runs ?? 0,
+      last: x?.last ?? null,
+      focusedId: session?.focused?.id ?? null,
+      shot: session?.camera?.shot ?? null,
+    };
+  }).catch(() => null);
+
   const sceneState = () => page.evaluate(() => ({
     mode: window.__terraSignal?.sceneMode ?? null,
     rows: window.__terraSignal?.properties?.length ?? 0,
@@ -645,6 +694,49 @@ async function main() {
     await new Promise((r) => setTimeout(r, 4_000));
     await shot('hero-six-plus-4s');
     playLog.push(`gold ${checks.scene?.goldId} · focused ${checks.heroScene?.focusedId}`);
+
+    /**
+     * X-ray, on demand, parked on the gold house.
+     *
+     * Three facts, each read off the live tileset rather than off our own
+     * bookkeeping: mid-effect the style on Google's tileset evaluates to an
+     * alpha below 0.5; after it the style is gone and the alpha is exactly 1;
+     * and the frame time through the whole envelope holds the same budget as
+     * the hero flight. The automatic x-ray on focus has already run by now
+     * (it fires when HERO lands), so `runs` is expected to be at least one
+     * before the word is even said.
+     */
+    checks.xrayBefore = await xrayState();
+    record(`CHECK x-ray before ${JSON.stringify(checks.xrayBefore)}`);
+    const xrayStart = await pageNow();
+    const xraySent = await sendPhrase('x-ray');
+    record(`SIX "x-ray" via ${xraySent}`);
+    await new Promise((r) => setTimeout(r, XRAY_MID_MS));
+    checks.xrayMid = await xrayState();
+    record(`CHECK x-ray mid ${JSON.stringify(checks.xrayMid)}`);
+    await shot('six-xray');
+    // The screenshot stalls the renderer; wait it out on the page clock.
+    while (((await pageNow()) - xrayStart) < XRAY_TOTAL_MS + 400) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    windows.sixXray = [xrayStart, await pageNow()];
+    checks.xrayAfter = await xrayState();
+    record(`CHECK x-ray after ${JSON.stringify(checks.xrayAfter)}`);
+    playLog.push(`"x-ray" → tileset style alpha ${checks.xrayMid?.styleAlpha ?? '?'} mid`
+      + ` (${checks.xrayMid?.phase ?? '?'}), ${checks.xrayAfter?.styleAlpha ?? '?'} after`
+      + ` · style on tileset mid=${checks.xrayMid?.tilesetStyled} after=${checks.xrayAfter?.tilesetStyled}`
+      + ` · auto runs before the word: ${checks.xrayBefore?.runs ?? '?'}`);
+
+    // "solid" ends it early: 500 ms in, then the 600 ms release, then opaque.
+    const solidSent = await sendPhrase('x-ray');
+    record(`SIX "x-ray" (for solid) via ${solidSent}`);
+    await new Promise((r) => setTimeout(r, 500));
+    await sendPhrase('solid');
+    await new Promise((r) => setTimeout(r, 900));
+    checks.xraySolid = await xrayState();
+    record(`CHECK x-ray after solid ${JSON.stringify(checks.xraySolid)}`);
+    playLog.push(`"solid" → alpha ${checks.xraySolid?.styleAlpha ?? '?'}, running ${checks.xraySolid?.running}`
+      + `, early end ${checks.xraySolid?.last?.earlyEnd}`);
 
     // Which approach heading the occlusion sweep chose, and why.
     const chosen = await cameraPose();
@@ -720,7 +812,6 @@ async function main() {
           }
           : null,
         markers: session?.visuals?.markerCount ?? 0,
-        chip: document.getElementById('ts-trees-chip')?.textContent ?? null,
       };
     }).catch(() => null);
 
@@ -1388,6 +1479,33 @@ async function main() {
     checks.angleChoice?.angles
     && Object.keys(checks.angleChoice.angles).length > 0,
   );
+  /**
+   * X-ray: the tileset really went translucent and really came back.
+   *
+   * Read off the style on Google's tileset, not off our own alpha: the
+   * controller can believe it wrote 0.35 while the tileset ignores it. Below
+   * 0.5 mid-effect, exactly 1.0 with no style after, and the same frame budget
+   * as the hero flight across the whole envelope.
+   */
+  const sixXrayFrames = frameStats(frames, windows.sixXray);
+  const sixXrayTookOk = !SIX || Boolean(
+    checks.xrayMid
+    && checks.xrayMid.tilesetStyled === true
+    && Number.isFinite(checks.xrayMid.styleAlpha) && checks.xrayMid.styleAlpha < 0.5
+    && Number.isFinite(checks.xrayMid.alpha) && checks.xrayMid.alpha < 0.5,
+  );
+  const sixXrayBackOk = !SIX || Boolean(
+    checks.xrayAfter
+    && checks.xrayAfter.running === false
+    && checks.xrayAfter.tilesetStyled === false
+    && checks.xrayAfter.styleAlpha === 1
+    && checks.xrayAfter.alpha === 1
+    && checks.xraySolid?.running === false
+    && checks.xraySolid?.styleAlpha === 1
+    && checks.xraySolid?.last?.earlyEnd === true,
+  );
+  const sixXrayFramesOk = !SIX || Boolean(sixXrayFrames && sixXrayFrames.p95 <= sixBudgetMs);
+  const sixXrayOk = sixXrayTookOk && sixXrayBackOk && sixXrayFramesOk;
 
 
   // ---- clear view verdict ----
@@ -1560,7 +1678,7 @@ async function main() {
 
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
     && framesOk && markersOk && heroOk
-    && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk
+    && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk && sixXrayOk
     && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk
     && driveLotViewOk && driveResumeOk
     && driveStopViewOk && driveLazyMapsOk && driveStreetResumeOk && drivePanoSwapOk
@@ -1622,6 +1740,14 @@ async function main() {
               : 'OFF SCREEN')).join(' · ')
           : 'no moves driven')
         + ` (centre ${ANGLE_CENTRE_FRACTION * 100}%)`,
+      `  ${sixXrayOk ? 'PASS' : 'FAIL'}  x-ray              `
+        + `mid alpha ${checks.xrayMid?.styleAlpha ?? 'no data'}`
+        + ` (style on tileset: ${checks.xrayMid?.tilesetStyled ?? '?'}) · `
+        + `after ${checks.xrayAfter?.styleAlpha ?? 'no data'}`
+        + ` (style on tileset: ${checks.xrayAfter?.tilesetStyled ?? '?'}) · `
+        + `solid → ${checks.xraySolid?.styleAlpha ?? 'no data'} · `
+        + `p95 ${sixXrayFrames ? `${sixXrayFrames.p95}ms` : 'no data'}`
+        + ` (budget ${sixBudgetMs.toFixed(1)}ms) · auto runs ${checks.xrayBefore?.runs ?? '?'}`,
       `        ground pulses      `
         + `ring on ${checks.angleChoice?.pulses?.ringId ?? 'NONE'}`
         + ` · supported=${checks.angleChoice?.pulses?.supported ?? '?'}`,
@@ -1766,6 +1892,7 @@ async function main() {
     for (const [label, stat] of [
       ['cruise over cluster', sixCruiseFrames],
       ['fly to gold + hero', sixHeroFrames],
+      ['x-ray envelope', sixXrayFrames],
     ]) {
       if (!stat) { out.push(`  frames ${label}: no data`); continue; }
       out.push(`  frames ${label}: n=${stat.n} over ${stat.seconds}s  `
@@ -1774,6 +1901,20 @@ async function main() {
     if (checks.heroEffects) {
       out.push(`  effects at HERO: active=${checks.heroEffects.active} `
         + `camera ${checks.heroEffects.cameraAglM ?? '?'} m above ground`);
+    }
+    // Where the hero window's worst frame fell relative to the automatic
+    // x-ray that fires when HERO lands: a hitch at +0 ms is the first
+    // translucent frame (draw commands rebuilt, shaders compiled); a hitch
+    // well before it is the flight and the tiles it streams.
+    const autoStart = checks.xrayBefore?.last?.startedAt;
+    if (sixHeroFrames && Number.isFinite(autoStart)) {
+      out.push(`  hero worst frame ${sixHeroFrames.worst}ms at `
+        + `${Math.round(sixHeroFrames.worstAt - autoStart)}ms relative to the auto x-ray start`
+        + ` (auto x-ray ran ${checks.xrayBefore.last.frames} frames, min alpha ${checks.xrayBefore.last.minAlpha})`);
+    }
+    if (sixXrayFrames) {
+      out.push(`  x-ray worst frame ${sixXrayFrames.worst}ms at `
+        + `${Math.round(sixXrayFrames.worstAt - (windows.sixXray?.[0] ?? sixXrayFrames.worstAt))}ms into the effect`);
     }
     if (shots.length) {
       out.push('  screenshots:');

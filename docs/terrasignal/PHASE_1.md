@@ -42,9 +42,16 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
       hero flight, ties to the street, cached per property
 - [x] A ring around the top pick and a scan wave across the scene, both
       shader-animated off the one shared clock
-- [x] Clear View: a tree-free world from ion terrain, Bing aerial and Cesium
-      OSM Buildings; footprints matched to building features so the answer is a
-      tinted building; TREES chip, spoken toggle, remembered choice
+- [~] Clear View — **parked**. A tree-free world from ion terrain, Bing aerial
+      and Cesium OSM Buildings; reviewed headed it read as untextured boxes on
+      a photo. Kept behind `?world=clear` for experiments only: no chip, no
+      spoken command, no remembered choice. The photo world is the only
+      shipped world.
+- [x] X-ray: on "look closer" / any focus / "show me the lot", and on demand
+      with "x-ray" / "see through", Google's tileset style goes translucent
+      white at 35% for 2.5 s and eases back to opaque over 600 ms; "solid"
+      ends it early. Pure envelope in `visuals/effects/xray.js`; `smoke:six`
+      reads the alpha off the live tileset mid-effect and after
 - [x] Drive Mode v2: the 3D chase camera drives, the scene answers; view
       director maps questions to views over a 300 ms cross-fade; Street View is
       an on-demand stop view; route position survives every answer
@@ -69,7 +76,7 @@ src/investor/
   camera/                shot list, director, front-side derivation, best angle
   drive/                 route spline, activation, narration, position sources,
                          Street View stop view, view director
-  world/                 Clear View — the tree-free world
+  world/                 Clear View — parked experiment, `?world=clear` only
   scenes/                ?scene=six — the six-house near-field scene
   mock/parcel.js         tangent-plane geometry helpers (its synthetic parcel
                          is data only — nothing renders it)
@@ -230,7 +237,7 @@ npm run smoke:investor-keyless   # spawns its own :4174 with the Google key
 npm run smoke:demo               # drives the whole acceptance conversation
 npm run smoke:six                # the six-house near-field scene
 npm run smoke:drive              # Drive Mode, the whole loop at 4x
-npm run smoke:clear              # the six-house scene in Clear View
+npm run smoke:clear              # the parked Clear View experiment (?world=clear)
 ```
 
 Geometry is refreshed by hand, never by `npm test`:
