@@ -1,0 +1,596 @@
+/**
+ * The investor camera, as a named shot list.
+ *
+ * Every number a camera move depends on lives here and nowhere else. The module
+ * is pure geometry — no Cesium, no viewer — so the whole shot list is unit
+ * testable and a designer can retune the demo by editing constants.
+ *
+ * The important modelling choice: a shot is defined by the **aim point** (what
+ * the audience is looking at) plus heading, pitch and either altitude or range.
+ * The camera position is derived from that. `Cesium.camera.flyTo({destination})`
+ * takes the *camera* position, so "centred on Kirkwood" naively written as a
+ * destination actually puts Kirkwood behind the camera at any pitch other than
+ * straight down. Deriving position from aim is what makes the framing mean what
+ * it says.
+ */
+
+import { MARKER_HEIGHT_M } from '../visuals/markers.js';
+
+const M_PER_DEG_LAT = 111_320;
+const DEG = Math.PI / 180;
+
+export const SHOTS = Object.freeze([
+  'WORLD', 'STAGING', 'CRUISE', 'REVEAL', 'HERO', 'HOP', 'DRIVE', 'TOPDOWN',
+]);
+
+/** Seconds per transition. Nothing in the product picks its own duration. */
+export const DURATIONS = Object.freeze({
+  worldToStaging: 3.5,
+  stagingToCruise: 3.0,
+  cruiseToReveal: 2.5,
+  toHero: 2.0,
+  hop: 2.5,
+  heroToCruise: 2.0,
+  toDrive: 2.0,
+  /** Let REVEAL breathe before dropping to HERO — otherwise it is never seen. */
+  revealDwell: 0.8,
+  /**
+   * An any-angle re-framing: "show me the back", "closer", "from the street".
+   *
+   * Two seconds is long enough to read as the camera travelling around a house
+   * rather than cutting to a new one, and short enough that a reviewer asking
+   * for four angles in a row is not kept waiting through any of them.
+   */
+  reframe: 2.0,
+});
+
+/** Parked globe: the view the app opens on. */
+export const WORLD = Object.freeze({
+  heightM: 18_000_000,
+  headingDeg: 0,
+  pitchDeg: -90,
+});
+
+/**
+ * Straight down over the metro at 40 km. This shot exists to be *boring*: it
+ * gives Google's 3D tiles for the whole market a few seconds to stream in at a
+ * coarse LOD before the descent, which is what stops tiles popping in mid-flight.
+ */
+export const STAGING = Object.freeze({
+  altitudeM: 40_000,
+  headingDeg: 0,
+  pitchDeg: -90,
+});
+
+/**
+ * The market view after the descent.
+ *
+ * Heading 264 is the bearing from this aim point to downtown Atlanta
+ * (33.7550, -84.3900), so the skyline sits on the horizon. `shots.test.mjs`
+ * recomputes that bearing and fails if the constant drifts away from it.
+ */
+export const CRUISE = Object.freeze({
+  // Midway between Decatur Square and Kirkwood — the dense side of the board.
+  // The 30-property centroid is (33.7625, -84.3274), so this frames the cluster.
+  aim: Object.freeze({ lat: 33.7640, lng: -84.3110 }),
+  altitudeM: 1_800,
+  headingDeg: 264,
+  // -25 puts the horizon — and the downtown skyline on it — in the top strip
+  // of the frame. At -35 the top of frame sat 5 degrees BELOW horizontal, so
+  // there was no sky in shot at all and nothing for a skyline to sit on.
+  pitchDeg: -25,
+});
+
+/**
+ * CRUISE over a tight cluster rather than over the market.
+ *
+ * The market CRUISE is a fixed aim point at 1,800 m with the downtown skyline
+ * on the horizon — it frames a board of thirty houses spread over eight
+ * kilometres. A six-house scene 400 m across would be six specks in the middle
+ * of it. This is the same shot re-aimed: lower, steeper, and centred on
+ * whatever cluster it is given.
+ *
+ * 900 m is also deliberately below the 1,500 m near-field ceiling, so the
+ * parcel glow and the columns are already up when the shot settles.
+ */
+export const CLUSTER_CRUISE = Object.freeze({
+  altitudeM: 900,
+  headingDeg: 264,
+  // Steeper than the market cruise: there is no skyline to put on the horizon
+  // here, and the subject is the ground.
+  pitchDeg: -38,
+});
+
+/** Fit the shortlist, with room around it. */
+export const REVEAL = Object.freeze({
+  paddingPct: 0.25,
+  pitchDeg: -45,
+  headingDeg: 264,
+  minAltitudeM: 900,
+  maxAltitudeM: 2_500,
+});
+
+/**
+ * The focused house.
+ *
+ * These three requirements are over-determined: at range 180 with the camera
+ * looking down 38 degrees, the house lands dead centre. Putting it in the lower
+ * third means the lens has to tilt UP off the house by the angle that a sixth
+ * of the frame subtends — 10 degrees at a 60 degree vertical FOV.
+ *
+ * So `pitchDeg` is the **geometric depression to the house**, which is what
+ * sets the camera position and keeps the range exactly 180. The camera's
+ * rendered pitch is that plus the framing tilt: -38 + 10 = **-28**.
+ */
+export const HERO = Object.freeze({
+  rangeM: 150,
+  /** Depression from camera to house — sets position, not the rendered pitch. */
+  pitchDeg: -45,
+  headingDeg: 35,
+  /**
+   * Where the subject sits down the frame, 0 = top, 0.5 = centre. 0.55 puts it
+   * just below centre so the command bar along the bottom cannot cover it —
+   * a lower third put the house behind the chrome.
+   */
+  subjectFrameFraction: 0.55,
+  /**
+   * How much of the marker's rise the framing gives away, 0..1.
+   *
+   * Two things want the same place on screen. Aim purely at the house and the
+   * marker floating 14 m above it climbs towards the HUD; aim purely at the
+   * marker — which is what this did — and the *house* drops to 70% down the
+   * frame, all but touching the command bar, with a third of the shot spent on
+   * sky. A headed six-house run measured exactly that: 50/69%.
+   *
+   * Splitting the difference puts the house at about 61% and the marker at
+   * about 49%, so the composition holds both and neither is against an edge.
+   */
+  markerRiseShare: 0.5,
+  /** 72-second lap: 2 deg/s was too slow to read as motion at all. */
+  orbitDegPerSec: 5,
+  /** One revolution, then stop: a parked demo must not hold the GPU forever. */
+  orbitMaxDeg: 360,
+});
+
+/**
+ * Straight down over one house — the answer to "show me the roof".
+ *
+ * 120 m is not a compromise between HERO and a map: it is the height at which a
+ * suburban lot fills the frame. Oakhurst lots run 15-25 m across the street
+ * frontage and 40-60 m deep, and at 120 m with a 40 degree vertical FOV the
+ * frame is about 87 m tall, so the house and both side setbacks are in it with
+ * the neighbours' roofs at the edges for context. Higher and the subject
+ * becomes one roof among nine; lower and the lot runs off the bottom of frame.
+ *
+ * Pitch is a true -90. Everything else in the product lives inside the
+ * watchable band the pitch clamp enforces, so `TOPDOWN` has to be named in
+ * `UNCLAMPED_SHOTS` or the clamp yanks it back to -70 the moment the flight
+ * settles and the "overhead" answer arrives as an oblique.
+ */
+export const TOP_DOWN = Object.freeze({
+  altitudeM: 120,
+  pitchDeg: -90,
+});
+
+/** Between two houses: up and over, so it reads as a hop rather than a slide. */
+export const HOP = Object.freeze({
+  minApexAltitudeM: 500,
+  apexPitchDeg: -60,
+});
+
+/** Chase camera for the simulated drive. */
+export const DRIVE = Object.freeze({
+  behindM: 120,
+  aboveM: 90,
+  pitchDeg: -25,
+});
+
+/**
+ * Drive Mode v1's chase camera: above the road, looking along it.
+ *
+ * **55 m, pitched 32 degrees down.** Both numbers are the second attempt, and
+ * the first attempt is why they are what they are.
+ *
+ * At 38 m and -22 the geometry was right and the neighbourhood was wrong.
+ * Oakhurst is old and heavily canopied, and a shallow camera at that height
+ * spends most of a residential block looking *through* mature oaks: the headed
+ * run's approach frames read beautifully on the open stretches and the gold
+ * frame was tree tops. The trees are real and they are not going to move, so
+ * the camera has to clear them.
+ *
+ * 55 m is above the canopy — Oakhurst's oaks top out around 25-30 m — while
+ * still low enough that the houses either side have scale and you can tell one
+ * roof from the next. Going higher starts reading as a map rather than a drive.
+ *
+ * -32 is still shallow, and deliberately shallower than the near-field layer's
+ * own shots at 38-45 degrees. Those are *about* a parcel; a drive is about what
+ * is coming, so the frame has to be mostly road ahead with houses arriving into
+ * it rather than a plan view of the block you are already on. The extra ten
+ * degrees over the first cut buys the downward angle that looks over a canopy
+ * instead of into it, and costs some of the horizon — which is the trade, and
+ * the reason it is not steeper still.
+ *
+ * The camera sits back along the travel bearing rather than directly over the
+ * fix, which is what makes it a chase camera: the tracked position stays ahead
+ * in frame instead of underneath.
+ */
+export const DRIVE_CHASE = Object.freeze({
+  heightM: 55,
+  pitchDeg: -32,
+  /** How far behind the tracked position the camera flies, in metres. */
+  behindM: 26,
+  /** Temporary look offsets — "look left", "look right", "overhead". */
+  lookLeftDeg: -70,
+  lookRightDeg: 70,
+  overheadPitchDeg: -80,
+});
+
+/**
+ * The chase pose for one position fix.
+ *
+ * `headingDeg` is supplied already smoothed — `route.smoothHeading` owns that,
+ * because the filter needs elapsed time and this module has no clock. Passing
+ * the raw tangent here would snap the camera round at every junction.
+ *
+ * @param {{lat:number,lng:number}} position where the drive is
+ * @param {number} headingDeg smoothed travel bearing
+ * @param {{lookOffsetDeg?:number, pitchDeg?:number, heightM?:number}} [options]
+ */
+export function driveChaseShot(position, headingDeg, {
+  lookOffsetDeg = 0,
+  pitchDeg = DRIVE_CHASE.pitchDeg,
+  heightM = DRIVE_CHASE.heightM,
+  behindM = DRIVE_CHASE.behindM,
+} = {}) {
+  const heading = Number(headingDeg) || 0;
+  const behind = offsetByHeading(position, heading + 180, behindM);
+  return {
+    name: 'DRIVE',
+    lat: behind.lat,
+    lng: behind.lng,
+    heightM,
+    // The look offset turns the CAMERA without moving it, so "look left" is a
+    // glance out of the side window rather than the drive changing course.
+    headingDeg: ((heading + lookOffsetDeg) % 360 + 360) % 360,
+    pitchDeg,
+    // Altitude is above the ground under the ROAD, not under the camera's
+    // set-back point — the same correction every other shot makes.
+    groundAnchor: { lat: position.lat, lng: position.lng },
+  };
+}
+
+export function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, Number(value) || 0));
+}
+
+export function metresPerDegreeLng(lat) {
+  return M_PER_DEG_LAT * Math.cos((Number(lat) || 0) * DEG);
+}
+
+/** Move a lat/lng by a ground distance along a compass heading. */
+export function offsetByHeading({ lat, lng }, headingDeg, distanceM) {
+  const heading = (Number(headingDeg) || 0) * DEG;
+  const north = Math.cos(heading) * distanceM;
+  const east = Math.sin(heading) * distanceM;
+  return {
+    lat: lat + north / M_PER_DEG_LAT,
+    lng: lng + east / metresPerDegreeLng(lat),
+  };
+}
+
+/**
+ * Camera position for an aim point. At pitch p the camera sits
+ * `altitude / tan(|p|)` metres *back* along the heading — that horizontal
+ * set-back is exactly what a naive `destination: aim` gets wrong.
+ */
+export function cameraFromAim(aim, { headingDeg, pitchDeg, altitudeM }) {
+  const pitch = Math.abs(Number(pitchDeg) || 90);
+  const setBack = pitch >= 89.5 ? 0 : altitudeM / Math.tan(pitch * DEG);
+  const position = offsetByHeading(aim, headingDeg + 180, setBack);
+  return {
+    lat: position.lat,
+    lng: position.lng,
+    heightM: altitudeM,
+    headingDeg,
+    pitchDeg: -pitch,
+  };
+}
+
+export function worldShot(market) {
+  return {
+    name: 'WORLD',
+    lat: market.globeLat,
+    lng: market.globeLng,
+    heightM: WORLD.heightM,
+    headingDeg: WORLD.headingDeg,
+    pitchDeg: WORLD.pitchDeg,
+  };
+}
+
+export function stagingShot(market) {
+  return {
+    name: 'STAGING',
+    ...cameraFromAim({ lat: market.lat, lng: market.lng }, {
+      headingDeg: STAGING.headingDeg,
+      pitchDeg: STAGING.pitchDeg,
+      altitudeM: STAGING.altitudeM,
+    }),
+  };
+}
+
+export function cruiseShot() {
+  return {
+    name: 'CRUISE',
+    ...cameraFromAim(CRUISE.aim, {
+      headingDeg: CRUISE.headingDeg,
+      pitchDeg: CRUISE.pitchDeg,
+      altitudeM: CRUISE.altitudeM,
+    }),
+  };
+}
+
+/**
+ * CRUISE aimed at the centroid of a group of houses.
+ *
+ * Keeps the shot NAME `CRUISE`, so transition durations, the pitch clamp and
+ * every probe that waits on a settled shot go on working unchanged — this is a
+ * different framing of the same shot, not a new one.
+ */
+export function clusterCruiseShot(points, {
+  altitudeM = CLUSTER_CRUISE.altitudeM,
+  headingDeg = CLUSTER_CRUISE.headingDeg,
+  pitchDeg = CLUSTER_CRUISE.pitchDeg,
+} = {}) {
+  const rows = (points || []).filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng));
+  if (!rows.length) return cruiseShot();
+  const aim = {
+    lat: rows.reduce((sum, p) => sum + p.lat, 0) / rows.length,
+    lng: rows.reduce((sum, p) => sum + p.lng, 0) / rows.length,
+  };
+  return {
+    name: 'CRUISE',
+    ...cameraFromAim(aim, { headingDeg, pitchDeg, altitudeM }),
+    // Altitude is above the cluster's ground, not the camera's set-back point.
+    groundAnchor: aim,
+  };
+}
+
+/** Lat/lng bounding box of some points, or null. */
+export function boundsOf(points) {
+  const rows = (points || []).filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng));
+  if (!rows.length) return null;
+  return {
+    south: Math.min(...rows.map((p) => p.lat)),
+    north: Math.max(...rows.map((p) => p.lat)),
+    west: Math.min(...rows.map((p) => p.lng)),
+    east: Math.max(...rows.map((p) => p.lng)),
+  };
+}
+
+/** Widen a box by a fraction of its own span, with a floor so a single point still frames. */
+export function padBounds(bounds, pct = REVEAL.paddingPct, minSpanM = 400) {
+  const latSpan = Math.max(bounds.north - bounds.south, minSpanM / M_PER_DEG_LAT);
+  const centreLat = (bounds.north + bounds.south) / 2;
+  const lngSpan = Math.max(bounds.east - bounds.west, minSpanM / metresPerDegreeLng(centreLat));
+  const padLat = latSpan * pct;
+  const padLng = lngSpan * pct;
+  return {
+    south: centreLat - latSpan / 2 - padLat,
+    north: centreLat + latSpan / 2 + padLat,
+    west: (bounds.east + bounds.west) / 2 - lngSpan / 2 - padLng,
+    east: (bounds.east + bounds.west) / 2 + lngSpan / 2 + padLng,
+  };
+}
+
+/**
+ * Altitude that fits a ground span in frame, before clamping.
+ * @param {number} spanM the larger ground dimension to fit
+ * @param {number} fovRad vertical field of view
+ */
+export function altitudeToFit(spanM, fovRad = 60 * DEG) {
+  return (spanM / 2) / Math.tan(fovRad / 2);
+}
+
+/** Frame the shortlist: bbox + padding, pitch -45, altitude clamped. */
+export function revealShot(points, { fovRad = 60 * DEG } = {}) {
+  const raw = boundsOf(points);
+  if (!raw) return cruiseShot();
+  const box = padBounds(raw);
+  const centre = {
+    lat: (box.north + box.south) / 2,
+    lng: (box.east + box.west) / 2,
+  };
+  const spanM = Math.max(
+    (box.north - box.south) * M_PER_DEG_LAT,
+    (box.east - box.west) * metresPerDegreeLng(centre.lat),
+  );
+  const altitudeM = clamp(altitudeToFit(spanM, fovRad), REVEAL.minAltitudeM, REVEAL.maxAltitudeM);
+  return {
+    name: 'REVEAL',
+    ...cameraFromAim(centre, {
+      headingDeg: REVEAL.headingDeg,
+      pitchDeg: REVEAL.pitchDeg,
+      altitudeM,
+    }),
+  };
+}
+
+/**
+ * Camera pose at a fixed slant range and depression from a target. Unlike
+ * `cameraFromAim` this pins the distance to the subject, which is what "range
+ * 180 m from the house" asks for.
+ */
+export function cameraFromRange(target, { headingDeg, pitchDeg, rangeM }) {
+  const pitch = Math.abs(Number(pitchDeg) || 0);
+  const altitudeM = rangeM * Math.sin(pitch * DEG);
+  const setBack = rangeM * Math.cos(pitch * DEG);
+  const position = offsetByHeading(target, headingDeg + 180, setBack);
+  return {
+    lat: position.lat,
+    lng: position.lng,
+    heightM: altitudeM,
+    headingDeg,
+    pitchDeg: -pitch,
+  };
+}
+
+/**
+ * Degrees to tilt the lens up so the subject falls at `fraction` down the
+ * frame. 0.5 is dead centre and needs no tilt; 0.55 is a twentieth of the frame
+ * below centre, which at a 60 degree FOV is 3 degrees.
+ */
+export function subjectTiltDeg(fovRad = 60 * DEG, fraction = HERO.subjectFrameFraction) {
+  return (fovRad / DEG) * (fraction - 0.5);
+}
+
+/**
+ * How far up the frame the floating marker sits relative to the house it marks.
+ * The marker, not the roof, is what the eye tracks, so the framing has to aim
+ * at the marker or the subject reads as sitting high in frame.
+ */
+export function markerRiseDeg(rangeM = HERO.rangeM, riseM = MARKER_HEIGHT_M) {
+  return Math.atan2(riseM, rangeM) / DEG;
+}
+
+/**
+ * The focused house: 150 m out, just below centre, never looking at the sky.
+ *
+ * `headingDeg`, `rangeM` and `pitchDeg` are all overridable because the
+ * any-angle commands ("show me the back", "closer", "higher") are re-framings of
+ * THIS shot rather than shots of their own. Routing them through here is what
+ * holds the house at the same place on screen as the camera moves around it:
+ * the two framing tilts are recomputed against the new range, so the subject
+ * stays at `subjectFrameFraction` down the frame instead of drifting up it as
+ * the camera pulls back.
+ */
+export function heroShot(property, {
+  headingDeg = HERO.headingDeg,
+  rangeM = HERO.rangeM,
+  pitchDeg = HERO.pitchDeg,
+  fovRad = 60 * DEG,
+} = {}) {
+  const subject = { lat: property.lat, lng: property.lng };
+  const range = Math.max(1, Number(rangeM) || HERO.rangeM);
+  const pose = cameraFromRange(subject, {
+    headingDeg,
+    pitchDeg,
+    rangeM: range,
+  });
+  // Two tilts, both upward. The subject tilt drops the target down the frame;
+  // the marker tilt accounts for the marker floating ABOVE the roof, which makes
+  // it appear HIGHER in frame than the house — so the lens has to come up to
+  // meet it, not go down. The marker tilt is measured at the RANGE actually
+  // being flown: 14 m of clearance subtends 5 degrees at 150 m and under 1 at
+  // 900, and using the 150 m figure at 900 would tip the house out of frame.
+  //
+  // Only PART of that rise is taken. Taking all of it centres the marker and
+  // pushes the house itself to 70% down the frame — see HERO.markerRiseShare.
+  const framed = Math.min(
+    -1,
+    pose.pitchDeg + subjectTiltDeg(fovRad) + markerRiseDeg(range) * HERO.markerRiseShare,
+  );
+  return {
+    name: 'HERO',
+    ...pose,
+    pitchDeg: framed,
+    // Altitude is relative to the SUBJECT's ground, not the camera's. Those
+    // differ by metres across a hillside, and at 150 m range that is visible.
+    groundAnchor: subject,
+  };
+}
+
+/** The apex of a hop: above the midpoint, high enough to read as a rise. */
+export function hopApexShot(from, to, currentHeightM = 0) {
+  const midpoint = {
+    lat: (from.lat + to.lat) / 2,
+    lng: (from.lng + to.lng) / 2,
+  };
+  const altitudeM = Math.max(Number(currentHeightM) || 0, HOP.minApexAltitudeM);
+  return {
+    name: 'HOP',
+    ...cameraFromAim(midpoint, {
+      headingDeg: HERO.headingDeg,
+      pitchDeg: HOP.apexPitchDeg,
+      altitudeM,
+    }),
+  };
+}
+
+/** Chase the route: behind and above, looking along the heading of travel. */
+export function driveShot(property, routeHeadingDeg = HERO.headingDeg) {
+  const position = offsetByHeading(
+    { lat: property.lat, lng: property.lng },
+    routeHeadingDeg + 180,
+    DRIVE.behindM,
+  );
+  return {
+    name: 'DRIVE',
+    lat: position.lat,
+    lng: position.lng,
+    heightM: DRIVE.aboveM,
+    headingDeg: routeHeadingDeg,
+    pitchDeg: DRIVE.pitchDeg,
+  };
+}
+
+/**
+ * Nadir over a house at 120 m.
+ *
+ * `headingDeg` is carried from wherever the camera was rather than reset to
+ * north. At -90 the heading is the rotation of the image in frame and nothing
+ * else, and spinning the picture on the way down adds a motion the viewer has
+ * to account for to answer a question about a roof.
+ */
+export function topDownShot(property, { headingDeg = HERO.headingDeg, altitudeM = TOP_DOWN.altitudeM } = {}) {
+  return {
+    name: 'TOPDOWN',
+    lat: property.lat,
+    lng: property.lng,
+    heightM: Math.max(1, Number(altitudeM) || TOP_DOWN.altitudeM),
+    headingDeg: normalizeHeading(headingDeg),
+    pitchDeg: TOP_DOWN.pitchDeg,
+  };
+}
+
+function normalizeHeading(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return HERO.headingDeg;
+  return ((n % 360) + 360) % 360;
+}
+
+/**
+ * What the WORLD button does next.
+ *
+ * From anywhere in the market it brings you back to the market view — the
+ * common case, and the one that used to throw the user out to space. Pressing
+ * it again *from* the market is an explicit "all the way out".
+ */
+export function worldToggleTarget(currentShot) {
+  return currentShot === 'CRUISE' ? 'WORLD' : 'CRUISE';
+}
+
+/** Compass heading from one point to another, 0-360. */
+export function headingBetween(from, to) {
+  const lat1 = from.lat * DEG;
+  const lat2 = to.lat * DEG;
+  const dLng = (to.lng - from.lng) * DEG;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) / DEG) + 360) % 360;
+}
+
+/** Seconds for a transition, by the shot being left and the shot being entered. */
+export function durationFor(fromName, toName) {
+  if (toName === 'STAGING') return DURATIONS.worldToStaging;
+  if (toName === 'CRUISE') {
+    if (fromName === 'STAGING') return DURATIONS.stagingToCruise;
+    if (fromName === 'HERO' || fromName === 'REVEAL') return DURATIONS.heroToCruise;
+    return DURATIONS.stagingToCruise;
+  }
+  if (toName === 'REVEAL') return DURATIONS.cruiseToReveal;
+  if (toName === 'HERO') return DURATIONS.toHero;
+  if (toName === 'HOP') return DURATIONS.hop;
+  if (toName === 'DRIVE') return DURATIONS.toDrive;
+  if (toName === 'TOPDOWN') return DURATIONS.toHero;
+  return DURATIONS.toHero;
+}

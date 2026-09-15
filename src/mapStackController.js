@@ -85,6 +85,15 @@ const REEARTH_TERRAIN_URL = 'https://terrain.reearth.land/cesium-mesh/ellipsoid'
  * Controls the active globe/map stack. Google Photorealistic 3D Tiles remain
  * the cinematic default, while Cesium ion world imagery and OSM run as globe
  * imagery stacks.
+ *
+ * Viewer is constructed with `baseLayer: false` (see src/main.js). That means
+ * the ellipsoid starts with ZERO ImageryLayers — Cesium's default Ion credit
+ * can still appear. `_activateGlobeStack` is the only path that adds a
+ * covering ImageryLayer for Esri / OSM / Bing. `_syncEsriAttribution` stamps
+ * “Powered by Esri” when the ArcGIS provider *constructs*, which is not the
+ * same as tiles painting. Callers that need a visible Earth must also
+ * request a scene frame (governorRequestRender is a no-op until the idle
+ * governor is installed).
  */
 export class MapStackController {
   constructor(viewer, {
@@ -233,6 +242,10 @@ export class MapStackController {
       }
       // Show/hide of tilesets + imagery swaps need a frame in idle mode;
       // subsequent tile loads self-request via Cesium. (perf wave 2)
+      // Hit the scene directly: governorRequestRender is a no-op until
+      // installRenderGovernor runs, and keyless boot adds the first layer
+      // before that install.
+      try { this.viewer?.scene?.requestRender?.(); } catch { /* stub / pre-init */ }
       governorRequestRender('map-stack');
       if (!silent) this._emitChange('ready');
     } catch (error) {
@@ -300,7 +313,13 @@ export class MapStackController {
 
     if (this.googleTileset) this.googleTileset.show = false;
     this.viewer.scene.globe.show = true;
-    await this._setWorldTerrainEnabled(!!this.cesiumToken, gen);
+    // Request a frame immediately so the new ImageryLayer can fetch tiles.
+    // Do NOT await Re:Earth / ion terrain here: layer.json can hang on a
+    // filtered network while Esri credits are already on screen, leaving a
+    // black or gray ellipsoid. Terrain still installs when the fetch lands
+    // (same generation guard as before).
+    try { this.viewer?.scene?.requestRender?.(); } catch { /* stub / pre-init */ }
+    void this._setWorldTerrainEnabled(!!this.cesiumToken, gen);
     return resolution;
   }
 

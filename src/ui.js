@@ -3517,6 +3517,17 @@ export class StyleManager {
    */
   async _setMapStack(stackId, { syncShare = true } = {}) {
     if (!this.mapStackController) return;
+    // Keyless investor: restoring a saved/share `photoreal` stack would call
+    // `_activatePhotoreal` → globe.show = false and strip imagery, leaving
+    // the HUD over a black void. Photoreal is unavailable without a tileset
+    // anyway; refuse so Esri/OSM stay attached.
+    if (
+      stackId === 'photoreal'
+      && !this.mapStackController.googleTileset
+      && globalThis.document?.documentElement?.classList?.contains('terrasignal-investor')
+    ) {
+      return this.mapStackController.getState();
+    }
     if (syncShare) this.shareLinkManager?.claimRestoreLane?.('map');
     const before = this.mapStackController.getActiveId();
     this._renderMapStackState(this.mapStackController.getState('switching'));

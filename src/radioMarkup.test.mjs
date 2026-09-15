@@ -21,15 +21,21 @@ function realtimeTools() {
   return new Function(`return ${literal};`)();
 }
 
-test('Realtime schema exposes the authoritative 28-tool inventory', () => {
+test('Realtime schema exposes the authoritative 45-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 28);
+  assert.equal(tools.length, 45);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 28, 'tool names are unique');
+  assert.equal(new Set(names).size, 45, 'tool names are unique');
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('select_nearest_aircraft'));
   assert.ok(names.includes('control_radio'));
+  assert.ok(names.includes('rank_mock_properties'));
+  assert.ok(names.includes('run_flip_analysis'));
+  assert.ok(names.includes('start_drive_demo'));
+  assert.ok(names.includes('investor_command'));
+  assert.ok(names.includes('compare_strategies'));
+  assert.ok(names.includes('explain_strategy'));
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
@@ -175,8 +181,27 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'select_nearest_aircraft',
     'set_map_stack',
   ]);
+  const INVESTOR_ADDED = new Set([
+    'investor_command',
+    'compare_strategies',
+    'explain_strategy',
+    'set_opportunity_vision',
+    'search_mock_properties',
+    'focus_property',
+    'rank_mock_properties',
+    'explain_property',
+    'show_deal_vision',
+    'run_flip_analysis',
+    'run_rental_analysis',
+    'run_brrrr_analysis',
+    'run_wholesale_analysis',
+    'save_property',
+    'show_saved_properties',
+    'start_drive_demo',
+    'stop_drive_demo',
+  ]);
   const unchanged = realtimeTools()
-    .filter((tool) => !TOUCHED.has(tool.name))
+    .filter((tool) => !TOUCHED.has(tool.name) && !INVESTOR_ADDED.has(tool.name))
     .sort((a, b) => a.name.localeCompare(b.name));
   assert.equal(unchanged.length, 21);
   const digest = createHash('sha256')
