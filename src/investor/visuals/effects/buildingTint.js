@@ -31,6 +31,7 @@
  */
 
 import { footprintCentroid, toGeo, toLocal } from '../../mock/parcel.js';
+import { brightnessFor, goldBreathFor, motionFor } from './signalMotion.js';
 
 /**
  * How far up the tint is extruded, in metres above the footprint's ground.
@@ -87,9 +88,137 @@ export function insetRing(ring, metresIn = TINT_EDGE_BAND_M) {
 }
 
 /**
- * Should this house be tinted at all?
+ * Which world draws the draped footprint outline.
  *
- * Only the two houses the product is actively pointing at. Tinting the whole
+ * Only the parked Clear View. On Google's photogrammetry the draped line
+ * wobbles over roof edges — the mesh is not the building's true edge, and a
+ * line that traces the mesh reads as sloppy. The rim band carries the shape
+ * in the photo world; the outline stays only for the tree-free experiment,
+ * whose OSM boxes have edges a line can honestly follow.
+ */
+export function outlineDrawnIn(world) {
+  return world === 'clear';
+}
+
+/**
+ * The rim's brightness floor: at the bottom of a beat the band is still this
+ * fraction of its full alpha, so a house never blinks off between pulses.
+ */
+export const RIM_ALPHA_FLOOR = 0.45;
+/** Length of the travelling segment as a fraction of the loop. */
+export const RIM_TRAVEL_WIDTH = 0.10;
+/** How much the travelling segment lifts the rim above its band alpha. */
+export const RIM_TRAVEL_LIFT = 1.6;
+
+/**
+ * Rim band alpha for a signal at a moment on the shared clock.
+ *
+ * The per-signal motion that used to breathe on the draped outline lands
+ * here: the heartbeat, the double pulse and the shimmer are the same
+ * envelopes, read as the rim's alpha rather than a glow width. Gold rims
+ * breathe on the gold breath. Always inside [TINT_EDGE_ALPHA * floor,
+ * TINT_EDGE_ALPHA].
+ */
+export function rimAlphaFor(type, seconds, { reduced = false, gold = false } = {}) {
+  const value = gold
+    ? goldBreathFor(seconds, { reduced })
+    : brightnessFor(type, seconds, { reduced });
+  const band = RIM_ALPHA_FLOOR + (1 - RIM_ALPHA_FLOOR) * Math.min(1, Math.max(0, value));
+  return TINT_EDGE_ALPHA * band;
+}
+
+/** Fraction along the ring's perimeter at which each vertex sits, 0 at the first. */
+export function edgeFractions(ring) {
+  const points = openRing(ring);
+  if (points.length < 3) return [];
+  const centroid = footprintCentroid(points);
+  const local = points.map((point) => toLocal(point, centroid));
+  const lengths = local.map(([x, y], i) => {
+    const [nx, ny] = local[(i + 1) % local.length];
+    return Math.hypot(nx - x, ny - y);
+  });
+  const total = lengths.reduce((sum, l) => sum + l, 0);
+  if (!(total > 0)) return points.map(() => 0);
+  let cursor = 0;
+  return lengths.map((length) => {
+    const at = cursor / total;
+    cursor += length;
+    return at;
+  });
+}
+
+/** A ring without its closing duplicate, if it carried one. */
+export function openRing(ring) {
+  if (!Array.isArray(ring)) return [];
+  const points = ring.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  if (points.length > 1) {
+    const [a, b] = [points[0], points[points.length - 1]];
+    if (Math.abs(a[0] - b[0]) < 1e-12 && Math.abs(a[1] - b[1]) < 1e-12) points.pop();
+  }
+  return points;
+}
+
+/**
+ * The rim band cut into one quad per wall.
+ *
+ * `insetRing` scales about the centroid, so inner and outer vertices
+ * correspond one to one and quad i is the strip along wall i. The quads share
+ * edges and never overlap, which is what lets a travelling segment light one
+ * wall at a time without translucent volumes stacking where they meet.
+ *
+ * @returns {Array<{ring:Array, start:number, mid:number, end:number}>}
+ *   each quad as a 4-point ring plus its perimeter fractions
+ */
+export function rimSegments(outerRing, innerRing) {
+  const outer = openRing(outerRing);
+  const inner = openRing(innerRing);
+  if (outer.length < 3 || inner.length !== outer.length) return [];
+  const fractions = edgeFractions(outer);
+  return outer.map((point, i) => {
+    const j = (i + 1) % outer.length;
+    const start = fractions[i];
+    const end = j === 0 ? 1 : fractions[j];
+    return {
+      ring: [point, outer[j], inner[j], inner[i]],
+      start,
+      end,
+      mid: (start + end) / 2,
+    };
+  });
+}
+
+/**
+ * How lit a point on the loop is by the travelling segment, 0..1.
+ *
+ * Distance is measured the short way round the loop so the head crosses the
+ * seam without a flicker — the same rule the old outline shader used.
+ */
+export function travelLitFor(fraction, head, { width = RIM_TRAVEL_WIDTH } = {}) {
+  const f = ((Number(fraction) % 1) + 1) % 1;
+  const h = ((Number(head) % 1) + 1) % 1;
+  if (!Number.isFinite(f) || !Number.isFinite(h)) return 0;
+  let d = Math.abs(f - h);
+  d = Math.min(d, 1 - d);
+  const w = Math.max(0.01, width);
+  if (d >= w) return 0;
+  const t = d / w;
+  return 1 - t * t * (3 - 2 * t);
+}
+
+/** Where the travelling head is on the loop for a signal, or null if it does not travel. */
+export function travelHeadFor(type, seconds) {
+  const rate = motionFor(type).travelPerSec;
+  if (!(rate > 0)) return null;
+  const t = Number(seconds);
+  if (!Number.isFinite(t)) return 0;
+  return ((t * rate) % 1 + 1) % 1;
+}
+
+/**
+ * Should this house wear the gold fill?
+ *
+ * Only the two houses the product is actively pointing at. The rim band is on
+ * every house in the near field — it is the shape — but filling the whole
  * board would turn a highlight into a colour wash and answer nothing.
  */
 export function tintAppliesTo(id, { focusedId = null, topPickId = null } = {}) {

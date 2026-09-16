@@ -292,8 +292,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     getProperties: () => properties,
     getTopPickId: () => conversation.topPickId || scene?.goldId || null,
     getFocusedId: () => focused?.id || null,
-    // A world swap ends any x-ray: the effect belongs to the photo world.
-    onWorld: () => xray.end(),
+    // A world swap ends any x-ray: the effect belongs to the photo world. The
+    // near field learns the world too — the draped outline is Clear View only.
+    onWorld: (world) => { xray.end(); visuals.setWorld(world); },
   });
 
   /**

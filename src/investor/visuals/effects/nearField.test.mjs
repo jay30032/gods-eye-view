@@ -214,7 +214,7 @@ test('every signal type has a near-field colour and LISTED is cyan, not blue', (
 
 test('a signal is the same colour in the far field and the near field', () => {
   // The two layers are visible at once through the whole handover around
-  // 1,500 m. If a sprite and the parcel outline under it are different
+  // 1,500 m. If a sprite and the rim band under it are different
   // colours, they stop reading as the same house — which is exactly what
   // happened when the near field carried its own LISTED override.
   for (const type of TYPES) {
@@ -236,7 +236,7 @@ test('a signal is the same colour in the far field and the near field', () => {
 // dim rules
 // ---------------------------------------------------------------------------
 
-test('with no shortlist and nothing focused every outline is full strength', () => {
+test('with no shortlist and nothing focused every rim is full strength', () => {
   const state = outlineStateFor('A', {});
   assert.deepEqual(state, { alpha: 1, moving: true, gold: false, focused: false });
 });
@@ -485,7 +485,8 @@ test('a travelling wave has nothing honest to freeze, so reduced motion drops it
 });
 
 // ---------------------------------------------------------------------------
-// Outline profile: a drawn line, not a ribbon
+// Outline profile: a drawn line, not a ribbon (Clear View only; the lot line
+// still uses it in the photo world)
 // ---------------------------------------------------------------------------
 
 test('the outline core is a steady 2 px and only the glow breathes', () => {
@@ -506,4 +507,106 @@ test('a surveyed lot line is drawn well under the building it belongs to', () =>
   assert.ok(lot.coreHalfPx < building.coreHalfPx, 'the lot line must be thinner');
   assert.equal(lot.alphaScale, PARCEL_LINE_SCALE);
   assert.ok(Math.abs(lot.glowHalfPx - building.glowHalfPx * PARCEL_LINE_SCALE) < 1e-9);
+});
+
+// ---------------------------------------------------------------------------
+// The rim band carries the shape and the motion in the photo world
+// ---------------------------------------------------------------------------
+import {
+  RIM_ALPHA_FLOOR,
+  RIM_TRAVEL_WIDTH,
+  TINT_EDGE_ALPHA,
+  edgeFractions,
+  insetRing,
+  openRing,
+  outlineDrawnIn,
+  rimAlphaFor,
+  rimSegments,
+  travelHeadFor,
+  travelLitFor,
+} from './buildingTint.js';
+
+test('the draped outline exists only in the parked clear world', () => {
+  assert.equal(outlineDrawnIn('photo'), false);
+  assert.equal(outlineDrawnIn(undefined), false);
+  assert.equal(outlineDrawnIn('clear'), true);
+});
+
+test('the rim alpha rides each signal envelope, never below its floor, never above the band', () => {
+  for (const type of TYPES) {
+    const { periodS, kind } = MOTION[type];
+    let min = Infinity;
+    let max = -Infinity;
+    for (let ms = 0; ms <= periodS * 3000; ms += 2) {
+      const alpha = rimAlphaFor(type, ms / 1000);
+      assert.ok(alpha >= TINT_EDGE_ALPHA * RIM_ALPHA_FLOOR - 1e-9, `${type} rim went dark: ${alpha}`);
+      assert.ok(alpha <= TINT_EDGE_ALPHA + 1e-9, `${type} rim overshot: ${alpha}`);
+      min = Math.min(min, alpha);
+      max = Math.max(max, alpha);
+    }
+    if (kind === 'steady') assert.equal(min, max, `${type} is steady`);
+    else assert.ok(max - min > 0.03, `${type} lost its motion on the rim (${(max - min).toFixed(3)})`);
+  }
+  // Gold rims breathe on the gold breath and hold at full under reduced motion.
+  assert.equal(rimAlphaFor('FORECLOSURE', 0, { gold: true, reduced: true }), TINT_EDGE_ALPHA);
+  const gold = [];
+  for (let t = 0; t < GOLD_BREATH_PERIOD_S; t += 0.05) gold.push(rimAlphaFor('FORECLOSURE', t, { gold: true }));
+  assert.ok(Math.max(...gold) - Math.min(...gold) > 0.05, 'the gold rim breathes');
+  assert.ok(Math.min(...gold) >= TINT_EDGE_ALPHA * RIM_ALPHA_FLOOR - 1e-9);
+});
+
+const HOUSE = [
+  [-84.3, 33.76], [-84.2998, 33.76], [-84.2998, 33.7601], [-84.2997, 33.7601],
+  [-84.2997, 33.7602], [-84.3, 33.7602],
+];
+
+test('the rim is cut into one quad per wall, in order, covering the whole loop', () => {
+  const inner = insetRing(HOUSE, 1.5);
+  assert.ok(inner && inner.length === HOUSE.length, 'the inset keeps vertex correspondence');
+  const segments = rimSegments(HOUSE, inner);
+  assert.equal(segments.length, HOUSE.length);
+  for (const [i, segment] of segments.entries()) {
+    assert.equal(segment.ring.length, 4);
+    assert.deepEqual(segment.ring[0], HOUSE[i]);
+    assert.deepEqual(segment.ring[1], HOUSE[(i + 1) % HOUSE.length]);
+    assert.ok(segment.end > segment.start, 'each wall spans a positive fraction');
+    assert.ok(segment.mid > segment.start && segment.mid < segment.end);
+  }
+  assert.equal(segments[0].start, 0);
+  assert.equal(segments.at(-1).end, 1);
+  for (let i = 1; i < segments.length; i += 1) {
+    assert.ok(Math.abs(segments[i].start - segments[i - 1].end) < 1e-12, 'walls abut');
+  }
+  // A closed ring (first repeated last) is the same house.
+  assert.equal(rimSegments([...HOUSE, HOUSE[0]], [...inner, inner[0]]).length, HOUSE.length);
+  assert.deepEqual(openRing([...HOUSE, HOUSE[0]]), HOUSE);
+  // Mismatched rings draw nothing rather than the wrong thing.
+  assert.deepEqual(rimSegments(HOUSE, inner.slice(1)), []);
+  assert.deepEqual(rimSegments(HOUSE, null), []);
+});
+
+test('edge fractions climb from 0 and every wall gets its share of the perimeter', () => {
+  const fractions = edgeFractions(HOUSE);
+  assert.equal(fractions.length, HOUSE.length);
+  assert.equal(fractions[0], 0);
+  for (let i = 1; i < fractions.length; i += 1) assert.ok(fractions[i] > fractions[i - 1]);
+  assert.ok(fractions.at(-1) < 1);
+  assert.deepEqual(edgeFractions([[0, 0], [1, 1]]), []);
+});
+
+test('the travelling segment lights one wall at a time, wraps the seam, and only LISTED has one', () => {
+  assert.equal(travelLitFor(0.5, 0.5), 1);
+  assert.equal(travelLitFor(0.5, 0.5 + RIM_TRAVEL_WIDTH), 0);
+  assert.ok(travelLitFor(0.5, 0.5 + RIM_TRAVEL_WIDTH / 2) > 0.4 && travelLitFor(0.5, 0.5 + RIM_TRAVEL_WIDTH / 2) < 0.6);
+  assert.ok(travelLitFor(0.02, 0.98) > 0.4, 'the seam is crossed the short way round');
+  assert.equal(travelLitFor(Number.NaN, 0.5), 0);
+  for (const type of TYPES) {
+    const head = travelHeadFor(type, 1.7);
+    assert.equal(head !== null, type === 'LISTED_OPPORTUNITY', `${type} travel head`);
+    if (head !== null) {
+      assert.ok(head >= 0 && head < 1);
+      const rate = MOTION[type].travelPerSec;
+      assert.ok(Math.abs(travelHeadFor(type, 1.7 + 1 / rate) - head) < 1e-9, 'one loop per 1/rate seconds');
+    }
+  }
 });

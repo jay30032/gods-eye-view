@@ -1,39 +1,46 @@
 /**
- * The near-field effects layer: building outline, per-signal motion, columns.
+ * The near-field effects layer: the building tint, per-signal motion, columns.
  *
  * Below 1,500 m the sprites stop being the story. A 48-pixel billboard says
  * "there is a signal in this block"; at street level the question is *which
  * roof*, and only geometry drawn on the ground can answer it. So this layer
- * draws the building itself and a column of light standing over it, and hands
+ * paints the building itself and stands a column of light over it, and hands
  * back to the sprites on the way up.
  *
- * It used to draw a *synthetic parcel* instead — the footprint's oriented
- * bounding box pushed out by guessed setbacks. Reviewed on the tiles that was
- * plainly the wrong object: a crooked gold box lying across the street and
- * around a neighbour's house. The outline now traces the real OSM footprint,
- * and a lot line is drawn only where a county actually surveyed one.
+ * ## What carries the shape
+ *
+ * In the photo world, the **tint's rim band** — a translucent volume around
+ * the footprint's edge, classified onto Google's tiles, in the signal's colour.
+ * A draped footprint *outline* used to do this job and was dropped: a line
+ * projected onto photogrammetry follows the mesh, not the building, and
+ * wobbles over every roof edge. It read as sloppy. The rim is a volume, so it
+ * colours whatever real geometry stands inside it and never draws an edge of
+ * its own. The outline code is kept for the parked `?world=clear` experiment,
+ * whose OSM boxes have edges a line can honestly trace (`outlineDrawnIn`).
+ *
+ * The per-signal motion moved with the shape. The heartbeat, the double pulse
+ * and the shimmer are the rim band's alpha; the travelling segment is the rim
+ * cut into one volume per wall with the lit wall walking around the house;
+ * the TAX_SALE wave still climbs the column. The far-field halo carries the
+ * same envelopes, so no signal loses its motion at any altitude.
  *
  * Four rules hold the whole design together:
  *
- *   1. **Draped, never drawn over.** Every ground primitive is a
- *      `GroundPolylinePrimitive` with `classificationType` BOTH, so
- *      the outline is projected onto Google's photogrammetry. Drawn as ordinary
- *      geometry it would be buried under a street tree or sliced by a porch
- *      roof — the tiles are real surfaces, not a backdrop.
- *   2. **One clock, delivered as uniforms.** `createEffectClock` is read once
- *      per frame and written to every material. No `CallbackProperty` anywhere:
- *      that machinery re-evaluates a property per frame on the main thread, and
- *      the far-field marker rewrite already established that per-frame work in
- *      this product is a scale write and nothing more.
+ *   1. **Draped, never drawn over.** Every ground primitive classifies the
+ *      tiles (`classificationType` BOTH). Drawn as ordinary geometry it would
+ *      be buried under a street tree or sliced by a porch roof — the tiles are
+ *      real surfaces, not a backdrop.
+ *   2. **One clock, delivered as uniforms and attributes.** `createEffectClock`
+ *      is read once per frame. The column's material takes uniforms; the tint
+ *      volumes take a per-instance colour, written only when its bytes change.
+ *      No `CallbackProperty` anywhere.
  *   3. **Nothing is rebuilt after `build()`.** Geometry is created once. Motion,
- *      selection, dimming and distance fades are all uniform writes. That is
- *      what keeps the layer inside the 33 ms p95 the six-house smoke check
- *      enforces.
+ *      selection, dimming and distance fades are all uniform or attribute
+ *      writes. That is what keeps the layer inside the frame budget the
+ *      six-house smoke check enforces.
  *   4. **Never colour the wrong house.** A row whose Overpass lookup missed has
  *      no footprint, so it draws nothing here at all — it keeps the far-field
  *      beacon, which marks a coordinate without claiming to know which roof.
- *      Silence is honest; a confident outline around the neighbour's house is
- *      not, and neither is a box that only looks surveyed.
  *
  * The screen-space markers are untouched by all of this and remain the far
  * field. This layer only adds.
@@ -41,11 +48,16 @@
 import { geometryFor } from '../../mock/geometry.js';
 import { COLUMN_FABRIC, OUTLINE_FABRIC } from './materials.js';
 import {
-  TINT_EDGE_ALPHA,
+  RIM_TRAVEL_LIFT,
   TINT_FILL_ALPHA,
   TINT_HEIGHT_M,
   insetRing,
+  outlineDrawnIn,
+  rimAlphaFor,
+  rimSegments,
   tintAppliesTo,
+  travelHeadFor,
+  travelLitFor,
 } from './buildingTint.js';
 import {
   COLUMN_HEIGHT_M,
@@ -81,9 +93,7 @@ const RIBBON_WIDTH_PX = RIBBON_HALF_PX * 2;
  * with a ring". The synthetic parcel — an oriented bounding box pushed out from
  * the footprint by guessed setbacks — is no longer drawn at all: on the tiles it
  * landed across the street and around a neighbour's house, and a confident gold
- * box around the wrong property is worse than no box. `mock/parcel.js` still
- * exists for the footprint geometry helpers it carries; nothing renders its
- * output.
+ * box around the wrong property is worse than no box.
  */
 const REAL_PARCEL_SOURCES = new Set(['dekalb-gis', 'fulton-gis']);
 /**
@@ -108,7 +118,8 @@ export function primarySignalType(property) {
 
 /**
  * @param {{viewer:object, Cesium:object, market:object, ground:object,
- *   getProperties:Function, reduced:Function, getGeometry:Function}} deps
+ *   getProperties:Function, reduced:Function, getGeometry:Function,
+ *   world?:string}} deps
  *   `ground` is the shared height source (`visuals/ground.js`): the column,
  *   the tint volumes and this layer's anchor stand on the same number the
  *   far-field sprite stands on. This layer samples nothing itself.
@@ -121,12 +132,13 @@ export function createNearFieldEffects({
   getProperties,
   reduced = () => false,
   getGeometry = geometryFor,
+  world = 'photo',
 }) {
   if (!ground?.heightFor) throw new TypeError('createNearFieldEffects needs the shared ground source');
   const scene = viewer.scene;
   const clock = createEffectClock();
   const goldColor = new Cesium.Color(EFFECT_GOLD[0], EFFECT_GOLD[1], EFFECT_GOLD[2], 1);
-  const entries = new Map(); // id -> { property, type, outline, parcel, column, materials }
+  const entries = new Map(); // id -> { property, type, outline, parcel, column, rim, fill, ... }
   /** Rows skipped for want of a footprint — reported, never drawn. */
   const withoutFootprint = [];
   const collection = scene.primitives.add(new Cesium.PrimitiveCollection());
@@ -139,6 +151,8 @@ export function createNearFieldEffects({
   let topPickId = null;
   let savedId = null;
   let shortlistIds = null;
+  /** Which world is under the layer; only the clear one gets the outline. */
+  let currentWorld = world;
   /**
    * Drive Mode's per-property weights, or null when not driving.
    *
@@ -152,12 +166,14 @@ export function createNearFieldEffects({
   let driveActivations = null;
   /** Last value read off the shared clock — the ground pulses ride this too. */
   let lastSeconds = 0;
+  /** Scratch colour for the per-instance writes; never allocated per frame. */
+  const scratch = new Cesium.Color(1, 1, 1, 1);
 
   /**
    * GroundPolylinePrimitive needs vertex texture fetch. Cesium reports that per
-   * scene, and if it is missing there is no draped outline to be had — the
-   * layer stays dark rather than falling back to geometry that floats through
-   * the roof it is supposed to be drawn on.
+   * scene, and if it is missing there is no draped line to be had — the layer
+   * stays dark rather than falling back to geometry that floats through the
+   * roof it is supposed to be drawn on.
    */
   const supported = (() => {
     try {
@@ -224,7 +240,6 @@ export function createNearFieldEffects({
         id: pickId,
       }),
       appearance: new Cesium.PolylineMaterialAppearance({ material }),
-      // The whole reason this layer exists: the outline belongs ON the tiles.
       classificationType: Cesium.ClassificationType.BOTH,
       asynchronous: true,
       show: false,
@@ -289,15 +304,8 @@ export function createNearFieldEffects({
     }
   })();
 
-  /**
-   * One extruded, tile-classifying volume over a ring.
-   *
-   * The colour is per-instance, not a material: the classification path does
-   * not take one. `PerInstanceColorAppearance` with `flat: true` is what makes
-   * the tint a wash over the photogrammetry rather than a lit surface that goes
-   * dark on whichever side the sun is not on.
-   */
-  function tintVolume(outerRing, holeRing, groundM, color, pickId) {
+  /** One extruded polygon instance over a ring, coloured per instance. */
+  function tintInstance(outerRing, holeRing, groundM, color, id) {
     const toHierarchy = (ring) => Cesium.Cartesian3.fromDegreesArray(
       ring.flatMap(([lon, lat]) => [lon, lat]),
     );
@@ -305,22 +313,35 @@ export function createNearFieldEffects({
       toHierarchy(outerRing),
       holeRing ? [new Cesium.PolygonHierarchy(toHierarchy(holeRing))] : undefined,
     );
-    return new Cesium.ClassificationPrimitive({
-      geometryInstances: new Cesium.GeometryInstance({
-        geometry: new Cesium.PolygonGeometry({
-          polygonHierarchy: hierarchy,
-          // Start a little UNDER the ground the footprint sits on. A volume
-          // whose floor is exactly at the sampled height leaves a hairline of
-          // untinted tile where the walls meet the grass.
-          height: groundM - 1,
-          extrudedHeight: groundM + TINT_HEIGHT_M,
-          vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
-        }),
-        attributes: {
-          color: Cesium.ColorGeometryInstanceAttribute.fromColor(color),
-        },
-        id: pickId,
+    return new Cesium.GeometryInstance({
+      geometry: new Cesium.PolygonGeometry({
+        polygonHierarchy: hierarchy,
+        // Start a little UNDER the ground the footprint sits on. A volume
+        // whose floor is exactly at the sampled height leaves a hairline of
+        // untinted tile where the walls meet the grass.
+        height: groundM - 1,
+        extrudedHeight: groundM + TINT_HEIGHT_M,
+        vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
       }),
+      attributes: {
+        color: Cesium.ColorGeometryInstanceAttribute.fromColor(color),
+      },
+      id,
+    });
+  }
+
+  /**
+   * One tile-classifying primitive over one or more instances.
+   *
+   * The colour is per-instance, not a material: the classification path does
+   * not take one. `PerInstanceColorAppearance` with `flat: true` is what makes
+   * the tint a wash over the photogrammetry rather than a lit surface that goes
+   * dark on whichever side the sun is not on. Per-frame motion is written back
+   * into those instance colours through `getGeometryInstanceAttributes`.
+   */
+  function tintPrimitive(instances) {
+    return new Cesium.ClassificationPrimitive({
+      geometryInstances: instances,
       appearance: new Cesium.PerInstanceColorAppearance({ flat: true, translucent: true }),
       classificationType: Cesium.ClassificationType.BOTH,
       asynchronous: true,
@@ -328,16 +349,42 @@ export function createNearFieldEffects({
     });
   }
 
+  /**
+   * The rim band for a footprint: one volume around the edge, or — for a
+   * signal that travels — one volume per wall so the lit wall can walk.
+   *
+   * @returns {{primitive:object, parts:Array<{id:object, mid:number}>}|null}
+   */
+  function rimFor(footprint, inner, groundM, propertyId, type, color) {
+    if (!inner) return null;
+    const travels = motionFor(type).travelPerSec > 0;
+    const parts = [];
+    const instances = [];
+    if (travels) {
+      for (const [index, segment] of rimSegments(footprint, inner).entries()) {
+        const id = { terrasignalPropertyId: propertyId, rim: index };
+        parts.push({ id, mid: segment.mid });
+        instances.push(tintInstance(segment.ring, null, groundM, color, id));
+      }
+    } else {
+      const id = { terrasignalPropertyId: propertyId, rim: 0 };
+      parts.push({ id, mid: 0 });
+      instances.push(tintInstance(footprint, inner, groundM, color, id));
+    }
+    if (!instances.length) return null;
+    return { primitive: tintPrimitive(instances), parts };
+  }
+
   function build() {
     if (destroyed || !supported) return;
     clear();
+    const drawOutline = outlineDrawnIn(currentWorld);
     for (const property of getProperties() || []) {
       const record = getGeometry(property.id);
       const footprint = record?.building?.footprint?.[0] || null;
-      // No footprint, no near-field geometry. This layer used to fall back to a
-      // nominal lot box around the row's bare coordinate; that box is what read
-      // as "the wrong property", so a row Overpass never resolved now keeps only
-      // the far-field beacon, which does not claim to know which roof it is.
+      // No footprint, no near-field geometry. A row Overpass never resolved
+      // keeps only the far-field beacon, which does not claim to know which
+      // roof it is.
       if (!footprint) {
         withoutFootprint.push(property.id);
         continue;
@@ -356,14 +403,18 @@ export function createNearFieldEffects({
       // 60 fps, which is a garbage collector pause the p95 budget would wear.
       const signalColor = new Cesium.Color(r, g, b, 1);
 
-      // The building itself: the ring this layer is actually willing to claim.
-      const outlineMaterial = makeMaterial(OUTLINE_FABRIC, {
-        color: signalColor,
-        travelPerSec: motion.travelPerSec,
-        ribbonHalfPx: RIBBON_HALF_PX,
-      });
-      const outline = outlinePrimitive(footprint, outlineMaterial, pickId);
-      collection.add(outline);
+      // The draped outline: Clear View only. See `outlineDrawnIn`.
+      let outline = null;
+      let outlineMaterial = null;
+      if (drawOutline) {
+        outlineMaterial = makeMaterial(OUTLINE_FABRIC, {
+          color: signalColor,
+          travelPerSec: motion.travelPerSec,
+          ribbonHalfPx: RIBBON_HALF_PX,
+        });
+        outline = outlinePrimitive(footprint, outlineMaterial, pickId);
+        collection.add(outline);
+      }
 
       // The surveyed lot, if a county gave us one. Secondary by construction:
       // thinner, dimmer, and it never travels — the moving segment belongs to
@@ -388,27 +439,25 @@ export function createNearFieldEffects({
       const column = columnPrimitive(footprint, groundM, columnMaterial, pickId);
       collection.add(column);
 
-      // The tint that lights the house itself. Built for every row so that
-      // nothing is constructed mid-flight when focus moves, but only ever
-      // shown for the top pick and the focused house.
-      let tintFill = null;
-      let tintEdge = null;
+      /**
+       * The tint. The rim band is built for every row in the signal's colour —
+       * it is the shape now — and the fill is built for every row so nothing is
+       * constructed mid-flight when focus moves, but only shown gold on the top
+       * pick and the focused house.
+       */
+      let rim = null;
+      let fill = null;
+      let fillId = null;
       if (classificationSupported) {
-        const gold = (alpha) => new Cesium.Color(
-          EFFECT_GOLD[0], EFFECT_GOLD[1], EFFECT_GOLD[2], alpha,
-        );
         const inner = insetRing(footprint);
-        if (inner) {
-          // Fill the middle, band the rim. The two volumes share an edge and
-          // never overlap, so neither alpha stacks on the other.
-          tintFill = tintVolume(inner, null, groundM, gold(TINT_FILL_ALPHA), pickId);
-          tintEdge = tintVolume(footprint, inner, groundM, gold(TINT_EDGE_ALPHA), pickId);
-        } else {
-          // Too small to carry a 1.6 m band: one flat wash over the whole roof.
-          tintFill = tintVolume(footprint, null, groundM, gold(TINT_FILL_ALPHA), pickId);
-        }
-        collection.add(tintFill);
-        if (tintEdge) collection.add(tintEdge);
+        fillId = { terrasignalPropertyId: property.id, fill: true };
+        const fillColor = new Cesium.Color(r, g, b, TINT_FILL_ALPHA);
+        rim = rimFor(footprint, inner, groundM, property.id, type, new Cesium.Color(r, g, b, TINT_FILL_ALPHA));
+        if (rim) collection.add(rim.primitive);
+        // With a rim the fill sits inside it; too small for a band and the fill
+        // is the whole roof, and carries the shape on its own.
+        fill = tintPrimitive([tintInstance(inner || footprint, null, groundM, fillColor, fillId)]);
+        collection.add(fill);
       }
 
       entries.set(property.id, {
@@ -423,8 +472,15 @@ export function createNearFieldEffects({
         parcelSource: parcelRing ? record.parcel.source : null,
         column,
         columnMaterial,
-        tintFill,
-        tintEdge,
+        rim,
+        fill,
+        fillId,
+        /** Cached instance attribute handles, filled once the primitives are ready. */
+        rimAttributes: null,
+        fillAttributes: null,
+        /** Last bytes written per instance, so an unchanged colour costs nothing. */
+        rimBytes: rim ? rim.parts.map(() => null) : [],
+        fillBytes: null,
         position: Cesium.Cartesian3.fromDegrees(anchor.lng, anchor.lat, groundM),
       });
     }
@@ -438,9 +494,47 @@ export function createNearFieldEffects({
     built = false;
   }
 
+  function hideEntry(entry) {
+    if (entry.outline) entry.outline.show = false;
+    if (entry.parcel) entry.parcel.show = false;
+    if (entry.column) entry.column.show = false;
+    if (entry.rim) entry.rim.primitive.show = false;
+    if (entry.fill) entry.fill.show = false;
+  }
+
   /**
-   * One frame. Per entry this writes at most seven uniform floats and two
-   * `show` booleans — no allocation, no geometry, no property evaluation.
+   * Write one instance colour, but only if its bytes changed.
+   *
+   * `getGeometryInstanceAttributes` is only answerable once the async
+   * primitive is ready; until then the instance keeps its build-time colour.
+   * The bytes are compared before the write because each write re-uploads the
+   * batch table, and a rim at rest would otherwise re-upload every frame.
+   */
+  function writeInstanceColor(primitive, id, cache, key, color, lastBytes) {
+    let attributes = cache[key];
+    if (!attributes) {
+      if (!primitive.ready) return lastBytes;
+      try {
+        attributes = primitive.getGeometryInstanceAttributes(id);
+      } catch {
+        return lastBytes;
+      }
+      if (!attributes) return lastBytes;
+      cache[key] = attributes;
+    }
+    const bytes = (Math.round(color.red * 255) << 24 >>> 0)
+      + (Math.round(color.green * 255) << 16)
+      + (Math.round(color.blue * 255) << 8)
+      + Math.round(color.alpha * 255);
+    if (bytes === lastBytes) return lastBytes;
+    attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(color, attributes.color);
+    return bytes;
+  }
+
+  /**
+   * One frame. Per entry this writes a handful of uniform floats, a few
+   * instance colours when they changed, and the `show` booleans — no
+   * allocation, no geometry, no property evaluation.
    */
   function tick() {
     if (destroyed || !supported) return;
@@ -453,15 +547,7 @@ export function createNearFieldEffects({
     const wasActive = active;
     active = enabled && nearFieldActive(height, wasActive);
     if (!active) {
-      if (wasActive) {
-        for (const entry of entries.values()) {
-          entry.outline.show = false;
-          if (entry.parcel) entry.parcel.show = false;
-          if (entry.column) entry.column.show = false;
-          if (entry.tintFill) entry.tintFill.show = false;
-          if (entry.tintEdge) entry.tintEdge.show = false;
-        }
-      }
+      if (wasActive) for (const entry of entries.values()) hideEntry(entry);
       return;
     }
     if (!built) build();
@@ -479,30 +565,24 @@ export function createNearFieldEffects({
 
       const range = rangeTo(entry.position);
       const visible = range <= DRAW_RADIUS_M;
-      entry.outline.show = visible;
+      if (entry.outline) entry.outline.show = visible;
       if (entry.parcel) entry.parcel.show = visible;
       if (entry.column) entry.column.show = visible;
-      // Only the two houses the product is pointing at are lit. The tint is a
-      // wash over real photogrammetry, so applying it broadly would recolour
-      // the street rather than single out a house.
-      // In a drive the tint is the "useful viewing" highlight, so it arrives on
-      // whatever is close enough to look at — not only on the focused house.
-      const tinted = visible && (drive
+      // The rim is the shape: on every visible house. The fill is the answer:
+      // only the two houses the product is pointing at, or — in a drive, where
+      // the tint is the "useful viewing" highlight — whatever is close enough.
+      const filled = visible && (drive
         ? drive.highlight > 0.02 || tintAppliesTo(id, { focusedId, topPickId })
         : tintAppliesTo(id, { focusedId, topPickId }));
-      if (entry.tintFill) entry.tintFill.show = tinted;
-      if (entry.tintEdge) entry.tintEdge.show = tinted;
+      if (entry.rim) entry.rim.primitive.show = visible;
+      if (entry.fill) entry.fill.show = filled;
       if (!visible) continue;
 
       if (drive?.suspended) {
         // Behind the camera and out of the rear-view: drawn not at all. This is
         // the cheap half of a drive's frame budget, where most of the route is
         // behind you most of the time.
-        entry.outline.show = false;
-        if (entry.parcel) entry.parcel.show = false;
-        if (entry.column) entry.column.show = false;
-        if (entry.tintFill) entry.tintFill.show = false;
-        if (entry.tintEdge) entry.tintEdge.show = false;
+        hideEntry(entry);
         continue;
       }
 
@@ -512,29 +592,62 @@ export function createNearFieldEffects({
         ? goldBrightness
         : brightnessFor(entry.type, moving ? seconds : 0, { reduced: !moving });
       const clockSeconds = moving ? seconds : 0;
-      const profile = outlineProfileFor(entry.type, clockSeconds, {
-        reduced: !moving,
-        gold: state.gold,
-      });
       // In a drive the alpha is distance-based; standing still it is selection.
       const alpha = drive ? drive.alpha : state.alpha;
-
-      const uniforms = entry.outlineMaterial.uniforms;
-      uniforms.color = state.gold ? goldColor : entry.signalColor;
       // Status motion only inside the useful window — a house 300 m up the road
       // pulsing at full rate is noise competing with the one you can see.
-      uniforms.brightness = drive ? brightness * (0.45 + 0.55 * drive.motion) : brightness;
-      // A 2 px core that does not breathe, with a halo around it that does. The
-      // drive fades the outline IN across the approach by shrinking it towards
-      // the core rather than by alpha alone, so it reads as resolving.
-      uniforms.coreHalfPx = profile.coreHalfPx;
-      uniforms.glowHalfPx = drive
-        ? profile.coreHalfPx + (profile.glowHalfPx - profile.coreHalfPx) * drive.outline
-        : profile.glowHalfPx;
-      uniforms.alpha = alpha;
-      uniforms.time = seconds;
-      // prefers-reduced-motion: a static glow, and the segment stops existing.
-      uniforms.travelPerSec = moving ? motionFor(entry.type).travelPerSec : 0;
+      const motionScale = drive ? (0.45 + 0.55 * drive.motion) : 1;
+      const color = state.gold ? goldColor : entry.signalColor;
+
+      // ---- the rim band: the shape, breathing on the signal's envelope -----
+      if (entry.rim) {
+        const band = rimAlphaFor(entry.type, clockSeconds, { reduced: !moving, gold: state.gold });
+        // The drive resolves the rim IN across the approach, the way it used
+        // to grow the outline's glow, rather than by alpha alone.
+        const resolve = drive ? (0.35 + 0.65 * drive.outline) : 1;
+        const head = moving && !state.gold ? travelHeadFor(entry.type, seconds) : null;
+        entry.rimAttributes = entry.rimAttributes || {};
+        for (const [index, part] of entry.rim.parts.entries()) {
+          const lit = head === null ? 0 : travelLitFor(part.mid, head);
+          scratch.red = color.red;
+          scratch.green = color.green;
+          scratch.blue = color.blue;
+          scratch.alpha = Math.min(1, band * (1 + RIM_TRAVEL_LIFT * lit) * alpha * resolve * motionScale);
+          entry.rimBytes[index] = writeInstanceColor(
+            entry.rim.primitive, part.id, entry.rimAttributes, index, scratch, entry.rimBytes[index],
+          );
+        }
+      }
+
+      // ---- the fill: gold on the answer, the signal's colour on a drive ----
+      if (entry.fill && filled) {
+        entry.fillAttributes = entry.fillAttributes || {};
+        scratch.red = color.red;
+        scratch.green = color.green;
+        scratch.blue = color.blue;
+        scratch.alpha = TINT_FILL_ALPHA * (state.gold ? (0.7 + 0.3 * goldBrightness) : alpha);
+        entry.fillBytes = writeInstanceColor(
+          entry.fill, entry.fillId, entry.fillAttributes, 0, scratch, entry.fillBytes,
+        );
+      }
+
+      // ---- the outline: Clear View only ------------------------------------
+      if (entry.outline) {
+        const profile = outlineProfileFor(entry.type, clockSeconds, {
+          reduced: !moving,
+          gold: state.gold,
+        });
+        const uniforms = entry.outlineMaterial.uniforms;
+        uniforms.color = color;
+        uniforms.brightness = brightness * motionScale;
+        uniforms.coreHalfPx = profile.coreHalfPx;
+        uniforms.glowHalfPx = drive
+          ? profile.coreHalfPx + (profile.glowHalfPx - profile.coreHalfPx) * drive.outline
+          : profile.glowHalfPx;
+        uniforms.alpha = alpha;
+        uniforms.time = seconds;
+        uniforms.travelPerSec = moving ? motionFor(entry.type).travelPerSec : 0;
+      }
 
       if (entry.parcel) {
         // The lot line rides the same envelope as the house so the two read as
@@ -553,7 +666,7 @@ export function createNearFieldEffects({
 
       if (entry.column) {
         const columnUniforms = entry.columnMaterial.uniforms;
-        columnUniforms.color = state.gold ? goldColor : entry.signalColor;
+        columnUniforms.color = color;
         columnUniforms.brightness = state.gold ? goldBrightness : brightness;
         columnUniforms.alpha = columnAlphaFor(range) * state.alpha;
         columnUniforms.time = seconds;
@@ -572,6 +685,8 @@ export function createNearFieldEffects({
     /** The shared effect clock, in seconds. One clock for every effect. */
     get seconds() { return lastSeconds; },
     get count() { return entries.size; },
+    /** Which world the layer is drawing for. */
+    get world() { return currentWorld; },
     /**
      * Ids drawing a real OSM building footprint. Every entry now qualifies —
      * a row without one is not built at all — so this equals `count`, and the
@@ -608,15 +723,23 @@ export function createNearFieldEffects({
 
     /** Did this scene support classifying the 3D tiles at all? */
     get classificationSupported() { return classificationSupported; },
-    /** Ids currently wearing the building tint. */
+    /** Ids currently wearing the fill — the gold answer, or a drive's highlight. */
     get tintedIds() {
       return [...entries.entries()]
-        .filter(([, e]) => Boolean(e.tintFill?.show))
+        .filter(([, e]) => Boolean(e.fill?.show))
         .map(([id]) => id);
     },
     /** Ids that actually built a rim band rather than a flat wash. */
     get tintEdgeIds() {
-      return [...entries.entries()].filter(([, e]) => Boolean(e.tintEdge)).map(([id]) => id);
+      return [...entries.entries()].filter(([, e]) => Boolean(e.rim)).map(([id]) => id);
+    },
+    /** Ids whose rim band is on screen right now. */
+    get rimIds() {
+      return [...entries.entries()].filter(([, e]) => Boolean(e.rim?.primitive.show)).map(([id]) => id);
+    },
+    /** Ids with a draped outline built — empty in the photo world by design. */
+    get outlineIds() {
+      return [...entries.entries()].filter(([, e]) => Boolean(e.outline)).map(([id]) => id);
     },
     /** Ids carrying a surveyed county lot line under the building. */
     get parcelIds() {
@@ -632,13 +755,21 @@ export function createNearFieldEffects({
     setEnabled(next) {
       enabled = Boolean(next);
       if (!enabled) {
-        for (const entry of entries.values()) {
-          entry.outline.show = false;
-          if (entry.column) entry.column.show = false;
-        }
+        for (const entry of entries.values()) hideEntry(entry);
         active = false;
       }
       return enabled;
+    },
+    /**
+     * The world changed under the layer. The outline exists only in the clear
+     * one, so a swap rebuilds — once, at the swap, never per frame.
+     */
+    setWorld(next) {
+      const target = next === 'clear' ? 'clear' : 'photo';
+      if (target === currentWorld) return currentWorld;
+      currentWorld = target;
+      if (built) { clear(); build(); }
+      return currentWorld;
     },
     setFocused(id) { focusedId = id || null; },
     /** Drive Mode weights, or null to go back to the standing rules. */

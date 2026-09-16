@@ -33,6 +33,7 @@
  */
 import { SIGNAL_LOOK } from './propertyPulse.js';
 import { GOLD } from './goldHalo.js';
+import { brightnessFor, motionFor } from './effects/signalMotion.js';
 
 export const SPRITE_PX = 48;
 export const CORE_PX = 12;
@@ -45,6 +46,37 @@ export const DIM_ALPHA = 0.35;
 
 export const PULSE_MIN = 0.8;
 export const PULSE_MAX = 1.15;
+
+/**
+ * The halo's brightness floor. The sprite's alpha rides the same per-signal
+ * envelope the near-field rim does — the heartbeat, the double pulse, the
+ * shimmer — and never falls below this fraction of full, so a marker at the
+ * bottom of a beat is still a marker.
+ */
+export const HALO_ALPHA_FLOOR = 0.62;
+/** The travelling arc: how much of the ring it lights, in turns. */
+export const ARC_SPAN_TURNS = 0.22;
+
+/**
+ * Alpha multiplier for the halo at a moment on the shared clock, in
+ * [HALO_ALPHA_FLOOR, 1]. Reduced motion holds it at the envelope's midpoint.
+ */
+export function haloAlphaFor(type, seconds, { reduced = false } = {}) {
+  const motion = motionFor(type);
+  const span = Math.max(1e-6, motion.ceil - motion.floor);
+  const value = (brightnessFor(type, seconds, { reduced }) - motion.floor) / span;
+  return HALO_ALPHA_FLOOR + (1 - HALO_ALPHA_FLOOR) * Math.min(1, Math.max(0, value));
+}
+
+/** Rotation of the travelling arc in radians, or null when the signal does not travel. */
+export function arcRotationFor(type, seconds, { reduced = false } = {}) {
+  const rate = motionFor(type).travelPerSec;
+  if (!(rate > 0) || reduced) return null;
+  const t = Number(seconds);
+  if (!Number.isFinite(t)) return 0;
+  // Clockwise on screen: Cesium rotates billboards counter-clockwise.
+  return -2 * Math.PI * (((t * rate) % 1 + 1) % 1);
+}
 
 /**
  * Choreography constants, read by the sequences and by these tests.
@@ -185,6 +217,31 @@ export function colorForSignal(type) {
 // Cesium side
 // ---------------------------------------------------------------------------
 
+/** A thin ring with one bright arc — the travelling segment, as a sprite. */
+function arcCanvas(rgba, size = SPRITE_PX) {
+  const canvas = globalThis.document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const [r, g, b] = rgba.map((v) => Math.round(v * 255));
+  const half = size / 2;
+  const radius = half * 0.72;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = `rgba(${r},${g},${b},0.22)`;
+  ctx.beginPath();
+  ctx.arc(half, half, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = `rgba(${r},${g},${b},0.95)`;
+  ctx.shadowColor = `rgba(${r},${g},${b},0.9)`;
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  ctx.arc(half, half, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ARC_SPAN_TURNS);
+  ctx.stroke();
+  return canvas;
+}
+
 function spriteCanvas(rgba, size = SPRITE_PX) {
   const canvas = globalThis.document.createElement('canvas');
   canvas.width = size;
@@ -241,6 +298,12 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
     return sprites.get(type);
   }
 
+  function arcFor(type) {
+    const key = `__arc:${type}`;
+    if (!sprites.has(key)) sprites.set(key, arcCanvas(colorForSignal(type)));
+    return sprites.get(key);
+  }
+
   function goldSprite() {
     if (!sprites.has('__gold')) sprites.set('__gold', spriteCanvas([GOLD.r, GOLD.g, GOLD.b, 1]));
     return sprites.get('__gold');
@@ -275,6 +338,18 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
         disableDepthTestDistance: NO_DEPTH,
         id: pickId,
       });
+      // The travelling segment, for the one signal that travels.
+      const arc = motionFor(type).travelPerSec > 0
+        ? billboards.add({
+          position: base,
+          image: arcFor(type),
+          scale: 1,
+          color: Cesium.Color.WHITE,
+          disableDepthTestDistance: NO_DEPTH,
+          show: false,
+          id: pickId,
+        })
+        : null;
       const point = points.add({
         position: base,
         pixelSize: CORE_PX,
@@ -326,8 +401,10 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
       });
 
       markers.set(property.id, {
-        property, type, billboard, point, beacon, label, bookmark, base, top,
+        property, type, billboard, point, beacon, label, bookmark, arc, base, top,
         ignitedAt: null, beaconRiseAt: null, bookmarkDropAt: null,
+        alpha: 1,
+        tint: new Cesium.Color(1, 1, 1, 1),
       });
     }
     applyState();
@@ -357,8 +434,15 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
       marker.billboard.show = show;
       marker.point.show = show;
       marker.billboard.image = isTop || isFocused ? goldSprite() : spriteFor(marker.type);
-      marker.billboard.color = Cesium.Color.WHITE.withAlpha(alpha);
+      // The selection alpha is remembered; the tick multiplies the halo's beat in.
+      marker.alpha = alpha;
+      marker.tint.alpha = alpha;
+      marker.billboard.color = marker.tint;
       marker.point.color = marker.point.color.withAlpha(alpha);
+      if (marker.arc) {
+        marker.arc.show = show && !(isTop || isFocused);
+        marker.arc.color = marker.tint;
+      }
 
       const beaconOn = show && (isTop || isFocused);
       marker.beacon.show = beaconOn;
@@ -388,12 +472,25 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
     lastSeconds = seconds;
     for (const [id, marker] of markers) {
       const emphasis = id === topPickId || id === focusedId ? EMPHASIS_SCALE : 1;
+      // The halo beats: the per-signal envelope as alpha, on top of the scale pulse.
+      const beat = emphasis > 1 ? 1 : haloAlphaFor(marker.type, seconds, { reduced: still });
+      const alpha = marker.alpha * beat;
+      if (Math.abs(marker.tint.alpha - alpha) > 1 / 255) {
+        marker.tint.alpha = alpha;
+        marker.billboard.color = marker.tint;
+        if (marker.arc) marker.arc.color = marker.tint;
+      }
       let pop = 0;
       if (marker.ignitedAt !== null) {
         pop = still ? 0 : ignitePopFor(seconds - marker.ignitedAt);
         if (seconds - marker.ignitedAt >= IGNITE_POP_S) marker.ignitedAt = null;
       }
       marker.billboard.scale = pulseScaleFor(marker.type, seconds, { reduced: still }) * emphasis * (1 + pop);
+      if (marker.arc?.show) {
+        const rotation = arcRotationFor(marker.type, seconds, { reduced: still });
+        marker.arc.rotation = rotation ?? 0;
+        marker.arc.scale = marker.billboard.scale;
+      }
 
       if (marker.beaconRiseAt !== null) {
         const rise = beaconRiseFor(seconds - marker.beaconRiseAt, { reduced: still });

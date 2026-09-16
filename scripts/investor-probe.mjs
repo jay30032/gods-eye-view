@@ -58,7 +58,9 @@ const PLAY = HAS('play');
  * The six-house scene check. Narrower than --play on purpose: it does not drive
  * the conversation, it measures the two shots the near-field effects actually
  * have to hold — a settled CRUISE over the cluster with six parcels glowing,
- * and HERO on the gold house with its outline breathing.
+ * and HERO on the gold house with its rim band breathing — and, in the photo
+ * world, no draped outline at all: the line wobbled over Google's mesh and
+ * was dropped, so a run that finds one has regressed.
  *
  * The frame budget is 33 ms rather than --play's 120 ms because that is the
  * whole question being asked. Draped ground polylines and translucent columns
@@ -83,7 +85,7 @@ const DRIVE = HAS('drive');
  * The same scene and the same shots as `--six`, on ion terrain, Bing aerial and
  * OSM Buildings instead of Google's photogrammetry. What it is actually asking
  * is whether every one of our own layers still lands: the draped parcels and
- * outlines have no tileset to classify onto in this world, the markers have a
+ * rims have no tileset to classify onto in this world, the markers have a
  * different ground under them, and the gold answer is a building tint rather
  * than a photograph of a roof.
  */
@@ -608,6 +610,10 @@ async function main() {
       classification: effects?.classification ?? null,
       tinted: effects?.tinted ?? [],
       tintEdges: effects?.tintEdges?.length ?? 0,
+      // The rim band is the shape in the photo world; the outline is Clear View's.
+      rims: effects?.rims?.length ?? 0,
+      outlines: effects?.outlines?.length ?? 0,
+      world: effects?.world ?? null,
       // Above ground, the way the layer's own ceiling is defined.
       cameraAglM: (() => {
         const h = window.__godsEyeView?.viewer?.camera?.positionCartographic?.height;
@@ -743,7 +749,7 @@ async function main() {
     record(`CHECK ground ${JSON.stringify(checks.ground)}`);
     await shot('hero-six');
 
-    // Four more seconds parked on the house: the orbit runs, the gold outline
+    // Four more seconds parked on the house: the orbit runs, the gold rim
     // breathes, and the column fades down. Anything that leaks shows up here.
     await new Promise((r) => setTimeout(r, 4_000));
     await shot('hero-six-plus-4s');
@@ -1105,7 +1111,7 @@ async function main() {
      * The assertion is not that a camera moved. It is that the 3D scene is what
      * is on screen (the panorama faded out), that it is framing a house rather
      * than a block, and that the near-field layer is actually drawing the
-     * parcel and the outline — which is the thing the question was asking to
+     * parcel and the rim — which is the thing the question was asking to
      * see and the thing that is invisible from the kerb.
      */
     const beforeLotM = (await driveState())?.alongM ?? null;
@@ -1514,6 +1520,16 @@ async function main() {
     && checks.cruiseEffects.count === 6
     && checks.cruiseEffects.surveyed === 6,
   );
+  /**
+   * The shape is the rim band, on every house, and there is no draped
+   * outline in the photo world. Read at CRUISE, where all six are in frame.
+   */
+  const sixRimOk = !SIX || Boolean(
+    checks.cruiseEffects
+    && checks.cruiseEffects.world === 'photo'
+    && checks.cruiseEffects.outlines === 0
+    && checks.cruiseEffects.rims === 6,
+  );
   // "show me the best one" has to land on the house the ranking chose.
   const sixGoldOk = !SIX || Boolean(
     checks.heroScene?.focusedId
@@ -1755,7 +1771,7 @@ async function main() {
 
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
     && framesOk && markersOk && heroOk
-    && sixFramesOk && sixSceneOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk && sixXrayOk
+    && sixFramesOk && sixSceneOk && sixRimOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk && sixXrayOk
     && alignOk
     && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk
     && driveLotViewOk && driveResumeOk
@@ -1796,6 +1812,9 @@ async function main() {
         + `active=${checks.cruiseEffects?.active} · ${checks.cruiseEffects?.surveyed ?? 0} surveyed`
         + ` / ${checks.cruiseEffects?.count ?? 0} built · `
         + `camera ${checks.cruiseEffects?.cameraAglM ?? '?'} m AGL`,
+      `  ${sixRimOk ? 'PASS' : 'FAIL'}  rim, no outline    `
+        + `world ${checks.cruiseEffects?.world ?? '?'} · ${checks.cruiseEffects?.rims ?? 0} rims on 6 · `
+        + `${checks.cruiseEffects?.outlines ?? '?'} draped outlines (photo world wants 0)`,
       `  ${sixGoldOk ? 'PASS' : 'FAIL'}  best one → HERO    `
         + `focused ${checks.heroScene?.focusedId ?? 'NONE'}`
         + ` (gold ${checks.scene?.goldId ?? 'NONE'})`,
@@ -1845,7 +1864,7 @@ async function main() {
         + `google tileset ${cw?.googleShown === true ? 'STILL SHOWN' : 'hidden'} · `
         + `terrain ${cw?.terrain ?? '?'} · buildings ${cw?.buildingsReady ? 'loaded' : 'MISSING'}`,
       `  ${clearEffectsOk ? 'PASS' : 'FAIL'}  effects on terrain `
-        + `near-field active=${cw?.effects?.active} · ${cw?.effects?.count ?? 0} outlines · `
+        + `near-field active=${cw?.effects?.active} · ${cw?.effects?.count ?? 0} footprints · `
         + `${cw?.effects?.parcels ?? 0} lot lines · ${cw?.markers ?? 0} markers`,
       `  ${clearMarkersOk ? 'PASS' : 'FAIL'}  markers at CRUISE  `
         + `${checks.clearCruise?.inView ?? 0} of ${checks.clearCruise?.count ?? 0} in view `
@@ -1901,7 +1920,7 @@ async function main() {
         + `view ${lot?.directorView ?? 'NONE'} · shot ${lot?.shot ?? 'NONE'} · `
         + `pano opacity ${lot?.svOpacity ?? '?'} · `
         + `parcel glow on ${lot?.focusedId ?? 'NOTHING'} `
-        + `(${lot?.effects?.parcels ?? 0} lot lines, ${lot?.effects?.count ?? 0} outlines) · `
+        + `(${lot?.effects?.parcels ?? 0} lot lines, ${lot?.effects?.count ?? 0} footprints) · `
         + `said "${lot?.spoken ?? ''}"`,
       `  ${driveResumeOk ? 'PASS' : 'FAIL'}  "keep going"       `
         + `${resumed?.directorView ?? 'NONE'} · `

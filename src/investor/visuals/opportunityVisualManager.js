@@ -173,6 +173,9 @@ export function createOpportunityVisualManager({
         classification: effects.classificationSupported,
         tinted: effects.tintedIds,
         tintEdges: effects.tintEdgeIds,
+        rims: effects.rimIds,
+        outlines: effects.outlineIds,
+        world: effects.world,
       };
     },
     /** Screen positions of shown markers — used by the headed smoke check. */
@@ -245,6 +248,12 @@ export function createOpportunityVisualManager({
     screenPositionFor(id) { return layer.screenPositionFor(id); },
     /** The house whose card is showing; its label yields to the card. */
     setCardOn(id) { layer.setCardOn(id); governorRequestRender('investor-card'); },
+    /** Which world is under the effects: the draped outline exists only in the clear one. */
+    setWorld(world) {
+      const next = effects.setWorld(world);
+      governorRequestRender('investor-world');
+      return next;
+    },
     setTopPick(id) {
       layer.setTopPick(id);
       effects.setTopPick(id);

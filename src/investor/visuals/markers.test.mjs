@@ -191,3 +191,32 @@ test('the bookmark falls onto the house, overshoots a touch, and rests where it 
   for (let t = 0; t <= BOOKMARK_DROP_S; t += 0.005) lowest = Math.max(lowest, bookmarkDropFor(t));
   assert.ok(lowest > BOOKMARK_REST_PX && lowest < BOOKMARK_REST_PX + 12, `bounce of ${lowest - BOOKMARK_REST_PX}px`);
 });
+
+// ---------------------------------------------------------------------------
+// The halo carries the per-signal envelope and the travelling arc
+// ---------------------------------------------------------------------------
+import { HALO_ALPHA_FLOOR, arcRotationFor, haloAlphaFor } from './markers.js';
+import { MOTION } from './effects/signalMotion.js';
+
+test('the halo beats on the near-field envelope, never below its floor, and only LISTED spins', () => {
+  for (const type of Object.keys(MOTION)) {
+    const { periodS, kind } = MOTION[type];
+    let min = Infinity;
+    let max = -Infinity;
+    for (let ms = 0; ms <= periodS * 2000; ms += 2) {
+      const alpha = haloAlphaFor(type, ms / 1000);
+      assert.ok(alpha >= HALO_ALPHA_FLOOR - 1e-9 && alpha <= 1 + 1e-9, `${type} halo alpha ${alpha}`);
+      min = Math.min(min, alpha);
+      max = Math.max(max, alpha);
+    }
+    if (kind === 'steady') assert.equal(min, max);
+    else assert.ok(max - min > 0.1, `${type} halo lost its motion`);
+    assert.equal(haloAlphaFor(type, 0.3, { reduced: true }), haloAlphaFor(type, 2.1, { reduced: true }), 'reduced motion holds');
+    const spins = arcRotationFor(type, 1.3);
+    assert.equal(spins !== null, type === 'LISTED_OPPORTUNITY', `${type} arc`);
+    assert.equal(arcRotationFor(type, 1.3, { reduced: true }), null, 'reduced motion: no spinning arc');
+  }
+  const a = arcRotationFor('LISTED_OPPORTUNITY', 0);
+  const b = arcRotationFor('LISTED_OPPORTUNITY', 0.5 / MOTION.LISTED_OPPORTUNITY.travelPerSec);
+  assert.ok(Math.abs((a - b) - Math.PI) < 1e-9, 'half a loop is half a turn');
+});
