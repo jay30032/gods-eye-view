@@ -922,20 +922,38 @@
 
   <div id="terrasignal-shell">
     <header id="terrasignal-brand" aria-label="TerraSignal Investor">
-      <div class="ts-brand-mark">TS</div>
-      <div class="ts-brand-copy">
-        <strong>TerraSignal Investor</strong>
-        <span>See what others miss.</span>
+      <button type="button" class="ts-brand-mark" aria-label="TerraSignal Investor — legend" aria-haspopup="true">TS</button>
+      <div class="ts-brand-flyout" role="group" aria-label="Legend">
+        <div class="ts-brand-copy">
+          <strong>TerraSignal Investor</strong>
+          <span id="ts-brand-tagline">See what others miss.</span>
+        </div>
+        <ul class="ts-legend" aria-label="Signals">
+          <li><i style="--c: rgb(140, 5, 15)"></i>Notice of Sale Under Power</li>
+          <li><i style="--c: rgb(219, 71, 20)"></i>Mortgage delinquency</li>
+          <li><i style="--c: rgb(133, 56, 219)"></i>Tax sale (fi. fa.)</li>
+          <li><i style="--c: rgb(235, 158, 31)"></i>Distress</li>
+          <li><i style="--c: rgb(41, 219, 235)"></i>Listed under comps</li>
+        </ul>
+        <label class="ts-vision-toggle">
+          <input type="checkbox" id="ts-opportunity-vision" checked />
+          <span>Opportunity Vision</span>
+        </label>
+        <div class="ts-brand-chips">
+          <div id="ts-lod-chip" aria-live="polite">GLOBE</div>
+          <span id="ts-sound-chip" data-on="1">SOUND ON</span>
+          <button type="button" id="ts-demo-chip" hidden>DEMO</button>
+        </div>
+        <p class="ts-brand-help">Press / to type · "sound off" · "voice on"</p>
+        <p id="ts-attribution">
+          Built on <a href="https://github.com/bilawalsidhu/gods-eye-view" rel="noreferrer">God's Eye View</a>
+          by Bilawal Sidhu · MIT · Mock data only · Not investment advice
+        </p>
       </div>
-      <label class="ts-vision-toggle">
-        <input type="checkbox" id="ts-opportunity-vision" checked />
-        <span>Opportunity Vision</span>
-      </label>
-      <div id="ts-lod-chip" aria-live="polite">GLOBE</div>
-      <button type="button" id="ts-demo-chip">DEMO</button>
     </header>
     <div id="ts-vignette" aria-hidden="true"></div>
-    <p id="ts-ai-prompt" role="status" aria-live="polite">Where are we hunting today?</p>
+    <svg id="ts-leader" aria-hidden="true" hidden><line x1="0" y1="0" x2="0" y2="0" /><circle cx="0" cy="0" r="3" /></svg>
+    <p id="ts-ai-prompt" role="status" aria-live="polite" tabindex="0" title="Tap to type, or press /">Where are we hunting today?</p>
     <aside id="ts-imagery-status" hidden role="status">Loading Earth imagery…</aside>
     <aside id="ts-basemap-toast" hidden role="status"></aside>
     <aside id="ts-first-hunt">
@@ -984,10 +1002,6 @@
       <input id="ts-demo-input" name="q" placeholder="Find me money" />
       <button type="submit">SEND</button>
     </form>
-    <p id="ts-attribution">
-      Built on <a href="https://github.com/bilawalsidhu/gods-eye-view" rel="noreferrer">God's Eye View</a>
-      by Bilawal Sidhu · MIT · Mock data only · Not investment advice
-    </p>
   </div>
 
   <!-- Loading screen -->

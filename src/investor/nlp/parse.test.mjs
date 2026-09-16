@@ -113,6 +113,16 @@ const TABLE = Object.freeze([
   ['back to the market', 'world', {}],
   ['vision off', 'vision_off', {}],
   ['turn on opportunity vision', 'vision_on', {}],
+  // --- sound and voice: session switches ---
+  ['sound off', 'sound_off', {}],
+  ['sound on', 'sound_on', {}],
+  ['mute', 'sound_off', {}],
+  ['turn the sounds off', 'sound_off', {}],
+  ['unmute', 'sound_on', {}],
+  ['voice on', 'voice_on', {}],
+  ['voice off', 'voice_off', {}],
+  ['read it out loud', 'voice_on', {}],
+  ['stop the voice', 'voice_off', {}],
   ['start drive', 'start_drive', {}],
   ['stop drive', 'stop_drive', {}],
   // --- x-ray: see through the photo world, and end it early ---

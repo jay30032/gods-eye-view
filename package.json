@@ -48,7 +48,9 @@
     "smoke:six": "node scripts/investor-probe.mjs --six --url \"http://localhost:4173/?scene=six\" --label six",
     "footprints:fetch": "node scripts/fetch-footprints.mjs",
     "smoke:drive": "node scripts/investor-probe.mjs --drive --url \"http://localhost:4173/?scene=six\" --label drive",
-    "smoke:clear": "node scripts/investor-probe.mjs --clear --url \"http://localhost:4173/?scene=six&world=clear\" --label clear"
+    "smoke:clear": "node scripts/investor-probe.mjs --clear --url \"http://localhost:4173/?scene=six&world=clear\" --label clear",
+    "smoke:sequences": "node scripts/investor-sequences.mjs --url \"http://localhost:4173/?scene=six\"",
+    "smoke:sequences-clean": "node scripts/investor-sequences.mjs --no-capture --url \"http://localhost:4173/?scene=six\""
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

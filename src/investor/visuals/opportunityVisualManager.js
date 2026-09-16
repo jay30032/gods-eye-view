@@ -207,12 +207,44 @@ export function createOpportunityVisualManager({
       return dealStrategy;
     },
     get dealVision() { return { strategy: dealStrategy, caption: dealCaption }; },
-    setShortlist(ids) {
-      layer.setShortlist(ids);
+    /**
+     * @param {string[]|null} ids
+     * @param {{lit?:boolean}} [options] `lit: false` leaves every member dim
+     *   until `ignite` reaches it — the FIND_MONEY choreography.
+     */
+    setShortlist(ids, { lit = true } = {}) {
+      layer.setShortlist(ids, { lit });
       effects.setShortlist(ids);
       governorRequestRender('investor-shortlist');
       return Array.isArray(ids) ? ids.slice() : [];
     },
+    /** Light one match. Returns false for an id with no marker. */
+    ignite(id) {
+      const lit = layer.ignite(id);
+      governorRequestRender('investor-ignite');
+      return lit;
+    },
+    /** Light every match still waiting — a cancelled ignition ends here. */
+    igniteAll() {
+      layer.igniteAll();
+      governorRequestRender('investor-ignite');
+    },
+    /** The gold beacon climbs from the roof. */
+    raiseBeacon(id) {
+      const started = layer.raiseBeacon(id);
+      governorRequestRender('investor-beacon');
+      return started;
+    },
+    /** The bookmark falls onto the house. */
+    dropBookmark(id) {
+      const dropped = layer.dropBookmark(id);
+      governorRequestRender('investor-bookmark');
+      return dropped;
+    },
+    /** One marker's anchor on screen, in pixels, or null. */
+    screenPositionFor(id) { return layer.screenPositionFor(id); },
+    /** The house whose card is showing; its label yields to the card. */
+    setCardOn(id) { layer.setCardOn(id); governorRequestRender('investor-card'); },
     setTopPick(id) {
       layer.setTopPick(id);
       effects.setTopPick(id);

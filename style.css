@@ -10459,3 +10459,512 @@ html.terrasignal-investor .ts-deal.ts-verdict-pass .ts-verdict-line .ts-deal-val
     transition: none;
   }
 }
+
+/* ==========================================================================
+   TerraSignal Investor — the living assistant
+   Furniture: one brand mark (legend on hover), one status strip, one orb.
+   Motion: everything enters and leaves on the spring in --ts-spring
+   (installed by ui/motion.js; the cubic-bezier below is the stand-in).
+   ========================================================================== */
+:root {
+  --ts-spring: cubic-bezier(0.22, 1.28, 0.36, 1);
+  --ts-spring-out: cubic-bezier(0.4, 0, 0.6, 1);
+  --ts-spring-ms: 520ms;
+  --ts-spring-out-ms: 260ms;
+  --ts-ring-ms: 700ms;
+  --ts-gold: #e0b84a;
+}
+
+/* ---- brand mark and legend ------------------------------------------- */
+#terrasignal-brand {
+  top: 0.9rem;
+  left: 0.9rem;
+  gap: 0;
+  z-index: 46;
+}
+
+#terrasignal-brand .ts-brand-mark {
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.45rem;
+  font-family: Inter, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: transform var(--ts-spring-ms) var(--ts-spring), box-shadow 200ms ease;
+}
+
+#terrasignal-brand .ts-brand-mark:hover,
+#terrasignal-brand .ts-brand-mark:focus-visible {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 4px rgba(212, 160, 23, 0.16), 0 6px 18px rgba(0, 0, 0, 0.4);
+  outline: none;
+}
+
+.ts-brand-flyout {
+  position: absolute;
+  top: 2.35rem;
+  left: 0;
+  width: 17.5rem;
+  padding: 0.85rem 0.95rem 0.8rem;
+  border-radius: 0.8rem;
+  background: rgba(10, 8, 4, 0.92);
+  border: 1px solid rgba(212, 160, 23, 0.3);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateY(-8px) scale(0.96);
+  transform-origin: top left;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform var(--ts-spring-ms) var(--ts-spring);
+}
+
+#terrasignal-brand:hover .ts-brand-flyout,
+#terrasignal-brand:focus-within .ts-brand-flyout {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.ts-legend {
+  list-style: none;
+  margin: 0.65rem 0 0.5rem;
+  padding: 0;
+  display: grid;
+  gap: 0.28rem;
+  font-size: 0.7rem;
+  color: rgba(244, 239, 228, 0.85);
+}
+
+.ts-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ts-legend i {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 7px var(--c);
+}
+
+.ts-brand-flyout .ts-vision-toggle {
+  margin: 0.2rem 0 0;
+}
+
+.ts-brand-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0;
+}
+
+.ts-brand-chips #ts-lod-chip,
+.ts-brand-chips #ts-demo-chip,
+.ts-brand-chips #ts-sound-chip {
+  margin-left: 0;
+  padding: 0.18rem 0.45rem;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  font-family: Inter, sans-serif;
+}
+
+#ts-sound-chip[data-on='0'] {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+#ts-demo-chip[hidden] {
+  display: none;
+}
+
+.ts-brand-help {
+  margin: 0.55rem 0 0;
+  font-size: 0.64rem;
+  color: rgba(244, 239, 228, 0.55);
+}
+
+.ts-brand-flyout #ts-attribution {
+  position: static;
+  max-width: none;
+  margin: 0.5rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(244, 239, 228, 0.1);
+}
+
+/* ---- the status strip, above the orb ---------------------------------- */
+#ts-ai-prompt {
+  top: auto;
+  bottom: 6.55rem;
+  max-width: min(40rem, 86vw);
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+  transition: transform var(--ts-spring-ms) var(--ts-spring), background 180ms ease, border-color 180ms ease;
+}
+
+#ts-ai-prompt:hover,
+#ts-ai-prompt:focus-visible {
+  background: rgba(10, 8, 4, 0.8);
+  border-color: rgba(212, 160, 23, 0.5);
+  outline: none;
+}
+
+body.ts-typing #ts-ai-prompt {
+  transform: translate(-50%, -2.55rem);
+}
+
+/* ---- the typed bar: only on "/" or a tap on the strip ----------------- */
+#ts-demo-form {
+  bottom: 6.45rem;
+  width: min(24rem, 88vw);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 10px);
+  transition: opacity 160ms ease, transform var(--ts-spring-ms) var(--ts-spring), width 160ms ease;
+}
+
+body.ts-typing #ts-demo-form {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+body.ts-typing #ts-demo-form button {
+  opacity: 1;
+  width: auto;
+  padding: 0.3rem 0.6rem;
+  border-width: 1px;
+}
+
+/* Demo mode keeps the bar on screen for the scripted rail. */
+body.ts-demo #ts-demo-form {
+  opacity: 0.72;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+  width: min(11.2rem, 62vw);
+}
+
+body.ts-demo.ts-typing #ts-demo-form,
+body.ts-demo #ts-demo-form:hover,
+body.ts-demo #ts-demo-form:focus-within {
+  opacity: 1;
+  width: min(24rem, 88vw);
+}
+
+/* ---- the orb: product mode shows the mic and nothing else ------------- */
+body.ts-product #ts-bottom-nav {
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+body.ts-product #ts-bottom-nav > button[data-ts-nav] {
+  display: none;
+}
+
+body.ts-product #ts-ai-slot {
+  margin: 0;
+}
+
+#ts-ai-slot {
+  --orb: rgba(212, 160, 23, 0.7);
+  border-radius: 50%;
+}
+
+#ts-ai-slot::before,
+#ts-ai-slot::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* The near ring: the state's colour, breathing when idle. */
+#ts-ai-slot::before {
+  inset: -5px;
+  border: 2px solid var(--orb);
+  opacity: 0.3;
+  transition: opacity 240ms ease, border-color 300ms ease;
+  animation: ts-orb-breathe 3.4s ease-in-out infinite;
+}
+
+/* The far ring: only lit while listening or speaking. */
+#ts-ai-slot::after {
+  inset: -14px;
+  border: 1px solid var(--orb);
+  opacity: 0;
+}
+
+#ts-ai-slot[data-ts-orb='listening'] {
+  --orb: rgba(92, 255, 198, 0.95);
+}
+
+#ts-ai-slot[data-ts-orb='listening']::before {
+  opacity: 0.9;
+  animation: none;
+}
+
+#ts-ai-slot[data-ts-orb='listening']::after {
+  animation: ts-orb-ping 1.3s ease-out infinite;
+}
+
+#ts-ai-slot[data-ts-orb='thinking'] {
+  --orb: rgba(255, 220, 120, 0.95);
+}
+
+#ts-ai-slot[data-ts-orb='thinking']::before {
+  opacity: 0.85;
+  border-top-color: transparent;
+  border-left-color: transparent;
+  animation: ts-orb-spin 1s linear infinite;
+}
+
+#ts-ai-slot[data-ts-orb='speaking'] {
+  --orb: rgba(232, 196, 90, 1);
+}
+
+#ts-ai-slot[data-ts-orb='speaking']::before {
+  opacity: 0.8;
+  animation: ts-orb-breathe 1.1s ease-in-out infinite;
+}
+
+#ts-ai-slot[data-ts-orb='speaking']::after {
+  animation: ts-orb-ring 1.1s ease-out infinite;
+}
+
+#ts-ai-slot #ts-ai-button,
+#ts-ai-slot #gev-voice-button {
+  transition: box-shadow 300ms ease, transform var(--ts-spring-ms) var(--ts-spring);
+}
+
+#ts-ai-slot[data-ts-orb='listening'] #ts-ai-button,
+#ts-ai-slot[data-ts-orb='listening'] #gev-voice-button {
+  box-shadow: 0 0 0 6px rgba(92, 255, 198, 0.14), 0 0 28px rgba(92, 255, 198, 0.35);
+}
+
+#ts-ai-slot[data-ts-orb='speaking'] #ts-ai-button,
+#ts-ai-slot[data-ts-orb='speaking'] #gev-voice-button {
+  box-shadow: 0 0 0 6px rgba(232, 196, 90, 0.16), 0 0 30px rgba(232, 196, 90, 0.4);
+}
+
+@keyframes ts-orb-breathe {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.05); }
+}
+
+@keyframes ts-orb-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ts-orb-ping {
+  0% { opacity: 0.7; transform: scale(0.88); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+
+@keyframes ts-orb-ring {
+  0% { opacity: 0.6; transform: scale(0.95); }
+  100% { opacity: 0; transform: scale(1.55); }
+}
+
+/* ---- the property card, beside its house ------------------------------ */
+#ts-focus-card {
+  right: auto;
+  bottom: auto;
+  z-index: 42;
+  width: min(22rem, 92vw);
+  padding: 0.9rem 1rem 0.85rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  will-change: transform, opacity;
+}
+
+#ts-focus-card.is-sheet {
+  left: 0 !important;
+  right: 0;
+  top: auto !important;
+  bottom: 0;
+  width: 100%;
+  max-height: 56vh;
+  overflow: auto;
+  border-radius: 1rem 1rem 0 0;
+  border-bottom: 0;
+  padding-bottom: 7rem;
+}
+
+#ts-focus-card .ts-line {
+  transition: opacity 220ms ease, transform var(--ts-spring-ms) var(--ts-spring);
+}
+
+#ts-focus-card .ts-line.is-pending {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+#ts-focus-card .ts-line.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+#ts-focus-card header {
+  margin-bottom: 0.55rem;
+}
+
+.ts-focus-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.ts-focus-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.ts-focus-titles strong {
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.ts-drive-callout {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ts-gold);
+}
+
+.ts-score-ring {
+  position: relative;
+  flex: 0 0 auto;
+  width: 3.2rem;
+  height: 3.2rem;
+  display: grid;
+  place-items: center;
+}
+
+.ts-score-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.ts-score-ring circle {
+  fill: none;
+  stroke-width: 3;
+}
+
+.ts-score-ring .ts-ring-track {
+  stroke: rgba(244, 239, 228, 0.12);
+}
+
+.ts-score-ring .ts-ring-fill {
+  stroke: var(--ts-gold);
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--p) * 100);
+  transition: stroke-dashoffset var(--ts-ring-ms) var(--ts-spring);
+}
+
+#ts-focus-card .ts-line.is-pending .ts-ring-fill {
+  stroke-dashoffset: 100;
+}
+
+#ts-focus-card.is-fresh .ts-line.is-in .ts-ring-fill {
+  animation: ts-ring-sweep var(--ts-ring-ms) var(--ts-spring) 1;
+}
+
+@keyframes ts-ring-sweep {
+  from { stroke-dashoffset: 100; }
+}
+
+.ts-score-ring b {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ts-gold);
+  font-variant-numeric: tabular-nums;
+}
+
+#ts-focus-card [data-ts-count] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The leader line: house to card, for the first 600 ms. */
+#ts-leader {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 41;
+  pointer-events: none;
+  overflow: visible;
+  transition: opacity 120ms linear;
+}
+
+#ts-leader[hidden] {
+  display: none;
+}
+
+#ts-leader line {
+  stroke: rgba(224, 184, 74, 0.85);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+#ts-leader circle {
+  fill: var(--ts-gold);
+}
+
+/* The saved sheet keeps its corner; it rises on the same spring. */
+#ts-saved-sheet {
+  will-change: transform, opacity;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+/* Drive Mode keeps its own card placement and hides the leader. */
+body.ts-drive-mode #ts-leader {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  #ts-ai-prompt {
+    max-width: 92vw;
+    font-size: 0.84rem;
+  }
+  .ts-brand-flyout {
+    width: min(17.5rem, 86vw);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #ts-ai-slot::before,
+  #ts-ai-slot::after,
+  #ts-focus-card.is-fresh .ts-line.is-in .ts-ring-fill {
+    animation: none !important;
+  }
+  #ts-focus-card .ts-line,
+  .ts-score-ring .ts-ring-fill,
+  .ts-brand-flyout,
+  #ts-ai-prompt,
+  #ts-demo-form,
+  #terrasignal-brand .ts-brand-mark {
+    transition: none !important;
+  }
+  #ts-focus-card .ts-line.is-pending {
+    opacity: 1;
+    transform: none;
+  }
+}

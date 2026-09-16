@@ -13,8 +13,13 @@ export function bindDemoScript(session, { location = globalThis.location } = {})
   let autoTimer = null;
   let playing = Boolean(mode.auto);
   let collapsed = false;
+  /** The DEMO chip can open the rail by hand outside demo mode. */
+  let opened = false;
 
   const paint = () => {
+    // The rail is demo furniture: without ?demo=1 it never paints, even when
+    // the session asks it to collapse after the hunt begins.
+    if (!mode.enabled && !opened) { root.hidden = true; return; }
     const step = DEMO_STEPS[index] || DEMO_STEPS[DEMO_STEPS.length - 1];
     const done = index >= DEMO_STEPS.length;
     root.hidden = false;
@@ -115,6 +120,7 @@ export function bindDemoScript(session, { location = globalThis.location } = {})
   });
 
   document.getElementById('ts-demo-chip')?.addEventListener('click', () => {
+    opened = root.hidden;
     root.hidden = !root.hidden;
     if (!root.hidden) {
       root.classList.add('visible');

@@ -132,3 +132,62 @@ test('every signal type has a colour, and unknown falls back rather than crashin
   }
   assert.deepEqual(colorForSignal('NOPE'), colorForSignal('DISTRESS'));
 });
+
+// ---------------------------------------------------------------------------
+// Choreography: staged ignition, the beacon rise, the bookmark drop
+// ---------------------------------------------------------------------------
+import {
+  BEACON_RISE_S,
+  BOOKMARK_DROP_PX,
+  BOOKMARK_DROP_S,
+  BOOKMARK_REST_PX,
+  IGNITE_POP,
+  IGNITE_POP_S,
+  beaconRiseFor,
+  bookmarkDropFor,
+  ignitePopFor,
+} from './markers.js';
+
+test('a shortlist being lit one by one keeps the unlit members dim until their turn', () => {
+  const shortlistIds = new Set(['a', 'b', 'c']);
+  const litIds = new Set(['a']);
+  assert.equal(markerAlphaFor('a', { shortlistIds, litIds }), 1);
+  assert.equal(markerAlphaFor('b', { shortlistIds, litIds }), DIM_ALPHA, 'waiting its turn');
+  assert.equal(markerAlphaFor('z', { shortlistIds, litIds }), DIM_ALPHA, 'never on the list');
+  // The gold pick and the focus are never dimmed, lit or not.
+  assert.equal(markerAlphaFor('c', { shortlistIds, litIds, topPickId: 'c' }), 1);
+  // Once everything is lit (litIds null) the old rule applies unchanged.
+  assert.equal(markerAlphaFor('b', { shortlistIds, litIds: null }), 1);
+});
+
+test('an ignition pops and settles inside its window; reduced motion has no pop to give', () => {
+  assert.equal(ignitePopFor(0), IGNITE_POP);
+  assert.ok(ignitePopFor(IGNITE_POP_S / 2) > 0 && ignitePopFor(IGNITE_POP_S / 2) < IGNITE_POP);
+  assert.equal(ignitePopFor(IGNITE_POP_S), 0);
+  assert.equal(ignitePopFor(-1), 0);
+  assert.equal(ignitePopFor(null), 0);
+});
+
+test('the beacon climbs from the roof over 500 ms and stays up', () => {
+  assert.equal(BEACON_RISE_S, 0.5);
+  assert.equal(beaconRiseFor(0), 0);
+  assert.ok(beaconRiseFor(0.1) > 0.4, 'fast off the roof');
+  assert.ok(beaconRiseFor(0.4) < 1 && beaconRiseFor(0.4) > 0.95);
+  assert.equal(beaconRiseFor(0.5), 1);
+  assert.equal(beaconRiseFor(9), 1);
+  assert.equal(beaconRiseFor(0, { reduced: true }), 1, 'reduced motion: already up');
+  for (let t = 0; t <= 0.5; t += 0.01) {
+    assert.ok(beaconRiseFor(t + 0.01) >= beaconRiseFor(t) - 1e-9, 'monotonic');
+  }
+});
+
+test('the bookmark falls onto the house, overshoots a touch, and rests where it always sat', () => {
+  assert.equal(BOOKMARK_DROP_S, 0.45);
+  assert.ok(Math.abs(bookmarkDropFor(0) - (BOOKMARK_REST_PX - BOOKMARK_DROP_PX)) < 1e-9, 'starts high above the roof');
+  assert.equal(bookmarkDropFor(BOOKMARK_DROP_S), BOOKMARK_REST_PX);
+  assert.equal(bookmarkDropFor(99), BOOKMARK_REST_PX);
+  assert.equal(bookmarkDropFor(0, { reduced: true }), BOOKMARK_REST_PX);
+  let lowest = -Infinity;
+  for (let t = 0; t <= BOOKMARK_DROP_S; t += 0.005) lowest = Math.max(lowest, bookmarkDropFor(t));
+  assert.ok(lowest > BOOKMARK_REST_PX && lowest < BOOKMARK_REST_PX + 12, `bounce of ${lowest - BOOKMARK_REST_PX}px`);
+});

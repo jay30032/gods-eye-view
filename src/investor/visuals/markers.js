@@ -47,6 +47,59 @@ export const PULSE_MIN = 0.8;
 export const PULSE_MAX = 1.15;
 
 /**
+ * Choreography constants, read by the sequences and by these tests.
+ *
+ * An ignition is a pop: the sprite swells by `IGNITE_POP` and settles over
+ * `IGNITE_POP_S`. The beacon climbs from the roof over `BEACON_RISE_S`, and
+ * the bookmark falls onto the house from `BOOKMARK_DROP_PX` above over
+ * `BOOKMARK_DROP_S` with a small bounce.
+ */
+export const IGNITE_POP = 0.7;
+export const IGNITE_POP_S = 0.35;
+export const BEACON_RISE_S = 0.5;
+export const BOOKMARK_DROP_PX = 72;
+export const BOOKMARK_DROP_S = 0.45;
+export const BOOKMARK_REST_PX = -26;
+
+/** How much extra scale an ignition adds `elapsedS` after it fired. 0 once settled. */
+export function ignitePopFor(elapsedS) {
+  if (elapsedS === null || elapsedS === undefined) return 0;
+  const t = Number(elapsedS);
+  if (!Number.isFinite(t) || t < 0 || t >= IGNITE_POP_S) return 0;
+  const p = t / IGNITE_POP_S;
+  return IGNITE_POP * (1 - p) * (1 - p);
+}
+
+/** How far up the beacon has climbed, 0..1, `elapsedS` after the rise began. */
+export function beaconRiseFor(elapsedS, { reduced = false } = {}) {
+  if (reduced) return 1;
+  const t = Number(elapsedS);
+  if (!Number.isFinite(t) || t < 0) return 0;
+  const p = clamp01(t / BEACON_RISE_S);
+  // Ease-out cubic: fast off the roof, settling at the top.
+  return 1 - (1 - p) ** 3;
+}
+
+/**
+ * The bookmark's pixel offset above the marker `elapsedS` into its drop.
+ *
+ * Starts high, falls with a spring-like overshoot past the roof and settles
+ * at the rest offset. Negative is up, as Cesium's pixelOffset reads it.
+ */
+export function bookmarkDropFor(elapsedS, { reduced = false } = {}) {
+  if (reduced) return BOOKMARK_REST_PX;
+  const t = Number(elapsedS);
+  if (!Number.isFinite(t) || t < 0) return BOOKMARK_REST_PX - BOOKMARK_DROP_PX;
+  if (t >= BOOKMARK_DROP_S) return BOOKMARK_REST_PX;
+  const p = t / BOOKMARK_DROP_S;
+  // Ease-out back: overshoots the rest point by a few pixels and returns.
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  const eased = 1 + c3 * (p - 1) ** 3 + c1 * (p - 1) ** 2;
+  return BOOKMARK_REST_PX - BOOKMARK_DROP_PX * (1 - eased);
+}
+
+/**
  * One tempo per signal type. The kind is the shape of the envelope; the period
  * is how long one cycle takes. All of them stay inside [PULSE_MIN, PULSE_MAX]
  * so a marker never swamps its neighbours.
@@ -101,9 +154,14 @@ export function pulseScaleFor(type, seconds, { reduced = false } = {}) {
  * A shortlist is an answer to a question — everything that did not make it
  * recedes rather than disappearing, so the board still reads as a board.
  */
-export function markerAlphaFor(id, { shortlistIds = null, focusedId = null, topPickId = null } = {}) {
+export function markerAlphaFor(id, {
+  shortlistIds = null, focusedId = null, topPickId = null, litIds = null,
+} = {}) {
   if (!shortlistIds || !shortlistIds.size) return 1;
-  if (shortlistIds.has(id) || id === focusedId || id === topPickId) return 1;
+  if (id === focusedId || id === topPickId) return 1;
+  // A shortlist being lit one house at a time: members wait dim for their
+  // turn, and the board does not read as answered until the last one lands.
+  if (shortlistIds.has(id)) return litIds && !litIds.has(id) ? DIM_ALPHA : 1;
   return DIM_ALPHA;
 }
 
@@ -165,10 +223,16 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
   let topPickId = null;
   let savedId = null;
   let shortlistIds = null;
+  /** Which shortlist members have ignited so far, or null once all are lit. */
+  let litIds = null;
   let hoveredId = null;
   let enabled = false;
   /** Drive Mode weights per id, or null. See nearFieldEffects for the rule. */
   let driveActivations = null;
+  /** The marker clock's last reading, so a choreography can stamp itself on it. */
+  let lastSeconds = 0;
+  /** The house whose card is on screen: the card carries the address, so the label yields. */
+  let cardOnId = null;
 
   const NO_DEPTH = Number.POSITIVE_INFINITY;
 
@@ -261,7 +325,10 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
         id: pickId,
       });
 
-      markers.set(property.id, { property, type, billboard, point, beacon, label, bookmark });
+      markers.set(property.id, {
+        property, type, billboard, point, beacon, label, bookmark, base, top,
+        ignitedAt: null, beaconRiseAt: null, bookmarkDropAt: null,
+      });
     }
     applyState();
   }
@@ -282,7 +349,7 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
       // the house is, not whether it answered an earlier question.
       const alpha = drive
         ? Math.max(0, Math.min(1, drive.beacon))
-        : markerAlphaFor(id, { shortlistIds, focusedId, topPickId });
+        : markerAlphaFor(id, { shortlistIds, focusedId, topPickId, litIds });
       const isTop = id === topPickId;
       const isFocused = id === focusedId;
       const show = enabled && !(drive?.suspended);
@@ -295,7 +362,7 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
 
       const beaconOn = show && (isTop || isFocused);
       marker.beacon.show = beaconOn;
-      marker.label.show = beaconOn;
+      marker.label.show = beaconOn && id !== cardOnId;
       marker.label.text = hoveredId === id && !beaconOn
         ? shortAddress(marker.property)
         : beaconLabelFor(marker.property);
@@ -318,9 +385,27 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
       ? frozenSeconds
       : Cesium.JulianDate.secondsDifference(time, epoch);
     const still = reduced();
+    lastSeconds = seconds;
     for (const [id, marker] of markers) {
       const emphasis = id === topPickId || id === focusedId ? EMPHASIS_SCALE : 1;
-      marker.billboard.scale = pulseScaleFor(marker.type, seconds, { reduced: still }) * emphasis;
+      let pop = 0;
+      if (marker.ignitedAt !== null) {
+        pop = still ? 0 : ignitePopFor(seconds - marker.ignitedAt);
+        if (seconds - marker.ignitedAt >= IGNITE_POP_S) marker.ignitedAt = null;
+      }
+      marker.billboard.scale = pulseScaleFor(marker.type, seconds, { reduced: still }) * emphasis * (1 + pop);
+
+      if (marker.beaconRiseAt !== null) {
+        const rise = beaconRiseFor(seconds - marker.beaconRiseAt, { reduced: still });
+        marker.beacon.positions = [marker.base, Cesium.Cartesian3.lerp(marker.base, marker.top, rise, new Cesium.Cartesian3())];
+        if (rise >= 1) marker.beaconRiseAt = null;
+      }
+
+      if (marker.bookmarkDropAt !== null) {
+        const elapsed = seconds - marker.bookmarkDropAt;
+        marker.bookmark.pixelOffset = new Cesium.Cartesian2(0, bookmarkDropFor(elapsed, { reduced: still }));
+        if (still || elapsed >= BOOKMARK_DROP_S) marker.bookmarkDropAt = null;
+      }
     }
   }
 
@@ -340,10 +425,54 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
     setFocused(id) { focusedId = id || null; applyState(); },
     setTopPick(id) { topPickId = id || null; applyState(); },
     setSaved(id) { savedId = id || null; applyState(); },
-    setShortlist(ids) {
+    /**
+     * @param {string[]|null} ids
+     * @param {{lit?:boolean}} [options] `lit: false` sets the shortlist with
+     *   every member still dim, waiting for `ignite`.
+     */
+    setShortlist(ids, { lit = true } = {}) {
       const list = Array.isArray(ids) ? ids.filter(Boolean) : [];
       shortlistIds = list.length ? new Set(list) : null;
+      litIds = shortlistIds && !lit ? new Set() : null;
       applyState();
+    },
+    /** Light one shortlist member: full strength, with a pop. */
+    ignite(id) {
+      const marker = markers.get(id);
+      if (!marker) return false;
+      if (litIds) litIds.add(id);
+      marker.ignitedAt = lastSeconds;
+      applyState();
+      return true;
+    },
+    /** Light everything that is still waiting — the end state of a cancelled ignition. */
+    igniteAll() {
+      litIds = null;
+      applyState();
+    },
+    /** Start the beacon climbing from the roof. It is only drawn for the top pick or the focus. */
+    raiseBeacon(id) {
+      const marker = markers.get(id);
+      if (!marker) return false;
+      marker.beaconRiseAt = lastSeconds;
+      marker.beacon.positions = [marker.base, marker.base];
+      return true;
+    },
+    /** Drop the bookmark glyph onto the house. `setSaved` decides whether it shows. */
+    dropBookmark(id) {
+      const marker = markers.get(id);
+      if (!marker) return false;
+      marker.bookmarkDropAt = lastSeconds;
+      marker.bookmark.pixelOffset = new Cesium.Cartesian2(0, bookmarkDropFor(0));
+      return true;
+    },
+    /** Where one marker's anchor lands on screen, or null when it is not built. */
+    screenPositionFor(id) {
+      const marker = markers.get(id);
+      if (!marker) return null;
+      const screen = Cesium.SceneTransforms.worldToWindowCoordinates?.(scene, marker.billboard.position)
+        || Cesium.SceneTransforms.wgs84ToWindowCoordinates?.(scene, marker.billboard.position);
+      return screen ? { id, x: screen.x, y: screen.y } : null;
     },
     /** Drive Mode weights, or null to go back to the standing rules. */
     setDriveActivations(map) {
@@ -353,6 +482,13 @@ export function createMarkerLayer({ viewer, Cesium, ground, getProperties, reduc
     setHovered(id) {
       if (hoveredId === id) return;
       hoveredId = id || null;
+      applyState();
+    },
+    /** The card is up for this house, or for none. */
+    setCardOn(id) {
+      const next = id || null;
+      if (cardOnId === next) return;
+      cardOnId = next;
       applyState();
     },
     /** Freeze the pulse clock (used while the camera is flying). */

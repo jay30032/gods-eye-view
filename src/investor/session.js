@@ -57,14 +57,34 @@ import {
 } from './ensureBasemap.js';
 import {
   applyInvestorChrome,
+  openTypedBar,
   relocateVoiceControl,
   setAiPrompt,
   setLodChip,
   setNavActive,
+  setSoundChip,
 } from './ui/chrome.js';
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
-import { hideFocusCard, renderFocusCard } from './ui/focusCard.js';
+import {
+  focusCardState,
+  hideFocusCard,
+  positionFocusCard,
+  renderFocusCard,
+  revealAllFocusLines,
+  revealFocusLine,
+} from './ui/focusCard.js';
+import {
+  buildFindMoney,
+  buildLookCloser,
+  buildSave,
+  createSequencer,
+  lineScheduleFor,
+} from './sequences.js';
+import { createAudioEngine } from './audio/engine.js';
+import { createNarrator, splitSentences } from './ui/narrator.js';
+import { createOrb } from './ui/orb.js';
+import { installSpringEasing } from './ui/motion.js';
 import {
   ensureDriveBar,
   hideDriveIntro,
@@ -75,6 +95,12 @@ import {
   setProgressBarVisible,
 } from './ui/driveChrome.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
+
+/** Commands that change a switch, not the board: they never interrupt a moment. */
+const ASIDE_INTENTS = new Set([
+  'sound_on', 'sound_off', 'voice_on', 'voice_off', 'vision_on', 'vision_off', 'help', 'unknown',
+  'drive_narration',
+]);
 
 /** What the six-house scene says instead of the market's opening hint. */
 const SIX_HOUSE_HINT = 'Six houses, five signals. Say "show me the best one".';
@@ -132,6 +158,46 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   let hunt = null;
 
   applyInvestorChrome(config);
+  installSpringEasing();
+
+  /**
+   * The assistant's body: the sound palette, the voice, the orb, and the
+   * sequencer that choreographs the hero moments. None of these touch data
+   * or maths; they decide *when* a thing the session already does happens.
+   */
+  const audio = createAudioEngine();
+  audio.bind();
+  setSoundChip(audio.enabled);
+  const orb = createOrb();
+  const narrator = createNarrator({ onState: (state) => orb.set('narrator', state) });
+  const sequences = createSequencer({ reduced: () => prefersReducedMotion() });
+  let thinkingTimer = null;
+
+  /** The assistant says a line: the strip, the orb, and the reading pace. */
+  function say(text, options = {}) {
+    if (thinkingTimer) { globalThis.clearTimeout(thinkingTimer); thinkingTimer = null; }
+    orb.set('session', 'idle');
+    if (!text) return null;
+    return narrator.say(text, options);
+  }
+
+  /** Between a command arriving and its answer, the orb thinks. */
+  function thinking() {
+    orb.set('session', 'thinking');
+    if (thinkingTimer) globalThis.clearTimeout(thinkingTimer);
+    thinkingTimer = globalThis.setTimeout(() => orb.set('session', 'idle'), 2000);
+  }
+
+  /** Where the camera stands, for "nearest to the camera first". */
+  function cameraPoint() {
+    try {
+      const carto = Cesium.Cartographic.fromCartesian(viewer.camera.positionWC);
+      return { lat: Cesium.Math.toDegrees(carto.latitude), lng: Cesium.Math.toDegrees(carto.longitude) };
+    } catch {
+      return null;
+    }
+  }
+
   await disableLiveFeeds(dataManager);
   try { styleManager?.hud?.setVisible?.(false); } catch { /* optional */ }
   try { setScopeMaskEnabled(false); } catch { /* optional */ }
@@ -300,7 +366,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     getProperties: () => properties,
     onAnnounce: (event) => {
       if (event.property && event.detail !== true) driveCard(event.property, event);
-      setAiPrompt(event.spoken);
+      say(event.spoken);
     },
     onState: (state) => applyDriveChrome(state),
     onStop: () => {
@@ -318,7 +384,11 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
    * so "save that one" has a visible referent.
    */
   function driveCard(property, event) {
-    renderFocusCard(property, { driveCallout: event?.spoken || null, compact: true });
+    renderFocusCard(property, {
+      driveCallout: event?.spoken || null,
+      compact: true,
+      anchor: visuals.screenPositionFor(property.id),
+    });
   }
 
   /**
@@ -367,6 +437,21 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
    * this viewer at 30 fps on battery. GPS ignores this — its fixes arrive on
    * their own schedule — which is why `tick` is a no-op for that source.
    */
+  /**
+   * The card follows its house.
+   *
+   * One screen projection per frame while a card is up, and a style write only
+   * when the answer moved. During a flight the card is already gone — the
+   * moment that lands it paints a new one on arrival.
+   */
+  viewer.scene.postRender.addEventListener(() => {
+    const card = document.getElementById('ts-focus-card');
+    const up = Boolean(focused && card && !card.hidden);
+    visuals.setCardOn(up ? focused.id : null);
+    if (!up) return;
+    positionFocusCard(visuals.screenPositionFor(focused.id));
+  });
+
   let lastDriveTickMs = null;
   viewer.scene.preRender.addEventListener(() => {
     if (!drive.running) { lastDriveTickMs = null; return; }
@@ -416,12 +501,27 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     viewDirector,
     clearView,
     xray,
+    audio,
+    narrator,
+    orb,
+    sequences,
+    /** What the card is doing, for the headed check. */
+    get card() { return focusCardState(); },
     get focused() { return focused; },
     get lastAnalysis() { return lastAnalysis; },
     getById(id) {
       return provider.getById(id) || properties.find((row) => row.id === id) || null;
     },
-    focus(id, { fly = true } = {}) {
+    /**
+     * Focus a house.
+     *
+     * With `fly`, this is the LOOK_CLOSER moment: the dive (a hop when coming
+     * from another house), the x-ray as it lands, and the card assembling line
+     * by line as the explanation is spoken. `line` is what is said as the
+     * camera takes off — the caller's answer — so the strip never says one
+     * thing while the flight says another.
+     */
+    focus(id, { fly = true, line = null } = {}) {
       const property = this.getById(id);
       if (!property) return { ok: false, action: 'focus_property', error: 'Unknown mock property' };
       const previous = focused;
@@ -430,33 +530,69 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       visuals.setFocused(property.id);
       // The building tint is the same answer as the marker and the outline.
       clearView.repaint();
-      const analysisForCard = lastAnalysisId === property.id ? lastAnalysis : null;
-      const paintCard = () => renderFocusCard(property, {
-        analysis: analysisForCard,
+      const cardOptions = (extra = {}) => ({
+        analysis: lastAnalysisId === property.id ? lastAnalysis : null,
         strategy: conversation.lastStrategy,
-        revealDeal: Boolean(analysisForCard),
+        revealDeal: Boolean(lastAnalysisId === property.id && lastAnalysis),
         customNumbers: hasCustomNumbers(conversation),
+        anchor: visuals.screenPositionFor(property.id),
+        ...extra,
       });
-      if (fly) {
-        // Moving house to house is a hop, not a slide across the rooftops.
-        const arrival = previous && previous.id !== property.id
-          ? camera.hop(previous, property)
-          : camera.fly('HERO', property);
-        arrival.then((result) => {
-          // Only act if we actually landed — a superseded flight must not
-          // orbit or open a card on a house the user has already left.
-          if (result.cancelled || focused?.id !== property.id) return;
-          paintCard();
-          // The house is in frame: see through the block to it.
-          xray.arm({ flying: camera.flying });
-          camera.orbit(property);
-        });
-      } else {
-        paintCard();
-        xray.arm({ flying: camera.flying });
-      }
       hideSavedSheet();
       setNavActive('world');
+
+      if (!fly) {
+        renderFocusCard(property, cardOptions());
+        xray.arm({ flying: camera.flying });
+        if (line) say(line);
+        return { ok: true, action: 'focus_property', id: property.id, address: property.address };
+      }
+
+      // The old card leaves as the camera does; the new one assembles on landing.
+      hideFocusCard();
+      const why = whyThisMatters(property);
+      const sentences = splitSentences(why);
+      const hop = Boolean(previous && previous.id !== property.id);
+      const timeline = buildLookCloser({
+        propertyId: property.id,
+        hop,
+        line: line || `${shortAddress(property)}.`,
+        sentences,
+      });
+      const run = sequences.play(timeline, {
+        speak: (event) => say(event.text),
+        sound: (event) => audio.play(event.sound),
+        flight: async (event, ctx) => {
+          // Moving house to house is a hop, not a slide across the rooftops.
+          const arrival = event.shot === 'HOP'
+            ? camera.hop(previous, property)
+            : camera.fly('HERO', property);
+          const result = await arrival;
+          // Only act if we actually landed — a superseded flight must not
+          // orbit or open a card on a house the user has already left.
+          if (result.cancelled || focused?.id !== property.id) ctx.cancel();
+        },
+        xray: () => xray.arm({ flying: camera.flying }),
+        card: () => renderFocusCard(property, cardOptions({ assemble: true })),
+        orbit: () => camera.orbit(property),
+        explain: (event) => {
+          if (!event.sentences?.length) return null;
+          const lines = focusCardState().lines;
+          const schedule = lineScheduleFor(lines, event.sentences.length);
+          const speech = say(why, {
+            sentences: event.sentences,
+            perSentence: true,
+            onSentence: (index) => {
+              schedule.forEach((at, k) => { if (at <= index) revealFocusLine(k); });
+            },
+          });
+          return speech?.done || null;
+        },
+        revealAll: () => revealAllFocusLines(),
+      });
+      run.done.then((summary) => {
+        if (summary.cancelled && focused?.id === property.id) revealAllFocusLines();
+      });
       return { ok: true, action: 'focus_property', id: property.id, address: property.address };
     },
     setOpportunityVision(enabled) {
@@ -464,7 +600,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       writeVisionPref(next);
       const box = document.getElementById('ts-opportunity-vision');
       if (box) box.checked = next;
-      setAiPrompt(next ? 'Opportunity Vision on.' : 'Opportunity Vision off.');
+      say(next ? 'Opportunity Vision on.' : 'Opportunity Vision off.');
       return { ok: true, action: 'set_opportunity_vision', enabled: next };
     },
     showDealVision(strategy) {
@@ -476,7 +612,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         renderFocusCard(focused, { analysis: lastAnalysis, strategy: name, revealDeal: true });
       }
       visuals.setDealVision(name, lastAnalysis);
-      setAiPrompt(`${name.toUpperCase()} vision on the globe.`);
+      say(`${name.toUpperCase()} vision on the globe.`);
       return { ok: true, action: 'show_deal_vision', strategy: name, id: focused?.id || null };
     },
     analyze(strategy, overrides = {}) {
@@ -504,14 +640,27 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         note: extras?.note || '',
       }));
       if (result.ok && property) {
-        visuals.setSaved(property.id);
-        renderFocusCard(property, {
+        const paint = () => renderFocusCard(property, {
           analysis: lastAnalysisId === property.id ? lastAnalysis : null,
           strategy: conversation.lastStrategy,
           revealDeal: lastAnalysisId === property.id,
+          customNumbers: hasCustomNumbers(conversation),
+          anchor: visuals.screenPositionFor(property.id),
         });
-        this.showSaved();
-        setAiPrompt(result.spoken);
+        const run = sequences.play(buildSave({ propertyId: property.id }), {
+          saved: () => visuals.setSaved(property.id),
+          drop: () => visuals.dropBookmark(property.id),
+          sound: (event) => audio.play(event.sound),
+          card: () => { paint(); this.showSaved(); },
+        });
+        run.done.then((summary) => {
+          if (!summary.cancelled) return;
+          visuals.setSaved(property.id);
+          paint();
+        });
+        say(result.spoken);
+      } else if (!result.ok) {
+        audio.play('errorTone');
       }
       return result;
     },
@@ -534,9 +683,29 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         compare,
       });
     },
+    /**
+     * Anything typed or spoken lands here.
+     *
+     * A new command interrupts the moment in progress — the choreography stops
+     * where it is and its end state is applied — except for the side switches
+     * (sound, voice, vision, help), which change nothing on the board. The orb
+     * thinks until the answer is said, and a miss gets the error tone.
+     */
     handleIntent(text) {
       const parsed = parseDemoIntent(text);
-      if (!parsed) return { ok: false, spoken: 'Say find me money.' };
+      if (!parsed) {
+        audio.play('errorTone');
+        return { ok: false, spoken: 'Say find me money.' };
+      }
+      if (!ASIDE_INTENTS.has(parsed.intent)) sequences.cancel();
+      thinking();
+      const result = this.dispatch(text, parsed);
+      if (result && result.ok === false) audio.play('errorTone');
+      if (result && !narrator.speaking) orb.set('session', 'idle');
+      return result;
+    },
+
+    dispatch(text, parsed) {
       const slots = parsed.slots || {};
 
       // Drive Mode v2: decide what the answer is *shown on* before working out
@@ -569,33 +738,63 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         this.setOpportunityVision(true);
         const result = applyFindMoney(properties, conversation, slots);
         if (!result.ok) {
-          setAiPrompt(result.spoken);
+          say(result.spoken);
           return result;
         }
+        hideFocusCard();
+        hideSavedSheet();
         visuals.setSaved(null);
-        visuals.setShortlist(result.candidateIds);
-        visuals.startScan();
+        // The board goes quiet under the scan; the matches light one by one.
+        visuals.setShortlist(result.candidateIds, { lit: false });
+        visuals.setTopPick(null);
+        visuals.setFocused(null);
+        focused = null;
         clearView.repaint();
-        // REVEAL fits the whole shortlist; the gold halo is the payoff of that
-        // shot, so it appears when the shot settles — not while still flying.
         const shortlist = result.candidateIds
           .map((candidateId) => this.getById(candidateId))
           .filter(Boolean);
-        camera.fly('REVEAL', shortlist).then(async (reveal) => {
-          if (reveal.cancelled) return;
-          visuals.setTopPick(result.topPickId);
-          conversation.topPickId = result.topPickId;
-          clearView.repaint();
-          await camera.dwell(DURATIONS.revealDwell);
-          if (result.focusId) this.focus(result.focusId);
+        const goldId = result.topPickId;
+        const timeline = buildFindMoney({
+          matches: shortlist,
+          goldId,
+          camera: cameraPoint(),
+          brief: result.spoken,
+          focusId: result.focusId,
         });
-        if (result.focusId) {
-          focused = this.getById(result.focusId);
-          conversation.focusedId = result.focusId;
-          visuals.setFocused(result.focusId);
-          setNavActive('world');
-        }
-        setAiPrompt(result.spoken);
+        const run = sequences.play(timeline, {
+          scan: () => visuals.startScan(),
+          sound: (event) => audio.play(event.sound),
+          ignite: (event) => visuals.ignite(event.propertyId),
+          gold: (event) => {
+            visuals.ignite(event.propertyId);
+            visuals.setTopPick(event.propertyId);
+            conversation.topPickId = event.propertyId;
+            focused = this.getById(event.propertyId);
+            conversation.focusedId = event.propertyId;
+            visuals.setFocused(event.propertyId);
+            clearView.repaint();
+            setNavActive('world');
+          },
+          beaconRise: (event) => visuals.raiseBeacon(event.propertyId),
+          // REVEAL fits the whole shortlist; the brief is spoken when it lands.
+          flight: async (_event, ctx) => {
+            const reveal = await camera.fly('REVEAL', shortlist);
+            if (reveal.cancelled) ctx.cancel();
+          },
+          speak: (event) => say(event.text),
+          // Deferred a tick: the dive is FIND_MONEY's last beat and starts the
+          // next moment, which must not read as this one being interrupted.
+          dive: (event) => { globalThis.setTimeout(() => this.focus(event.propertyId), 0); },
+        });
+        run.done.then((summary) => {
+          if (!summary.cancelled) return;
+          // Interrupted: land the end state so the board still reads as answered.
+          visuals.igniteAll();
+          if (goldId && conversation.topPickId !== goldId) {
+            visuals.setTopPick(goldId);
+            conversation.topPickId = goldId;
+          }
+        });
         return result;
       }
 
@@ -603,26 +802,27 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         // While the drive is running, "next" and "skip" belong to the route.
         if (this.drive.running && (slots.step === 'next' || slots.step === 'previous')) {
           const moved = slots.step === 'next' ? drive.next() : drive.skip();
-          setAiPrompt(moved.spoken);
+          say(moved.spoken);
           return moved;
         }
         const result = applyFocus(properties, conversation, slots);
         if (result.ok) {
           // "Show me the best one" is a question about the whole board, so it
           // gets the same sweep "find me money" does before the answer lights.
-          if (slots.step === 'top') visuals.startScan();
-          this.focus(result.id);
+          if (slots.step === 'top') { visuals.startScan(); audio.play('scanSweep'); }
+          this.focus(result.id, { line: result.spoken });
+          return result;
         }
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
       if (parsed.intent === 'why') {
         if (slots.referring && drive.running) {
           const target = this.driveTarget('why_flagged');
-          if (!target.ok) { setAiPrompt(target.spoken); return target; }
+          if (!target.ok) { say(target.spoken); return target; }
           const spoken = whyThisMatters(target.property);
-          setAiPrompt(spoken);
+          say(spoken);
           return { ok: true, action: 'explain_property', id: target.id, spoken };
         }
         const result = slots.strategy
@@ -633,7 +833,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           lastAnalysisId = focused.id;
         }
         this.paintFocus();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
@@ -644,20 +844,20 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           lastAnalysisId = focused.id;
           this.showDealVision(result.strategy);
         }
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
       if (parsed.intent === 'compare') {
         if (slots.withPrevious && drive.running) {
           const target = this.driveTarget('compare_last');
-          if (!target.ok) { setAiPrompt(target.spoken); return target; }
+          if (!target.ok) { say(target.spoken); return target; }
           const previous = this.getById(target.previousId);
           const spoken = previous
             ? `${shortAddress(target.property)} scores ${Math.round(target.property.composite)}; `
               + `${shortAddress(previous)} scores ${Math.round(previous.composite)}.`
             : 'Nothing to compare with yet.';
-          setAiPrompt(spoken);
+          say(spoken);
           return { ok: Boolean(previous), action: 'compare_drive', id: target.id, spoken };
         }
         const result = applyCompare(focused, conversation);
@@ -674,7 +874,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
             caption: compareCaption(result, runnerUp),
           });
         }
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
@@ -686,7 +886,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           this.paintFocus();
           visuals.setDealVision(result.strategy, lastAnalysis);
         }
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
@@ -699,14 +899,14 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           this.paintFocus();
           visuals.setDealVision(strategy, lastAnalysis);
         }
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
       if (parsed.intent === 'save') {
         if (slots.referring && drive.running) {
           const target = this.driveTarget('save_that');
-          if (!target.ok) { setAiPrompt(target.spoken); return target; }
+          if (!target.ok) { say(target.spoken); return target; }
           return this.save(target.id, { note: slots.note || '' });
         }
         return this.save(focused?.id, { note: slots.note || '' });
@@ -719,7 +919,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           this.paintFocus();
           this.showSaved();
         }
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
@@ -727,6 +927,13 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
 
       if (parsed.intent === 'vision_on' || parsed.intent === 'vision_off') {
         return this.setOpportunityVision(parsed.intent === 'vision_on');
+      }
+
+      if (parsed.intent === 'sound_on' || parsed.intent === 'sound_off') {
+        return this.setSound(parsed.intent === 'sound_on');
+      }
+      if (parsed.intent === 'voice_on' || parsed.intent === 'voice_off') {
+        return this.setVoice(parsed.intent === 'voice_on');
       }
 
       if (parsed.intent === 'xray') return this.seeThrough();
@@ -756,17 +963,17 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         // Exit returns to the market view over the cluster, which is where the
         // drive was entered from.
         camera.fly('CRUISE', scene ? scene.rows : null);
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_next') {
         const result = drive.running ? drive.next() : this.startDrive();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_skip') {
         const result = drive.skip();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
 
@@ -790,7 +997,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       if (parsed.intent === 'drive_pause') {
         if (!drive.running) return this.cameraAngle({ orbit: 'stop' });
         const result = drive.pause();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_resume') {
@@ -802,13 +1009,13 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           return { ok: true, action: 'drive_resume', view: VIEWS.DRIVE, spoken: 'Back on the road.' };
         }
         const result = drive.keepGoing();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_speed') {
         if (!drive.running) return { ok: false, spoken: 'No drive running.' };
         const result = slots.speed === 'slower' ? drive.slower() : drive.faster();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_look') {
@@ -821,7 +1028,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
             : this.cameraAngle({ height: 'higher' });
         }
         const result = drive.look(slots.look);
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'look_closer') {
@@ -832,57 +1039,87 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         if (result.ok) {
           focused = result.property;
           conversation.focusedId = result.id;
-          renderFocusCard(result.property);
+          renderFocusCard(result.property, { anchor: visuals.screenPositionFor(result.id) });
           xray.arm({ flying: camera.flying });
         }
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_best') {
         if (!drive.running) return this.handleIntent('show me the best one');
         const result = drive.requestBestMatch();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'drive_narration') {
         const result = drive.setNarrationLevel(slots.level);
-        setAiPrompt(result.spoken);
+        say(result.spoken);
         return result;
       }
       if (parsed.intent === 'how_recent') {
         const target = this.driveTarget('how_recent');
-        if (!target.ok) { setAiPrompt(target.spoken); return target; }
+        if (!target.ok) { say(target.spoken); return target; }
         const signal = (target.property.signals || [])[0];
         const spoken = signal
           ? `${String(signal.type).replaceAll('_', ' ').toLowerCase()}, filed ${signal.ageDays} days ago.`
           : 'No filing date on that one.';
-        setAiPrompt(spoken);
+        say(spoken);
         return { ok: true, action: 'how_recent', id: target.id, spoken };
       }
       if (parsed.intent === 'more_like_it') {
         const target = this.driveTarget('more_like_it');
-        if (!target.ok) { setAiPrompt(target.spoken); return target; }
+        if (!target.ok) { say(target.spoken); return target; }
         const type = (target.property.signals || [])[0]?.type;
         return this.handleIntent(`find ${String(type || '').replaceAll('_', ' ').toLowerCase() || 'money'}`);
       }
 
       if (parsed.intent === 'help') {
-        setAiPrompt(HELP_LINE);
-        // The rail is the written version of the same cheat sheet.
+        say(HELP_LINE);
+        // The rail is the written version of the same cheat sheet — demo
+        // furniture, so it only exists with ?demo=1. The product opens the
+        // typed bar instead, which is the thing "help" is usually asking for.
         const rail = document.getElementById('ts-demo-script');
-        if (rail) {
+        if (rail && document.body.classList.contains('ts-demo')) {
           rail.hidden = false;
           rail.classList.add('visible');
           session.demoScript?.paint?.();
+        } else {
+          openTypedBar({ focus: false });
         }
         return { ok: true, action: 'help', spoken: HELP_LINE };
       }
 
       const suggestion = slots.suggestion || 'find me money';
       const spoken = `Didn't catch that. Try: ${suggestion}`;
-      setAiPrompt(spoken);
+      say(spoken);
       return { ok: false, action: 'unknown', suggestion, spoken };
     },
+    /** "sound on" / "sound off": the palette, remembered per browser. */
+    setSound(enabled) {
+      const on = audio.setEnabled(enabled);
+      setSoundChip(on);
+      if (on) {
+        audio.unlock();
+        audio.play('saveConfirm');
+      }
+      const spoken = on ? 'Sound on.' : 'Sound off.';
+      say(spoken);
+      return { ok: true, action: 'set_sound', enabled: on, spoken };
+    },
+
+    /** "voice on" / "voice off": the assistant reads its lines aloud, or not. */
+    setVoice(enabled) {
+      if (enabled && !narrator.synthAvailable) {
+        const spoken = 'No speech voice in this browser — the lines stay written.';
+        say(spoken);
+        return { ok: false, action: 'set_voice', enabled: false, spoken };
+      }
+      const on = narrator.setVoice(enabled);
+      const spoken = on ? 'Voice on.' : 'Voice off.';
+      say(spoken);
+      return { ok: true, action: 'set_voice', enabled: on, spoken };
+    },
+
     /**
      * Which way the focused house faces, and where that came from.
      *
@@ -910,20 +1147,20 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     cameraAngle(slots = {}) {
       if (!focused) {
         const spoken = 'Pick a house first — try "show me the best one".';
-        setAiPrompt(spoken);
+        say(spoken);
         return { ok: false, action: 'camera_angle', spoken };
       }
 
       if (slots.orbit === 'stop') {
         camera.stopOrbit();
         const spoken = 'Holding here.';
-        setAiPrompt(spoken);
+        say(spoken);
         return { ok: true, action: 'camera_orbit', orbit: 'stop', spoken };
       }
       if (slots.orbit === 'start') {
         camera.orbit(focused);
         const spoken = `Circling ${shortAddress(focused)}.`;
-        setAiPrompt(spoken);
+        say(spoken);
         return { ok: true, action: 'camera_orbit', orbit: 'start', spoken };
       }
 
@@ -938,7 +1175,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         const front = this.frontOf(focused);
         if (!front) {
           const missing = 'No footprint for that one, so I cannot tell front from back.';
-          setAiPrompt(missing);
+          say(missing);
           return { ok: false, action: 'camera_angle', spoken: missing };
         }
         headingDeg = headingForSide(slots.side, front.bearingDeg);
@@ -960,7 +1197,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         range: slots.range,
         height: slots.height,
       });
-      setAiPrompt(spoken);
+      say(spoken);
       return {
         ok: true,
         action: 'camera_angle',
@@ -1011,7 +1248,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         setDriveChrome(true);
         if (live) requestWakeLock();
       }
-      setAiPrompt(result.spoken);
+      say(result.spoken);
       return result;
     },
 
@@ -1089,7 +1326,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const spoken = target === WORLDS.CLEAR
         ? 'Clear View — an experiment, not the product.'
         : 'Photo world.';
-      setAiPrompt(spoken);
+      say(spoken);
       return {
         ok: true, action: 'set_world', world: target, changed: !already, spoken,
       };
@@ -1098,12 +1335,13 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     /** "x-ray" / "see through": the photo world goes translucent now. */
     seeThrough() {
       const result = xray.trigger();
+      if (result.ok) audio.play('xrayHum');
       const spoken = result.ok
         ? 'X-ray.'
         : (result.reason === 'tileset hidden'
           ? 'X-ray needs the photo world.'
           : 'No photo world to see through.');
-      setAiPrompt(spoken);
+      say(spoken);
       return { ok: result.ok, action: 'xray', spoken, ...result };
     },
 
@@ -1111,7 +1349,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     goSolid() {
       const result = xray.end();
       const spoken = result.wasRunning ? 'Solid.' : 'Already solid.';
-      setAiPrompt(spoken);
+      say(spoken);
       return { ok: true, action: 'solid', spoken, ...result };
     },
 
@@ -1122,7 +1360,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     showLot() {
       if (!focused) {
         const spoken = 'Nothing focused. Say show me the best one.';
-        setAiPrompt(spoken);
+        say(spoken);
         return { ok: false, action: 'show_lot', spoken };
       }
       const property = focused;
@@ -1133,7 +1371,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         xray.arm({ flying: camera.flying });
       });
       const spoken = 'Here\'s the lot.';
-      setAiPrompt(spoken);
+      say(spoken);
       return { ok: true, action: 'show_lot', id: property.id, spoken };
     },
 
@@ -1349,13 +1587,14 @@ function bindUi(session) {
       else {
         setNavActive('drive');
         const result = session.drive.start();
-        setAiPrompt(result.spoken);
+        say(result.spoken);
       }
     }
     if (name === 'saved') session.showSaved();
     if (name === 'ai') {
-      document.getElementById('gev-voice-button')?.click();
-      document.getElementById('ts-demo-input')?.focus();
+      const voice = document.getElementById('gev-voice-button');
+      if (voice) voice.click();
+      else openTypedBar();
     }
   });
 

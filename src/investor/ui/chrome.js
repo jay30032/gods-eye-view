@@ -1,5 +1,8 @@
 import { readDemoMode } from '../demoSequence.js';
 import { initFirstHunt } from './firstHunt.js';
+import { SIGNAL_LABELS, SIGNAL_TYPES } from '../mock/schema.js';
+import { SIGNAL_LOOK } from '../visuals/propertyPulse.js';
+import { escapeHtml } from './escapeHtml.js';
 
 const HIDDEN_GEV = [
   '#title-bar',
@@ -23,8 +26,19 @@ const HIDDEN_GEV = [
   '#world-overlay-root',
 ];
 
+/**
+ * Product mode vs demo mode.
+ *
+ * The product shows the map, the orb and one line of status, and nothing
+ * else until asked. `?demo=1` adds the scripted rail and the WORLD / DRIVE /
+ * SAVED buttons a reviewer with a mouse wants — those are demo furniture, not
+ * the product.
+ */
 export function applyInvestorChrome({ productName, tagline }) {
   document.body.classList.add('terrasignal-investor');
+  const demo = readDemoMode().enabled;
+  document.body.classList.toggle('ts-demo', demo);
+  document.body.classList.toggle('ts-product', !demo);
   document.title = `${productName} — ${tagline}`;
   const loading = document.querySelector('#loading-screen h2');
   if (loading) loading.innerHTML = 'TERRA<span class="title-accent">SIGNAL</span>';
@@ -41,13 +55,88 @@ export function applyInvestorChrome({ productName, tagline }) {
   initFirstHunt({
     root: document.getElementById('ts-first-hunt'),
   });
-  if (readDemoMode().enabled) {
+  bindTypedBar();
+  if (demo) {
     const rail = document.getElementById('ts-demo-script');
     if (rail) {
       rail.hidden = false;
       rail.classList.add('visible');
     }
+    const chip = document.getElementById('ts-demo-chip');
+    if (chip) chip.hidden = false;
   }
+}
+
+/** The five signals, as a legend the brand mark reveals on hover. */
+function legendMarkup() {
+  return SIGNAL_TYPES.map((type) => {
+    const [r, g, b] = (SIGNAL_LOOK[type] || SIGNAL_LOOK.DISTRESS).color;
+    const rgb = `${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}`;
+    return `<li><i style="--c: rgb(${rgb})"></i>${escapeHtml(SIGNAL_LABELS[type] || type)}</li>`;
+  }).join('');
+}
+
+/**
+ * The typed bar is not furniture: it appears on "/" or a tap on the status
+ * strip, and goes away on Escape or when it is empty and loses focus. The
+ * form is always in the DOM — a hidden form still submits, which is how the
+ * headed checks talk to the product — it is only *shown* on request.
+ */
+export function openTypedBar({ focus = true } = {}) {
+  document.body.classList.add('ts-typing');
+  const input = document.getElementById('ts-demo-input');
+  if (focus) {
+    try { input?.focus?.({ preventScroll: true }); } catch { input?.focus?.(); }
+  }
+  return true;
+}
+
+export function closeTypedBar() {
+  document.body.classList.remove('ts-typing');
+  const input = document.getElementById('ts-demo-input');
+  try { input?.blur?.(); } catch { /* fine */ }
+  return false;
+}
+
+export function isTypedBarOpen() {
+  return Boolean(document.body?.classList.contains('ts-typing'));
+}
+
+let typedBarBound = false;
+function bindTypedBar() {
+  if (typedBarBound || typeof document === 'undefined') return;
+  typedBarBound = true;
+  document.getElementById('ts-ai-prompt')?.addEventListener('click', () => {
+    if (isTypedBarOpen()) closeTypedBar();
+    else openTypedBar();
+  });
+  document.getElementById('ts-ai-prompt')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openTypedBar();
+    }
+  });
+  const input = document.getElementById('ts-demo-input');
+  input?.addEventListener('blur', () => {
+    // Empty and abandoned: fold away. Half-typed stays, so a stray click on the
+    // map does not lose the sentence.
+    if (!String(input.value || '').trim() && !document.body.classList.contains('ts-demo')) {
+      closeTypedBar();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented) return;
+    const target = event.target;
+    const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+    if (event.key === 'Escape' && isTypedBarOpen()) {
+      closeTypedBar();
+      return;
+    }
+    if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      openTypedBar();
+    }
+  });
 }
 
 function ensureInvestorShell(productName, tagline) {
@@ -57,20 +146,32 @@ function ensureInvestorShell(productName, tagline) {
   shell.id = 'terrasignal-shell';
   shell.innerHTML = `
     <header id="terrasignal-brand" aria-label="${productName}">
-      <div class="ts-brand-mark">TS</div>
-      <div class="ts-brand-copy">
-        <strong>${productName}</strong>
-        <span>${tagline}</span>
+      <button type="button" class="ts-brand-mark" aria-label="${productName} — legend" aria-haspopup="true">TS</button>
+      <div class="ts-brand-flyout" role="group" aria-label="Legend">
+        <div class="ts-brand-copy">
+          <strong>${productName}</strong>
+          <span id="ts-brand-tagline">${tagline}</span>
+        </div>
+        <ul class="ts-legend" aria-label="Signals">${legendMarkup()}</ul>
+        <label class="ts-vision-toggle">
+          <input type="checkbox" id="ts-opportunity-vision" checked />
+          <span>Opportunity Vision</span>
+        </label>
+        <div class="ts-brand-chips">
+          <div id="ts-lod-chip" aria-live="polite">CITY</div>
+          <span id="ts-sound-chip" data-on="1">SOUND ON</span>
+          <button type="button" id="ts-demo-chip" hidden>DEMO</button>
+        </div>
+        <p class="ts-brand-help">Press / to type · "sound off" · "voice on"</p>
+        <p id="ts-attribution">
+          Built on <a href="https://github.com/bilawalsidhu/gods-eye-view" rel="noreferrer">God's Eye View</a>
+          by Bilawal Sidhu · MIT · Mock data only · Not investment advice
+        </p>
       </div>
-      <label class="ts-vision-toggle">
-        <input type="checkbox" id="ts-opportunity-vision" checked />
-        <span>Opportunity Vision</span>
-      </label>
-      <div id="ts-lod-chip" aria-live="polite">CITY</div>
-      <button type="button" id="ts-demo-chip">DEMO</button>
     </header>
     <div id="ts-vignette" aria-hidden="true"></div>
-    <p id="ts-ai-prompt" role="status" aria-live="polite">Where are we hunting today?</p>
+    <svg id="ts-leader" aria-hidden="true" hidden><line x1="0" y1="0" x2="0" y2="0" /><circle cx="0" cy="0" r="3" /></svg>
+    <p id="ts-ai-prompt" role="status" aria-live="polite" tabindex="0" title="Tap to type, or press /">Where are we hunting today?</p>
     <aside id="ts-imagery-status" hidden role="status">Loading Earth imagery…</aside>
     <aside id="ts-basemap-toast" hidden role="status"></aside>
     <aside id="ts-first-hunt" hidden>
@@ -119,10 +220,6 @@ function ensureInvestorShell(productName, tagline) {
       <input id="ts-demo-input" name="q" placeholder="Find me money" />
       <button type="submit">SEND</button>
     </form>
-    <p id="ts-attribution">
-      Built on <a href="https://github.com/bilawalsidhu/gods-eye-view" rel="noreferrer">God's Eye View</a>
-      by Bilawal Sidhu · MIT · Mock data only · Not investment advice
-    </p>
   `;
   document.body.appendChild(shell);
 }
@@ -135,6 +232,14 @@ export function setAiPrompt(text) {
 export function setLodChip(lodId) {
   const el = document.getElementById('ts-lod-chip');
   if (el) el.textContent = String(lodId || '').toUpperCase();
+}
+
+/** The legend's sound line, kept in step with the engine. */
+export function setSoundChip(enabled) {
+  const el = document.getElementById('ts-sound-chip');
+  if (!el) return;
+  el.textContent = enabled ? 'SOUND ON' : 'SOUND OFF';
+  el.dataset.on = enabled ? '1' : '0';
 }
 
 export function setNavActive(name) {
@@ -238,6 +343,10 @@ function settleVoiceControl(slot) {
       placedVoiceNode = document.getElementById('gev-voice-control');
       disconnectVoiceObservers();
       armRemovalWatch(slot);
+      // The orb watches the control's status once it is in the slot.
+      try {
+        globalThis.dispatchEvent?.(new CustomEvent('terrasignal:voice-placed', { detail: { node: placedVoiceNode } }));
+      } catch { /* no CustomEvent in a test harness */ }
     }
     return settled;
   } finally {

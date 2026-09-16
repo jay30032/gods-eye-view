@@ -21,7 +21,8 @@ export const INTENTS = Object.freeze([
   'stop_drive', 'drive_next', 'drive_skip', 'world', 'vision_on', 'vision_off',
   'camera_angle', 'drive_pause', 'drive_resume', 'drive_speed', 'drive_look',
   'look_closer', 'drive_best', 'drive_narration', 'how_recent', 'more_like_it',
-  'xray', 'solid', 'show_lot', 'help', 'unknown',
+  'xray', 'solid', 'show_lot', 'help', 'sound_on', 'sound_off', 'voice_on', 'voice_off',
+  'unknown',
 ]);
 
 /** The five that must never stop working, matched before any pattern. */
@@ -566,6 +567,24 @@ export function parseCommand(text, options = {}) {
   if (/\bvision\b/.test(normalized) || /opportunity vision/.test(normalized)) {
     if (/\b(off|hide|stop|disable)\b/.test(normalized)) return result('vision_off', {}, raw, normalized, 0.95);
     if (/\b(on|show|start|enable)\b/.test(normalized)) return result('vision_on', {}, raw, normalized, 0.95);
+  }
+  /**
+   * Sound and voice. "sound off" mutes the palette; "voice on" has the
+   * assistant read its lines aloud. Both are session switches and never take
+   * slots. "Mute" alone means the sounds — a muted assistant still writes.
+   */
+  if (/\b(sounds?|audio|sfx|chimes?)\b/.test(normalized) || /^(mute|unmute)$/.test(normalized)) {
+    if (/\b(off|mute|silence|silent|stop|disable|quiet)\b/.test(normalized)) {
+      return result('sound_off', {}, raw, normalized, 0.95);
+    }
+    if (/\b(on|unmute|enable|back)\b/.test(normalized)) return result('sound_on', {}, raw, normalized, 0.95);
+  }
+  if (/\b(voice|speak|speech|talk|read (?:it |them )?(?:out|aloud))\b/.test(normalized)
+    && !/\bvoice (?:control|button)\b/.test(normalized)) {
+    if (/\b(off|stop|quiet|disable|mute|silent)\b/.test(normalized)) {
+      return result('voice_off', {}, raw, normalized, 0.9);
+    }
+    if (/\b(on|enable|aloud|out loud|start)\b/.test(normalized)) return result('voice_on', {}, raw, normalized, 0.9);
   }
   if (/\b(zoom out|back to the market|reset the map|show me the market|world view|whole market)\b/.test(normalized)) {
     return result('world', {}, raw, normalized, 0.95);
