@@ -40,6 +40,14 @@ The five phrases above are the scripted demo. The command bar and the mic
 understand a good deal more — same parser either way, so anything typed can be
 spoken. Unrecognised input answers with the nearest phrase it does know.
 
+With `OPENAI_API_KEY` set, one tap on the orb opens Terra: always listening,
+no key to hold, talk over it whenever you like. It briefs the board when it
+joins, answers from what is on screen, and every board question runs on the
+map before it is answered aloud. Tap the orb again (or say "stop listening")
+to pause the mic. Without a key the orb opens the typed bar and nothing else
+changes. `npm run smoke:voice` measures it — see
+[PHASE_1.md](./PHASE_1.md#terra--the-assistant-as-a-presence).
+
 **Hunt**
 
 - `find me money`

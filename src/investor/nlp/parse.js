@@ -22,6 +22,7 @@ export const INTENTS = Object.freeze([
   'camera_angle', 'drive_pause', 'drive_resume', 'drive_speed', 'drive_look',
   'look_closer', 'drive_best', 'drive_narration', 'how_recent', 'more_like_it',
   'xray', 'solid', 'show_lot', 'help', 'sound_on', 'sound_off', 'voice_on', 'voice_off',
+  'listen_on', 'listen_off',
   'unknown',
 ]);
 
@@ -579,6 +580,17 @@ export function parseCommand(text, options = {}) {
     }
     if (/\b(on|unmute|enable|back)\b/.test(normalized)) return result('sound_on', {}, raw, normalized, 0.95);
   }
+  /**
+   * The assistant's ear. "Stop listening" pauses the always-on mic; "listen"
+   * or "start listening" brings it back. Matched before the voice switch so
+   * "stop listening" is never read as "stop the voice".
+   */
+  if (/\blisten(?:ing)?\b/.test(normalized) || /\b(?:pause|mute|stop) (?:the )?(?:mic|microphone|ears?)\b/.test(normalized)) {
+    if (/\b(stop|pause|off|quit|quiet|mute|don'?t|not)\b/.test(normalized)) {
+      return result('listen_off', {}, raw, normalized, 0.95);
+    }
+    return result('listen_on', {}, raw, normalized, 0.9);
+  }
   if (/\b(voice|speak|speech|talk|read (?:it |them )?(?:out|aloud))\b/.test(normalized)
     && !/\bvoice (?:control|button)\b/.test(normalized)) {
     if (/\b(off|stop|quiet|disable|mute|silent)\b/.test(normalized)) {
@@ -673,6 +685,14 @@ export function parseCommand(text, options = {}) {
     const strategy = matchStrategy(normalized);
     if (strategy) slots.strategy = strategy;
     return result('show_deal', slots, raw, normalized, dealPhrase ? 0.95 : 0.85);
+  }
+
+  // 8b. A *question* about the best house is a hunt: "what's the best one"
+  //     asks the board and lands on the answer, where "show me the best one"
+  //     asks for the house already at the head of the shortlist.
+  if (/^(?:so |ok(?:ay)? )?(?:what|which)(?:'s| is| one is| one's)? (?:the )?best(?: one| house| property| pick| deal)?\??$/
+    .test(normalized)) {
+    return result('find_money', findMoneySlots(normalized, vocabulary), raw, normalized, 0.9);
   }
 
   // 9. Moving around the shortlist.

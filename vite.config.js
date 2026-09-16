@@ -75,6 +75,7 @@ import {
   validTerrainResult,
 } from './src/data/terrainHeightsProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
+import { ASSISTANT_NAME, buildAssistantSessionConfig } from './src/investor/terra/identity.js';
 
 /** Resolve __dirname for ESM context. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -5149,6 +5150,20 @@ export function openAiRealtimeProxy() {
       }
     });
 
+    /**
+     * Is a voice session even possible? The product decides between the
+     * always-listening assistant and the typed bar from this one bit, before
+     * anyone mints a secret or asks for a microphone.
+     */
+    middlewares.use('/api/realtime/available', (req, res) => {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(JSON.stringify({
+        available: Boolean(process.env.OPENAI_API_KEY),
+        assistant: ASSISTANT_NAME,
+      }));
+    });
+
     middlewares.use('/api/realtime/token', async (req, res) => {
       if (req.method !== 'GET' && req.method !== 'POST') {
         res.statusCode = 405;
@@ -5181,6 +5196,20 @@ export function openAiRealtimeProxy() {
           return null;
         }
       })();
+      /**
+       * `?persona=terra` mints the investor assistant's session instead of the
+       * classic controller's: its own instructions, its locked voice, server
+       * VAD with barge-in, user transcription, and only the investor tools.
+       * Everything below the persona switch — the API call, the headers, the
+       * error path — is shared.
+       */
+      const persona = (() => {
+        try {
+          return String(new URL(req.url || '', 'http://localhost').searchParams.get('persona') || '').toLowerCase();
+        } catch {
+          return '';
+        }
+      })();
       const tier = resolveVoiceModel(requestedTier).tier;
       const model =
         tier === 'mini'
@@ -5196,7 +5225,14 @@ export function openAiRealtimeProxy() {
         0.1,
         Math.min(1, Number(process.env.OPENAI_REALTIME_CONTEXT_RETENTION) || OPENAI_REALTIME_CONTEXT_RETENTION_DEFAULT)
       );
-      const sessionConfig = {
+      const sessionConfig = persona === 'terra' ? {
+        session: buildAssistantSessionConfig({
+          model,
+          tools: GEV_REALTIME_TOOLS,
+          contextTokenLimit,
+          contextRetentionRatio,
+        }),
+      } : {
         session: {
           type: 'realtime',
           model,

@@ -22,7 +22,9 @@ export const ORB_STATES = Object.freeze(['idle', 'listening', 'thinking', 'speak
 const PRIORITY = Object.freeze({ listening: 3, speaking: 2, thinking: 1, idle: 0 });
 
 /** What the voice control's attributes mean for the orb. */
-export function orbStateFromVoice({ status, speaker } = {}) {
+export function orbStateFromVoice({ status, speaker, paused = false } = {}) {
+  // A paused mic is a session that is up but not listening: the light goes out.
+  if (paused && speaker !== 'ai') return 'idle';
   if (speaker === 'ai') return 'speaking';
   if (status === 'listening') return speaker === 'user' ? 'listening' : 'listening';
   if (status === 'connecting' || status === 'executing') return 'thinking';
@@ -67,7 +69,8 @@ export function createOrb({
   function readVoice(node) {
     const status = node?.dataset?.status ?? node?.getAttribute?.('data-status') ?? 'idle';
     const speaker = node?.dataset?.speaker ?? node?.getAttribute?.('data-speaker') ?? 'idle';
-    sources.voice = orbStateFromVoice({ status, speaker });
+    const paused = Boolean(node?.dataset?.paused ?? node?.getAttribute?.('data-paused'));
+    sources.voice = orbStateFromVoice({ status, speaker, paused });
     paint();
   }
 
@@ -79,7 +82,7 @@ export function createOrb({
     readVoice(node);
     if (typeof MutationObserverCtor !== 'function') return true;
     observer = new MutationObserverCtor(() => readVoice(node));
-    observer.observe(node, { attributes: true, attributeFilter: ['data-status', 'data-speaker'] });
+    observer.observe(node, { attributes: true, attributeFilter: ['data-status', 'data-speaker', 'data-paused'] });
     return true;
   }
 

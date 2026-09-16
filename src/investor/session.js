@@ -95,11 +95,14 @@ import {
   setProgressBarVisible,
 } from './ui/driveChrome.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
+import { createTerra } from './terra/presence.js';
+import { ASSISTANT_NAME } from './terra/identity.js';
+import { demoNow } from './clock.js';
 
 /** Commands that change a switch, not the board: they never interrupt a moment. */
 const ASIDE_INTENTS = new Set([
   'sound_on', 'sound_off', 'voice_on', 'voice_off', 'vision_on', 'vision_off', 'help', 'unknown',
-  'drive_narration',
+  'drive_narration', 'listen_on', 'listen_off',
 ]);
 
 /** What the six-house scene says instead of the market's opening hint. */
@@ -173,12 +176,21 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   const sequences = createSequencer({ reduced: () => prefersReducedMotion() });
   let thinkingTimer = null;
 
-  /** The assistant says a line: the strip, the orb, and the reading pace. */
+  let terra = null;
+
+  /**
+   * The assistant says a line: the strip, the orb, and the reading pace.
+   *
+   * With the Realtime session live the line is written and paced but never
+   * voiced by the browser: the assistant speaks for itself from the state,
+   * and two voices saying two versions of one answer is the thing this file
+   * exists to prevent.
+   */
   function say(text, options = {}) {
     if (thinkingTimer) { globalThis.clearTimeout(thinkingTimer); thinkingTimer = null; }
     orb.set('session', 'idle');
     if (!text) return null;
-    return narrator.say(text, options);
+    return narrator.say(text, { ...options, silent: options.silent || Boolean(terra?.live) });
   }
 
   /** Between a command arriving and its answer, the orb thinks. */
@@ -314,6 +326,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     releaseRender: releaseContinuousRender,
     requestRender: () => governorRequestRender('investor-xray'),
     reduced: () => prefersReducedMotion(),
+    onFire: () => terra?.emit('xray', { propertyId: focused?.id || null }),
   });
   camera.onFlight((state) => xray.onFlight(state));
 
@@ -368,6 +381,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     onAnnounce: (event) => {
       if (event.property && event.detail !== true) driveCard(event.property, event);
       say(event.spoken);
+      if (event.property && event.detail !== true) {
+        terra?.emit('drive_approach', { propertyId: event.property.id });
+      }
     },
     onState: (state) => applyDriveChrome(state),
     onStop: () => {
@@ -506,6 +522,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     narrator,
     orb,
     sequences,
+    /** The assistant's presence: the always-on session, briefs, metrics. */
+    get terra() { return terra; },
     /** What the card is doing, for the headed check. */
     get card() { return focusCardState(); },
     get focused() { return focused; },
@@ -546,6 +564,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
         renderFocusCard(property, cardOptions());
         xray.arm({ flying: camera.flying });
         if (line) say(line);
+        terra?.emit('house_focused', { propertyId: property.id });
         return { ok: true, action: 'focus_property', id: property.id, address: property.address };
       }
 
@@ -593,6 +612,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       });
       run.done.then((summary) => {
         if (summary.cancelled && focused?.id === property.id) revealAllFocusLines();
+        if (!summary.cancelled) terra?.emit('house_focused', { propertyId: property.id });
       });
       return { ok: true, action: 'focus_property', id: property.id, address: property.address };
     },
@@ -655,7 +675,10 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           card: () => { paint(); this.showSaved(); },
         });
         run.done.then((summary) => {
-          if (!summary.cancelled) return;
+          if (!summary.cancelled) {
+            terra?.emit('save_done', { propertyId: property.id });
+            return;
+          }
           visuals.setSaved(property.id);
           paint();
         });
@@ -700,6 +723,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
       if (!ASIDE_INTENTS.has(parsed.intent)) sequences.cancel();
       thinking();
+      this.lastIntent = { intent: parsed.intent, slots: parsed.slots || {}, text, at: Date.now() };
       const result = this.dispatch(text, parsed);
       if (result && result.ok === false) audio.play('errorTone');
       if (result && !narrator.speaking) orb.set('session', 'idle');
@@ -788,7 +812,10 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
           dive: (event) => { globalThis.setTimeout(() => this.focus(event.propertyId), 0); },
         });
         run.done.then((summary) => {
-          if (!summary.cancelled) return;
+          if (!summary.cancelled) {
+            terra?.emit('find_money_complete', { propertyId: goldId });
+            return;
+          }
           // Interrupted: land the end state so the board still reads as answered.
           visuals.igniteAll();
           if (goldId && conversation.topPickId !== goldId) {
@@ -935,6 +962,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       }
       if (parsed.intent === 'voice_on' || parsed.intent === 'voice_off') {
         return this.setVoice(parsed.intent === 'voice_on');
+      }
+      if (parsed.intent === 'listen_on' || parsed.intent === 'listen_off') {
+        return this.setListening(parsed.intent === 'listen_on');
       }
 
       if (parsed.intent === 'xray') return this.seeThrough();
@@ -1119,6 +1149,30 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const spoken = on ? 'Voice on.' : 'Voice off.';
       say(spoken);
       return { ok: true, action: 'set_voice', enabled: on, spoken };
+    },
+
+    /**
+     * "stop listening" / "listen": the assistant's ear.
+     *
+     * Pausing keeps the session up and mutes the mic, so "listen" is instant;
+     * with no key there is no ear to pause and the typed bar is the answer.
+     */
+    setListening(enabled) {
+      if (!terra) {
+        const spoken = 'No voice session in this build.';
+        say(spoken);
+        return { ok: false, action: enabled ? 'listen_on' : 'listen_off', spoken };
+      }
+      if (enabled) {
+        const result = terra.resume();
+        const outcome = typeof result?.then === 'function' ? { ok: true, action: 'listen_on', spoken: `${ASSISTANT_NAME} is listening.` } : result;
+        if (outcome?.spoken) say(outcome.spoken);
+        return outcome;
+      }
+      const result = terra.pause();
+      const spoken = result.ok ? result.spoken : `${ASSISTANT_NAME} is not listening.`;
+      say(spoken);
+      return { ...result, spoken };
     },
 
     /**
@@ -1396,6 +1450,62 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     },
   };
 
+  /**
+   * The assistant's presence rides on GEV's Realtime controller, which
+   * `main.js` built before this session started. Its snapshot is gathered
+   * here because this is the one place that can see everything at once.
+   */
+  terra = createTerra({
+    session,
+    controller: globalThis.__gevVoiceCommands || null,
+    parseIntent: parseDemoIntent,
+    strip: setAiPrompt,
+    openTyped: () => openTypedBar(),
+    onInterrupt: () => {
+      // The half-spoken line ends; the card it was assembling finishes now.
+      narrator.cancel();
+      revealAllFocusLines();
+    },
+    gather: () => ({
+      market,
+      clock: demoNow().toISOString().slice(0, 10),
+      camera: {
+        shot: camera.shot,
+        flying: camera.flying,
+        orbiting: camera.orbiting,
+        heightM: cameraHeightM(viewer),
+      },
+      drive: {
+        running: drive.running,
+        paused: drive.paused,
+        alongM: drive.alongM,
+        lengthM: drive.lengthM,
+        current: drive.current,
+        goldId: drive.goldId,
+        panoStopped: Boolean(drive.panoStopped),
+      },
+      properties,
+      shortlistIds: conversation.candidateIds,
+      topPickId: conversation.topPickId || scene?.goldId || null,
+      focused,
+      analysis: focused && lastAnalysisId === focused.id ? lastAnalysis : null,
+      strategy: conversation.dealVisible ? conversation.lastStrategy : null,
+      saved: focused ? readSavedProperties().some((row) => row.id === focused.id) : false,
+      level: drive.level,
+      screen: {
+        card: Boolean(focused && !document.getElementById('ts-focus-card')?.hidden),
+        cardAssembling: focusCardState().assembling,
+        savedSheet: !document.getElementById('ts-saved-sheet')?.hidden,
+        dealVision: conversation.dealVisible ? conversation.lastStrategy : null,
+        opportunityVision: visuals.enabled,
+        xray: xray.running,
+        strip: document.getElementById('ts-ai-prompt')?.textContent || null,
+      },
+    }),
+  });
+  terra.attach();
+  void terra.probe();
+
   bindUi(session);
   bindDemoScript(session);
   // No retry timer: relocateVoiceControl arms a placement observer when the
@@ -1501,6 +1611,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     // The descent is over; stop telling the user it is still happening.
     setAiPrompt(scene ? SIX_HOUSE_HINT : FIRST_HINT);
     enableVision();
+    terra?.emit('descent_settled');
     if (!tileset) {
       const painted = await ensureKeylessVisibleBasemap({
         viewer,
@@ -1599,12 +1710,31 @@ function bindUi(session) {
     }
   });
 
+  /**
+   * The orb is the assistant's one control: first tap opens the always-on
+   * session (or the typed bar when there is no key), the next pauses it, the
+   * next resumes. The classic start/stop handler is replaced, not wrapped —
+   * "stop" on a click was the push-to-talk product's idea of a mic button.
+   */
+  const controller = globalThis.__gevVoiceCommands;
+  const voiceButton = controller?.ui?.button || document.getElementById('gev-voice-button');
+  if (controller && voiceButton && session.terra) {
+    if (controller.buttonHandler) voiceButton.removeEventListener('click', controller.buttonHandler);
+    controller.buttonHandler = () => { void session.terra.toggle(); };
+    voiceButton.addEventListener('click', controller.buttonHandler);
+    voiceButton.setAttribute('aria-label', `${ASSISTANT_NAME} — tap to listen, tap again to pause`);
+  }
+
   document.getElementById('ts-demo-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const input = document.getElementById('ts-demo-input');
     const text = input?.value || '';
     if (!text.trim()) return;
-    session.handleIntent(text);
+    // With the assistant live, typed words go through the same session the
+    // voice does, so the answer is spoken by one presence. Without it, the
+    // parser answers directly — the product before there was a voice.
+    if (session.terra?.live && !session.terra.paused) session.terra.sendText(text);
+    else session.handleIntent(text);
     input.value = '';
   });
 

@@ -48,7 +48,7 @@ test('the orb writes its state onto the slot, and follows the voice control thro
   const voice = { dataset: { status: 'idle', speaker: 'idle' } };
   listeners['terrasignal:voice-placed']({ detail: { node: voice } });
   assert.equal(observed.length, 1);
-  assert.deepEqual(observed[0][1], { attributes: true, attributeFilter: ['data-status', 'data-speaker'] });
+  assert.deepEqual(observed[0][1], { attributes: true, attributeFilter: ['data-status', 'data-speaker', 'data-paused'] });
   voice.dataset.status = 'listening';
   callback();
   assert.equal(slot.dataset.tsOrb, 'listening');
@@ -63,4 +63,10 @@ test('the orb writes its state onto the slot, and follows the voice control thro
   assert.equal(observed.length, 1);
   orb.destroy();
   assert.deepEqual(Object.keys(listeners), []);
+});
+
+test('a paused mic reads as idle even while the control says listening; the assistant speaking still shows', () => {
+  assert.equal(orbStateFromVoice({ status: 'listening', speaker: 'idle', paused: true }), 'idle');
+  assert.equal(orbStateFromVoice({ status: 'listening', speaker: 'ai', paused: true }), 'speaking');
+  assert.equal(orbStateFromVoice({ status: 'listening', speaker: 'idle', paused: false }), 'listening');
 });

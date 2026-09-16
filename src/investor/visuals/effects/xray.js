@@ -159,6 +159,8 @@ export function createXray({
   requestRender = () => {},
   now = () => (globalThis.performance?.now?.() ?? Date.now()),
   reduced = () => false,
+  /** Called with `{restarted}` each time the effect actually starts. */
+  onFire = null,
 } = {}) {
   let tileset = null;
   let style = null;
@@ -254,6 +256,7 @@ export function createXray({
       releaseFrom = 1;
       last.earlyEnd = false;
       runs += 1;
+      try { onFire?.({ restarted: true }); } catch { /* listener */ }
       return { ok: true, restarted: true };
     }
     if (running()) finish();
@@ -267,6 +270,7 @@ export function createXray({
     runs += 1;
     holdRender(XRAY_RENDER_OWNER);
     requestRender();
+    try { onFire?.({ restarted: false }); } catch { /* listener */ }
     return { ok: true, restarted: false };
   }
 

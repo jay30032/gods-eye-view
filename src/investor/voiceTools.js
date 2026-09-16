@@ -1,6 +1,7 @@
 import { normalizeStrategy } from './deal/index.js';
 import { whyThisMatters } from './focus.js';
 import { isPropertySaved } from './saved.js';
+import { ASSISTANT_TOOL_NAMES } from './terra/identity.js';
 
 export function explainProperty(property) {
   if (!property) return { ok: false, error: 'No property' };
@@ -21,25 +22,8 @@ export function explainProperty(property) {
   };
 }
 
-export const INVESTOR_VOICE_TOOL_NAMES = Object.freeze([
-  'investor_command',
-  'compare_strategies',
-  'explain_strategy',
-  'set_opportunity_vision',
-  'search_mock_properties',
-  'focus_property',
-  'rank_mock_properties',
-  'explain_property',
-  'show_deal_vision',
-  'run_flip_analysis',
-  'run_rental_analysis',
-  'run_brrrr_analysis',
-  'run_wholesale_analysis',
-  'save_property',
-  'show_saved_properties',
-  'start_drive_demo',
-  'stop_drive_demo',
-]);
+/** The one list: the assistant's session is minted from the same names. */
+export const INVESTOR_VOICE_TOOL_NAMES = ASSISTANT_TOOL_NAMES;
 
 export function isInvestorVoiceTool(name) {
   return INVESTOR_VOICE_TOOL_NAMES.includes(name);

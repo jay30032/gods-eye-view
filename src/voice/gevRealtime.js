@@ -326,7 +326,79 @@ export class GevRealtimeController {
     this.pendingViewportDeletes = new Set();
     this.errors = loadStoredErrors();
     this.sessionId = createDebugSessionId();
+    /**
+     * A presence riding on this session (TerraSignal's assistant) needs three
+     * seams and nothing more: every server event as it arrives, a moment
+     * before each client-created response to put fresh state in front of the
+     * model, and a way to ask the token endpoint for a different persona.
+     */
+    this.serverEventListeners = new Set();
+    this.beforeResponseCreate = null;
+    this.followupInstructions = null;
+    this.tokenQuery = '';
+    /**
+     * Always-on: Space no longer claims a push-to-talk session; it starts the
+     * ordinary open-mic one when nothing is running and is otherwise inert.
+     */
+    this.alwaysOn = false;
+    /** The one context item kept in the conversation, replaced on each turn. */
+    this.contextItemId = null;
     this.debugLog('controller.created', { status: this.status });
+  }
+
+  /** Observe every server event. Returns an unsubscribe function. */
+  onServerEvent(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.serverEventListeners.add(listener);
+    return () => this.serverEventListeners.delete(listener);
+  }
+
+  emitServerEvent(payload) {
+    for (const listener of this.serverEventListeners) {
+      try { listener(payload, this); } catch (error) { console.warn('[GEV Realtime] listener:', error); }
+    }
+  }
+
+  /** Whether the assistant's audio is currently reaching the speaker. */
+  get audioElement() { return this.audioEl; }
+
+  /**
+   * Put one system item of state in front of the model, replacing the last.
+   *
+   * The same housekeeping as the viewport screenshot: the previous item is
+   * deleted first so the conversation carries exactly one snapshot, and the
+   * delete is tagged so a server-side truncation racing it reads as benign.
+   * @param {string} text
+   * @param {string} [idPrefix]
+   * @returns {boolean} whether the item was sent
+   */
+  setContextItem(text, idPrefix = 'ctx_') {
+    if (!this.dc || this.dc.readyState !== 'open') return false;
+    if (this.contextItemId) {
+      const deleteEventId = `evt_del_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      this.pendingViewportDeletes.add(deleteEventId);
+      if (this.pendingViewportDeletes.size > 8) {
+        this.pendingViewportDeletes.delete(this.pendingViewportDeletes.values().next().value);
+      }
+      this.sendRealtimeEvent({
+        event_id: deleteEventId,
+        type: 'conversation.item.delete',
+        item_id: this.contextItemId,
+      }, 'client.conversation.item.delete.old_context');
+      this.contextItemId = null;
+    }
+    const itemId = `${idPrefix}${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const sent = this.sendRealtimeEvent({
+      type: 'conversation.item.create',
+      item: {
+        id: itemId,
+        type: 'message',
+        role: 'system',
+        content: [{ type: 'input_text', text: String(text || '') }],
+      },
+    }, 'client.context_item');
+    if (sent) this.contextItemId = itemId;
+    return sent;
   }
 
   isActive() {
@@ -374,7 +446,7 @@ export class GevRealtimeController {
     let localStream = null;
     let localPc = null;
     try {
-      const minted = await fetchRealtimeToken(this.voiceTier);
+      const minted = await fetchRealtimeToken(this.voiceTier, this.tokenQuery);
       const token = minted.token;
       if (this.abandonStart(epoch, { localStream, localPc })) return;
       // Bind the session meter to the model actually served. An env override
@@ -584,6 +656,12 @@ export class GevRealtimeController {
       // Space must not generate the focused mic button's native click on keyup.
       event.preventDefault();
       this.pauseRadioForVoice();
+      // Always-on: there is no push-to-talk. Space opens the ordinary session
+      // when nothing is running and does nothing to one that is.
+      if (this.alwaysOn) {
+        if (!this.isActive()) this.start({ pushToTalk: false });
+        return;
+      }
       if (this.pushToTalkKeyHeld) return;
       // A click-started session is intentionally open-mic. Space only claims an
       // idle session (or a session it already started) so releasing the key can
@@ -840,6 +918,7 @@ export class GevRealtimeController {
     this.supersededResponseIds.clear();
     this.pendingRadioPlaybackResult = null;
     this.lastViewportItemId = null;
+    this.contextItemId = null;
     this.pendingViewportDeletes.clear();
     this.pushToTalkMode = false;
     this.pushToTalkKeyHeld = false;
@@ -994,6 +1073,7 @@ export class GevRealtimeController {
     }
     if (!this.dc || this.dc.readyState !== 'open') return;
     this.pendingUserTextResponse = false;
+    this.runBeforeResponseCreate('user_text');
     this.responseCreatePending = true;
     const sent = this.sendRealtimeEvent({ type: 'response.create' }, 'client.response_create.user_text');
     if (!sent) this.responseCreatePending = false;
@@ -1012,6 +1092,7 @@ export class GevRealtimeController {
       responseId: payload.response_id || payload.response?.id || null,
       payload,
     });
+    this.emitServerEvent(payload);
 
     if (payload.type === 'error') {
       if (payload.error?.code === 'conversation_already_has_active_response') {
@@ -1353,9 +1434,12 @@ export class GevRealtimeController {
       }
       // Keep the Radio handoff wording authoritative even when another tool
       // result follows Radio in the same multi-intent response.
-      this.queueResponseCreate(responseInstructionForToolResult(
-        this.pendingRadioPlaybackResult || lastResult,
-      ));
+      const followupResult = this.pendingRadioPlaybackResult || lastResult;
+      // A presence may word its own follow-up; the classic wording otherwise.
+      const custom = typeof this.followupInstructions === 'function'
+        ? this.followupInstructions(followupResult)
+        : null;
+      this.queueResponseCreate(custom || responseInstructionForToolResult(followupResult));
     }
     this.setStatus('listening', 'Ask or command');
   }
@@ -1971,6 +2055,14 @@ export class GevRealtimeController {
     }
   }
 
+  /** The seam a presence uses to refresh its state item before a response. */
+  runBeforeResponseCreate(kind, instructions = null) {
+    if (typeof this.beforeResponseCreate !== 'function') return;
+    try { this.beforeResponseCreate({ kind, instructions }, this); } catch (error) {
+      console.warn('[GEV Realtime] beforeResponseCreate:', error);
+    }
+  }
+
   queueResponseCreate(instructions) {
     if (this.userTurnPending) {
       this.debugLog('response.create.skipped_user_turn', {
@@ -1993,6 +2085,7 @@ export class GevRealtimeController {
     ) return;
     const instructions = this.pendingResponseInstructions;
     this.pendingResponseInstructions = null;
+    this.runBeforeResponseCreate('followup', instructions);
     this.responseCreatePending = true;
     const sent = this.sendRealtimeEvent({
       type: 'response.create',
@@ -2311,8 +2404,9 @@ function isNearlyBlackFrame(ctx, width, height) {
  * point a tier at any model id. The caller prices against the returned id, not
  * against its own tier assumption.
  */
-async function fetchRealtimeToken(tier = DEFAULT_VOICE_TIER) {
-  const url = `${TOKEN_URL}?tier=${encodeURIComponent(resolveVoiceModel(tier).tier)}`;
+async function fetchRealtimeToken(tier = DEFAULT_VOICE_TIER, extraQuery = '') {
+  const extra = String(extraQuery || '').replace(/^[?&]+/, '');
+  const url = `${TOKEN_URL}?tier=${encodeURIComponent(resolveVoiceModel(tier).tier)}${extra ? `&${extra}` : ''}`;
   const response = await fetch(url, { cache: 'no-store' });
   const data = await response.json().catch(() => null);
   // Server echo first (authoritative, always present); the minted session

@@ -65,6 +65,11 @@ Status: implemented on the existing Cesium / Vite / vanilla JS tree. No React, N
 - [x] Drive Mode v1: a committed road-following loop, a chase camera on a
       spline, activation by distance ahead, narration that speaks only when
       useful, and a pluggable position source with a live GPS implementation
+- [x] Terra — the assistant as a presence: one always-listening Realtime
+      session opened on the first tap of the orb, server VAD with barge-in, a
+      state snapshot in front of the model before every turn, proactive briefs
+      gated by a unit-tested speak policy, the voice and reasoning effort
+      locked, first-word latency measured by `smoke:voice`
 - [x] Phase 2 not started
 
 ## Architecture
@@ -92,6 +97,9 @@ src/investor/
   ensureBasemap.js       keyless Esri → OSM + requestRender bursts + empty-globe assert
   frameBudget.js         30 fps on battery/Air; classic stays 60
   voiceTools.js          additive GEV tool handlers
+  terra/                 the assistant: identity (name, voice, instructions,
+                         session config), snapshot, speak policy, turn
+                         metrics, presence (the wiring onto gevRealtime)
   driveDemo.js           simulated route
 ```
 
@@ -245,6 +253,7 @@ npm run smoke:demo               # drives the whole acceptance conversation
 npm run smoke:six                # the six-house near-field scene
 npm run smoke:drive              # Drive Mode, the whole loop at 4x
 npm run smoke:clear              # the parked Clear View experiment (?world=clear)
+npm run smoke:voice              # Terra: the real key, a real Realtime session
 ```
 
 Geometry is refreshed by hand, never by `npm test`:
@@ -1218,6 +1227,147 @@ At 60 fps the 33 ms figure binds with two frames of slack; at 30 fps it becomes
 
 Measured both ways: **17.9 / 18.3 ms** on mains at 60 fps, **33.8 / 33.8 ms** on
 battery at 30 fps.
+
+## Terra — the assistant as a presence
+
+The mic used to be a command parser with a push-to-talk key: hold Space, say a
+phrase, the GEV controller ran a tool, a canned line was read back. Terra is
+the same Realtime session turned into someone standing at the screen. The
+name is one constant (`ASSISTANT_NAME` in `terra/identity.js`) so it can be
+renamed in one edit; everything below says "the assistant" where the name
+would otherwise be baked into prose.
+
+### Always listening
+
+The first tap on the orb opens **one** WebRTC session to OpenAI Realtime with
+**server-side voice activity detection** (`server_vad`, 350 ms silence window,
+`interrupt_response: true`). There is no push-to-talk: `alwaysOn` on the
+controller turns Space into "open the session if it is closed" and nothing
+else. The orb shows listening as light — the same `data-ts-orb` states as
+before, with a `data-paused` attribute on the voice control reading as *idle*.
+A second tap, or "stop listening", **pauses**: the mic tracks are disabled and
+the session stays up, so "listen" resumes instantly with no reconnect and no
+second permission prompt. The mic is asked for once, and if the browser has
+not already granted it the strip says why in one line first.
+
+**No `OPENAI_API_KEY`** means `/api/realtime/available` says so, the orb opens
+the typed bar, and the narrator does what it did before: writes the line,
+paces the card. Nothing about that path changed; `smoke:demo` still drives it.
+
+### The session is minted for the persona
+
+`/api/realtime/token?persona=terra` builds the session from
+`buildAssistantSessionConfig` rather than the classic controller's config:
+
+| | classic GEV | Terra |
+|---|---|---|
+| turn detection | `semantic_vad`, eagerness low, no interrupt | `server_vad` 350 ms, barge-in on |
+| voice | `OPENAI_REALTIME_VOICE` (marin) | **cedar, locked** — the env var is ignored |
+| speed | 1.0 | 0.95 |
+| reasoning | `OPENAI_REALTIME_REASONING_EFFORT` (low) | **minimal, locked** |
+| transcription | off | `gpt-4o-mini-transcribe` on the user's audio |
+| tools | all 40-odd GEV tools | the 17 investor tools only |
+| instructions | the GEV controller's | `buildAssistantInstructions()` |
+
+The voice: of the ten the API offers, OpenAI recommends marin and cedar for
+gpt-realtime; cedar is the lower-pitched, less hurried of the two. It is not
+read from the environment on purpose — the product has one voice the way it
+has one palette.
+
+Reasoning effort `minimal` is a measured decision, not a default. A board
+question is **two** model responses — the tool call, then the caption once the
+tool has run — and every reasoning token is paid twice. Headed on the
+six-house scene, `low` put the first word 1.9 s after the user stopped
+talking; `minimal` and `none` both land around 0.8–1.1 s for a tool turn and
+0.4–0.9 s for a single-response brief, inside each other's run-to-run
+variance, and `minimal` keeps a little headroom for the style rules. The tool
+choice is spelled out in the instructions ("ACT FIRST") rather than left to
+reasoning, and the style is shown as example replies rather than as labels —
+an early cut said "Numbers first" and "verdict" in the rubric and the model
+read them back verbatim: *"Numbers first: 100 composite. Verdict: ..."*
+
+### Situational awareness
+
+Before every assistant turn the app puts **one system item** in the
+conversation whose text is a JSON snapshot (`terra/snapshot.js`): the market,
+the camera shot — with `camera.change` present only when the view moved since
+the last snapshot — the drive state, the board (house count, signal counts,
+auctions soonest first), the shortlist, the focused house with its exact
+numbers, its analysis and its Why, what is on screen, the narration level and
+the last three exchanges. The previous item is deleted first, so the
+conversation carries exactly one snapshot; the delete is tagged so a server
+truncation racing it reads as benign, the same housekeeping the viewport
+screenshot uses.
+
+"Before every turn" is three seams on the controller: the user starting to
+speak (`input_audio_buffer.speech_started`, which lands before their audio is
+committed), a typed command's `response.create`, and a tool follow-up's. The
+instructions tell the model the snapshot is the truth about now, that it must
+never read a canned line verbatim, and that **numbers are repeated exactly** —
+which is why the snapshot rounds nothing.
+
+### Proactive briefs
+
+The session raises events — `descent_settled`, `find_money_complete`,
+`house_focused`, `drive_approach`, `xray`, `save_done` — and
+`terra/speakPolicy.js` decides whether each becomes a brief:
+
+1. never twice about the same property inside 60 s (a direct answer about a
+   house counts as having briefed it);
+2. never during a flight;
+3. under narration level **quiet**, nothing but direct answers;
+4. under **off**, nothing at all.
+
+The level is the drive's narration level ("narration quiet" / "off" / "full"),
+which now governs the assistant everywhere, not just on the road. A yes
+becomes `response.create` with the event named and the snapshot refreshed in
+front of it. Joining a market that has already settled is treated as the
+descent settling, so the first thing the assistant does after the orb is
+tapped is brief the board: *"Six houses, five signals. Three notices of sale —
+the nearest auction is 26 days out at 621 Third. Want the best one?"*
+`speakPolicy.test.mjs` pins all four rules on a fake clock.
+
+### Interruption
+
+Talking over the assistant does three things in the same event handler, on
+the client, before the server has said anything: the audio element is muted,
+`output_audio_buffer.clear` is sent, and `onInterrupt` cancels the narrator's
+pacing and reveals every remaining card line — the half-spoken card assembly
+finishes silently. The mute lifts on the next `output_audio_buffer.started`.
+"Speaking" is tracked from the transport's own `output_audio_buffer` events,
+not from the audio element, because a live stream element is never paused;
+the first cut read every user turn as an interruption of nothing.
+
+### Latency, measured
+
+`terra/turnMetrics.js` times each turn from the event stream: a spoken turn
+starts at `input_audio_buffer.speech_stopped`, a typed one when
+`response.create` is sent, a brief when it is requested; the first audible
+word is `output_audio_buffer.started`, which the WebRTC transport raises as
+the first audio frame reaches the client. For a spoken turn the server has
+already waited the 350 ms silence window before it says speech stopped, so
+`fromLastWordMs` adds it back — that is the pause the user actually feels.
+
+### `npm run smoke:voice`
+
+Real Chrome, the real key, a real session. `getUserMedia` in the page is
+replaced with a Web Audio destination the probe can speak into (Chrome's own
+`--use-file-for-fake-audio-capture` stalled the WebRTC connect outright), so
+the phrase starts exactly when the probe says. It asserts:
+
+- one tap on the orb opens the session, the orb lights, no push-to-talk;
+- the board brief speaks unasked on joining;
+- a **text event** through the data channel — "what's the best one" — starts
+  an audio response within 2 s and fires a tool call that resolves to
+  `find_money` (a *question* about the best house is a hunt in `parse.js`;
+  "show me the best one" is still a focus);
+- the same phrase **spoken** into the mic produces a heard turn with its first
+  word inside the 800 ms target, and the user's words come back transcribed;
+- a second tap pauses the mic (tracks disabled, session live), the page still
+  answers, no console errors.
+
+The transcript — user lines, assistant lines, tool calls, briefs, every turn's
+latency, the last snapshot — goes to `/tmp/shots/voice-transcript.txt`.
 
 ## Env
 
