@@ -11,7 +11,7 @@ const rows = provider.list();
 test('the board summary counts houses, signals and auctions soonest first', () => {
   const board = boardSummary(rows);
   assert.equal(board.houses, 6);
-  assert.equal(board.notices, 7);
+  assert.equal(board.signals, 7);
   assert.equal(board.byType['Notice of Sale Under Power'], 2);
   assert.equal(board.byType['Tax sale (fi. fa.)'], 1);
   assert.equal(board.auctions.length, 3);

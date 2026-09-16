@@ -95,7 +95,7 @@ export function rowSummary(property, { rank = null } = {}) {
   return {
     id: property.id,
     address: shortAddress(property),
-    notice: signalLabel(signal?.type),
+    signal: signalLabel(signal?.type),
     ...(rank ? { rank } : {}),
     play: playWords(best),
     ...(analysis ? { works: analysis.verdict, headline: strategyHeadline(analysis) } : {}),
@@ -127,8 +127,8 @@ export function boardSummary(properties = []) {
     }
   }
   auctions.sort((a, b) => a.daysUntil - b.daysUntil);
-  const notices = rows.reduce((n, row) => n + (row.signals || []).length, 0);
-  return { houses: rows.length, notices, byType: signals, auctions };
+  const count = rows.reduce((n, row) => n + (row.signals || []).length, 0);
+  return { houses: rows.length, signals: count, byType: signals, auctions };
 }
 
 /** The focused house, its analysis and its why. */
@@ -144,7 +144,7 @@ export function focusedSummary(property, analysis = null, { saved = false, strat
     rehab: money(property.deal?.rehab),
     arv: money(property.deal?.arv),
     rent: money(property.deal?.rent),
-    notices: (property.signals || []).map((s) => ({
+    signals: (property.signals || []).map((s) => ({
       type: signalLabel(s.type),
       confidencePct: Math.round(Number(s.confidence || 0) * 100),
       filed: s.effectiveDate || null,

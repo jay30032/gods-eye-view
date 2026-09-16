@@ -37,10 +37,10 @@ export const MIC_EXPLANATION = `${ASSISTANT_NAME} listens through your mic so yo
 
 /** What each app event asks the assistant to do. */
 export const EVENT_BRIEFS = Object.freeze({
-  descent_settled: 'The descent has settled on the market. Say how many houses and notices there are and when and where the nearest auction is, then ask if they want the best one.',
+  descent_settled: 'The descent has settled on the market. Say how many houses and signals there are and when and where the nearest auction is, then ask if they want the best one. At most 25 words, the question included.',
   find_money_complete: 'The hunt is complete and the camera is on the gold pick. Name it, the money in it and its play in one breath, then the next step as a question.',
   house_focused: 'A house is now in focus with its card open. Say the figure that decides its play and whether it works, then the next step as a question.',
-  drive_approach: 'The drive is approaching a notice. Say what is coming up and on which side, in one breath.',
+  drive_approach: 'The drive is approaching a signal. Say what is coming up and on which side, in one breath.',
   xray: 'The x-ray just fired on the house in focus. One short clause on what the see-through shows, then stop.',
   save_done: 'The save just landed. Confirm in four words or fewer.',
 });
@@ -50,7 +50,7 @@ export function followupInstructions(result) {
   const outcome = result?.ok === false
     ? `The action did not run (${String(result?.error || result?.spoken || 'no reason given').slice(0, 120)}). Say so in a few words.`
     : 'The action ran and the state item just before this is the new state.';
-  return `${outcome} No bridge now — straight to the answer, one breath, in plain sentences: if the state item shows camera.change, open with a short clause on where we are now; then the money and the deadline, the play in plain words and whether it works, and the next step as a short question. Do not read the tool result's spoken caption word for word. Do not repeat yourself.`;
+  return `${outcome} No bridge now — straight to the answer, one breath, in plain sentences: if the state item shows camera.change, open with a short clause on where we are now; then the money and the deadline, the play in plain words and whether it works, and the next step as a short question — 25 words in all unless the investor asked to walk the numbers, figures exactly as the state gives them, no hedges. Do not read the tool result's spoken caption word for word. Do not repeat yourself.`;
 }
 
 /** How the model is asked for a brief: the event, then the rules it already has. */

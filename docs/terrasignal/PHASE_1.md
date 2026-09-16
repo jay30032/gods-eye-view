@@ -1291,7 +1291,10 @@ read them back verbatim: *"Numbers first: 100 composite. Verdict: ..."*
 The instructions describe the voice as a seasoned investor at the screen and
 show it with six example replies whose figures are the six-house scene's real
 ones: money and deadline first, the play in plain words, the next move as a
-short question. `BANNED_SPOKEN_TERMS` — the app's own vocabulary: "composite",
+short question. Replies are capped at 25 words, the closing question included, unless the
+investor asks to walk the numbers; figures are said exactly as the state
+gives them, never hedged with "about" or "roughly"; a count of mixed signals
+is "signals", not "notices". `BANNED_SPOKEN_TERMS` — the app's own vocabulary: "composite",
 "verdict", "on the board", every snapshot field name — is checked against the
 instructions, the briefs and the follow-ups by unit tests, because the first
 cuts said "Numbers first" and "verdict" in the rubric and the model read them

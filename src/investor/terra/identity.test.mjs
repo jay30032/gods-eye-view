@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ASSISTANT_NAME,
+  BANNED_HEDGES,
   BRIDGE_WORDS,
   bannedTermsIn,
+  exampleReplies,
   ASSISTANT_SPEED,
   ASSISTANT_TOOL_NAMES,
   ASSISTANT_TURN_DETECTION,
@@ -53,12 +55,21 @@ test('the style rules are all present', () => {
 
 test('six example replies in an investor\'s voice, every number exact for the six-house scene', () => {
   const text = buildAssistantInstructions();
-  const examples = text.split('SOUND LIKE THIS. ')[1].split('\n')[0].split(' · ');
+  const examples = exampleReplies(text);
   assert.equal(examples.length, 6);
   for (const example of examples) {
     assert.match(example, /\?"$/, `ends with a question: ${example}`);
-    assert.ok(example.split(' ').length <= 32, `one breath: ${example}`);
+    // The cap the rule states, question included.
+    assert.ok(example.replace(/"/g, '').trim().split(/\s+/).length <= 25, `25 words: ${example}`);
+    // No hedge on any figure.
+    const words = example.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/);
+    for (const hedge of BANNED_HEDGES) assert.ok(!words.includes(hedge), `"${hedge}" in: ${example}`);
+    // A mixed count is "signals", never "notices".
+    assert.ok(!/\b(seven|six|five|four|three|two|\d+) notices\b/i.test(example), example);
   }
+  assert.ok(text.includes('at most 25 words in total, and the closing question counts inside the 25'));
+  assert.ok(text.includes('never hedge one'));
+  assert.ok(text.includes('"signals" unless every one of them is a notice of sale'));
   // Real figures from DEMO-SIX-001 and DEMO-SIX-004, so an example can never
   // teach the model a number the calculators would contradict.
   for (const figure of ['$100,493', '$55,747', '23.3%', '$76,909', '$59,531', '26 days', '45% under value', '$7 a month', '1.01']) {
