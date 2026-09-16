@@ -1286,6 +1286,24 @@ reasoning, and the style is shown as example replies rather than as labels —
 an early cut said "Numbers first" and "verdict" in the rubric and the model
 read them back verbatim: *"Numbers first: 100 composite. Verdict: ..."*
 
+### An investor's voice, and a bridge over the tool pause
+
+The instructions describe the voice as a seasoned investor at the screen and
+show it with six example replies whose figures are the six-house scene's real
+ones: money and deadline first, the play in plain words, the next move as a
+short question. `BANNED_SPOKEN_TERMS` — the app's own vocabulary: "composite",
+"verdict", "on the board", every snapshot field name — is checked against the
+instructions, the briefs and the follow-ups by unit tests, because the first
+cuts said "Numbers first" and "verdict" in the rubric and the model read them
+back verbatim.
+
+A tool turn is two responses, and the gap between them was dead air. The
+model now says a two-word bridge — "On it." or "One second." — in the same
+response as the tool call, before the call; the substance follows once the
+tool has run, and the follow-up instruction forbids a second bridge.
+`smoke:voice` checks headed that the turn's first audio belongs to the tool
+call's own response and lands before the tool result returns.
+
 ### Situational awareness
 
 Before every assistant turn the app puts **one system item** in the

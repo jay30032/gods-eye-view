@@ -7,8 +7,9 @@ import {
   briefInstructions,
   createTerra,
   foldExchanges,
+  followupInstructions,
 } from './presence.js';
-import { ASSISTANT_NAME, SNAPSHOT_ITEM_PREFIX } from './identity.js';
+import { ASSISTANT_NAME, SNAPSHOT_ITEM_PREFIX, bannedTermsIn } from './identity.js';
 import { parseCommand } from '../nlp/parse.js';
 
 /** A controller with the four seams the presence uses and nothing else. */
@@ -202,6 +203,16 @@ test('joining a settled market briefs the board once', () => {
   assert.equal(controller.queued.length, 1);
   assert.ok(controller.queued[0].startsWith('event: descent_settled.'));
   assert.equal(terra.events.at(-1).sent, true);
+});
+
+test('the briefs and follow-ups never teach a banned term either', () => {
+  const texts = [
+    ...Object.values(EVENT_BRIEFS),
+    ...Object.keys(EVENT_BRIEFS).map((type) => briefInstructions(type)),
+    followupInstructions({ ok: true }),
+    followupInstructions({ ok: false, error: 'nothing focused' }),
+  ];
+  for (const text of texts) assert.deepEqual(bannedTermsIn(text), [], text);
 });
 
 test('the transcript folds into exchanges, newest three', () => {

@@ -6,8 +6,10 @@
  * Realtime session to come up over WebRTC. Then it asks three things of it:
  *
  *   1. a text event sent through the data channel — "what's the best one" —
- *      produces a tool call that resolves to `find_money`, and an audio
- *      response begins within AUDIO_DEADLINE_MS of the send;
+ *      produces a tool call that resolves to `find_money`, an audio response
+ *      begins within AUDIO_DEADLINE_MS of the send, and that audio — the
+ *      two-word bridge — starts in the tool call's own response, before the
+ *      tool result returns;
  *   2. a spoken turn — a WAV of the same phrase, played into the session's
  *      microphone stream from inside the page — produces the same tool call,
  *      and its first audible word is measured from the server's
@@ -211,6 +213,20 @@ async function main() {
     const calls = await page.evaluate(() => window.__terraSignal.terra.toolCalls);
     const findMoney = calls.find((c) => c.intent === 'find_money');
     check(Boolean(findMoney), `a tool call for find_money fired (${calls.map((c) => `${c.name}→${c.intent || '?'}`).join(', ') || 'none'})`);
+    // The bridge: the turn's first audio belongs to the SAME response as the
+    // tool call and lands before the tool result comes back, so the user
+    // never hears dead air while the tool runs.
+    const textDone = await page.evaluate((sentAt) => {
+      const t = window.__terraSignal.terra;
+      return t.turns.find((x) => x.kind === 'text' && x.startedAt >= sentAt - 5) || null;
+    }, sentAt);
+    const bridgeLead = textDone && findMoney && Number.isFinite(textDone.firstAudioAt)
+      ? Math.round(findMoney.at - textDone.firstAudioAt)
+      : null;
+    const bridgedSameResponse = Boolean(textDone && findMoney && textDone.responseIds?.[0]
+      && findMoney.responseId === textDone.responseIds[0]);
+    check(Number.isFinite(bridgeLead) && bridgeLead > 0 && bridgedSameResponse,
+      `bridge audio started ${bridgeLead} ms before the tool result, in the tool call's own response (${bridgedSameResponse})`);
     const dispatched = await page.evaluate(() => window.__terraSignal.lastIntent?.intent || null);
     check(dispatched === 'find_money', `the session dispatched find_money (${dispatched})`);
 

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ASSISTANT_NAME,
+  BRIDGE_WORDS,
+  bannedTermsIn,
   ASSISTANT_SPEED,
   ASSISTANT_TOOL_NAMES,
   ASSISTANT_TURN_DETECTION,
@@ -40,11 +42,36 @@ test('server VAD with barge-in, and a silence window under the first-word target
 
 test('the style rules are all present', () => {
   const text = buildAssistantInstructions();
-  for (const rule of ['one breath', 'Open with the figure that decides it', 'No filler', '"sure"', '"great"',
-    'Do not repeat what is already on screen', 'opens with a short clause', 'repeat exactly',
-    'ACT FIRST', 'Never answer a board question from the snapshot alone', 'camera.change', 'SOUND LIKE THIS', 'a brief NEVER calls a tool']) {
-    assert.ok(text.toLowerCase().includes(rule.toLowerCase()), rule);
+  for (const rule of ['One breath', 'Lead with the money and the deadline', 'name the play in plain words',
+    'next step as a short question', '"sure"', '"great"', 'Do not repeat what is already on screen',
+    'opens with a short clause', 'repeat exactly', 'ACT FIRST, BRIDGE THE PAUSE', 'never bridge twice',
+    'camera.change', 'SOUND LIKE THIS', 'NEVER calls a tool and never bridges']) {
+    assert.ok(text.includes(rule), rule);
   }
+  for (const bridge of BRIDGE_WORDS) assert.ok(text.includes(`"${bridge}"`), bridge);
+});
+
+test('six example replies in an investor\'s voice, every number exact for the six-house scene', () => {
+  const text = buildAssistantInstructions();
+  const examples = text.split('SOUND LIKE THIS. ')[1].split('\n')[0].split(' · ');
+  assert.equal(examples.length, 6);
+  for (const example of examples) {
+    assert.match(example, /\?"$/, `ends with a question: ${example}`);
+    assert.ok(example.split(' ').length <= 32, `one breath: ${example}`);
+  }
+  // Real figures from DEMO-SIX-001 and DEMO-SIX-004, so an example can never
+  // teach the model a number the calculators would contradict.
+  for (const figure of ['$100,493', '$55,747', '23.3%', '$76,909', '$59,531', '26 days', '45% under value', '$7 a month', '1.01']) {
+    assert.ok(text.includes(figure), figure);
+  }
+});
+
+test('the instructions never teach a banned term', () => {
+  assert.deepEqual(bannedTermsIn(buildAssistantInstructions()), []);
+  // The matcher itself: phrases loosely, keys and field names exactly.
+  assert.deepEqual(bannedTermsIn('two foreclosures and a Composite Score'), ['composite', 'composite score']);
+  assert.deepEqual(bannedTermsIn('the FORECLOSURE key and bestPath'), ['bestPath', 'FORECLOSURE']);
+  assert.deepEqual(bannedTermsIn('the best path forward'), ['best path']);
 });
 
 test('the session keeps only investor tools and carries transcription', () => {

@@ -11,9 +11,9 @@ const rows = provider.list();
 test('the board summary counts houses, signals and auctions soonest first', () => {
   const board = boardSummary(rows);
   assert.equal(board.houses, 6);
-  assert.equal(board.signalCount, 7);
-  assert.equal(board.signals['Notice of Sale Under Power'], 2);
-  assert.equal(board.signals['Tax sale (fi. fa.)'], 1);
+  assert.equal(board.notices, 7);
+  assert.equal(board.byType['Notice of Sale Under Power'], 2);
+  assert.equal(board.byType['Tax sale (fi. fa.)'], 1);
   assert.equal(board.auctions.length, 3);
   assert.ok(board.auctions.every((a, i, all) => i === 0 || a.daysUntil >= all[i - 1].daysUntil));
   assert.equal(board.auctions[0].daysUntil, 26);
@@ -28,8 +28,11 @@ test('the focused house carries exact numbers, the analysis and the why', () => 
   assert.equal(focused.value, 432000);
   assert.equal(focused.equityPct, 52);
   assert.equal(focused.purchase, 238000);
-  assert.equal(focused.analysis.strategy, 'flip');
-  assert.equal(focused.analysis.verdict, 'strong');
+  assert.equal(focused.analysis.play, 'flip');
+  assert.equal(focused.analysis.works, 'strong');
+  assert.equal(focused.underValuePct, 45);
+  assert.equal(focused.play, 'flip');
+  assert.equal(focused.headline, '$100k profit on $56k cash in');
   assert.equal(focused.analysis.profit, Math.round(analysis.profit));
   assert.equal(focused.analysis.marginPct, 23.3);
   assert.equal(focused.auction.daysUntil, 26);
@@ -38,7 +41,7 @@ test('the focused house carries exact numbers, the analysis and the why', () => 
   assert.equal(focusedSummary(null), null);
   // A different strategy's shape.
   const rental = focusedSummary(house, analyzePropertyDeal(house, 'rental'));
-  assert.equal(rental.analysis.strategy, 'rental');
+  assert.equal(rental.analysis.play, 'rental');
   assert.ok('dscr' in rental.analysis);
 });
 
@@ -68,7 +71,15 @@ test('the snapshot is compact JSON with the shortlist, the camera, the drive and
   assert.equal(snapshot.drive.alongM, 121);
   assert.equal(snapshot.drive.current.address, '1344 Oakview Rd');
   assert.equal(snapshot.shortlist.length, 2);
-  assert.equal(snapshot.topPick.id, 'DEMO-SIX-001');
+  assert.deepEqual(snapshot.shortlist.map((row) => row.rank), [1, 2]);
+  assert.equal(snapshot.gold.id, 'DEMO-SIX-001');
+  assert.equal(snapshot.gold.play, 'flip');
+  // Nothing in the snapshot invites the app's vocabulary into the reply.
+  const keys = new Set();
+  JSON.stringify(snapshot, (key, value) => { keys.add(key); return value; });
+  for (const banned of ['composite', 'scores', 'bestPath', 'signalCount', 'topPick', 'verdict', 'strategy']) {
+    assert.ok(!keys.has(banned), banned);
+  }
   assert.equal(snapshot.focused.analysis, null);
   assert.equal(snapshot.narration, 'quiet');
   assert.equal(snapshot.exchanges.length, EXCHANGE_LIMIT);

@@ -12,7 +12,7 @@
  *
  * Pure: the caller gathers the live objects; this shapes them.
  */
-import { compositeScore, primarySignal, signalLabel } from '../mock/schema.js';
+import { primarySignal, signalLabel } from '../mock/schema.js';
 import { strategyHeadline } from '../scoring.js';
 import { whyThisMatters } from '../focus.js';
 import { formatSaleDate } from '../georgia.js';
@@ -59,16 +59,47 @@ function pct(value) {
   return Math.round(n * 1000) / 10;
 }
 
-/** One row of the board, as the assistant needs it. */
-export function rowSummary(property) {
+/** The plays, in an investor's words rather than the calculators'. */
+export const PLAY_WORDS = Object.freeze({
+  flip: 'flip',
+  rental: 'rental',
+  brrrr: 'refinance-and-hold',
+  wholesale: 'assignment',
+});
+
+export function playWords(strategy) {
+  return PLAY_WORDS[String(strategy || '').toLowerCase()] || null;
+}
+
+function underValuePct(property) {
+  const value = Number(property?.estimatedValue);
+  const purchase = Number(property?.deal?.purchase);
+  if (!(value > 0) || !Number.isFinite(purchase)) return null;
+  return Math.round((1 - purchase / value) * 100);
+}
+
+/**
+ * One house, as the assistant needs it.
+ *
+ * No score and no strategy key: the assistant is told to talk money and
+ * deadline, and a field called `composite` on every row is an invitation to
+ * say "composite score" out loud. The ranking survives as `rank` (1 is the
+ * gold pick), the calculators as a headline in dollars, and the strategy as
+ * the words an investor would use for it.
+ */
+export function rowSummary(property, { rank = null } = {}) {
   if (!property) return null;
   const signal = primarySignal(property);
+  const best = property.bestStrategy || null;
+  const analysis = property.analyses?.[best] || null;
   return {
     id: property.id,
     address: shortAddress(property),
-    signal: signalLabel(signal?.type),
-    composite: compositeScore(property),
-    bestPath: property.bestStrategy || null,
+    notice: signalLabel(signal?.type),
+    ...(rank ? { rank } : {}),
+    play: playWords(best),
+    ...(analysis ? { works: analysis.verdict, headline: strategyHeadline(analysis) } : {}),
+    underValuePct: underValuePct(property),
     ...(property.auction ? { auctionDays: property.auction.daysUntil } : {}),
   };
 }
@@ -96,8 +127,8 @@ export function boardSummary(properties = []) {
     }
   }
   auctions.sort((a, b) => a.daysUntil - b.daysUntil);
-  const signalCount = rows.reduce((n, row) => n + (row.signals || []).length, 0);
-  return { houses: rows.length, signalCount, signals, auctions };
+  const notices = rows.reduce((n, row) => n + (row.signals || []).length, 0);
+  return { houses: rows.length, notices, byType: signals, auctions };
 }
 
 /** The focused house, its analysis and its why. */
@@ -113,7 +144,7 @@ export function focusedSummary(property, analysis = null, { saved = false, strat
     rehab: money(property.deal?.rehab),
     arv: money(property.deal?.arv),
     rent: money(property.deal?.rent),
-    signals: (property.signals || []).map((s) => ({
+    notices: (property.signals || []).map((s) => ({
       type: signalLabel(s.type),
       confidencePct: Math.round(Number(s.confidence || 0) * 100),
       filed: s.effectiveDate || null,
@@ -125,11 +156,10 @@ export function focusedSummary(property, analysis = null, { saved = false, strat
         courthouse: String(property.auction.courthouse || '').split(',')[0],
       }
       : null,
-    scores: property.opportunityScore || null,
     analysis: run
       ? {
-        strategy: run.strategy,
-        verdict: run.verdict,
+        play: playWords(run.strategy),
+        works: run.verdict,
         headline: strategyHeadline(run),
         ...(run.strategy === 'flip' ? {
           profit: money(run.profit), cashIn: money(run.cashIn), marginPct: pct(run.margin), holdMonths: run.holdMonths,
@@ -146,7 +176,7 @@ export function focusedSummary(property, analysis = null, { saved = false, strat
         } : {}),
       }
       : null,
-    strategyShown: strategy || null,
+    playShown: playWords(strategy),
     why: whyThisMatters(property, run),
     saved: Boolean(saved),
   };
@@ -179,8 +209,8 @@ export function buildSnapshot({
     .map((id) => byId.get(id))
     .filter(Boolean)
     .slice(0, SHORTLIST_LIMIT)
-    .map(rowSummary);
-  const topPick = topPickId ? rowSummary(byId.get(topPickId)) : null;
+    .map((row, index) => rowSummary(row, { rank: index + 1 }));
+  const gold = topPickId ? rowSummary(byId.get(topPickId), { rank: 1 }) : null;
   const driveCurrent = drive?.current?.property || drive?.current || null;
 
   return {
@@ -211,14 +241,14 @@ export function buildSnapshot({
         alongM: Math.round(Number(drive.alongM) || 0),
         lengthM: Math.round(Number(drive.lengthM) || 0),
         current: driveCurrent?.id ? rowSummary(driveCurrent) : null,
-        goldId: drive.goldId || null,
+        gold: drive.goldId ? rowSummary(byId.get(drive.goldId)) : null,
         streetView: Boolean(drive.panoStopped),
       } : {}),
     },
     narration: level,
     listening: Boolean(listening),
     board: boardSummary(properties),
-    topPick,
+    gold,
     shortlist,
     focused: focusedSummary(focused, analysis, { saved, strategy }),
     screen: {

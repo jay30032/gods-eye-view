@@ -37,11 +37,11 @@ export const MIC_EXPLANATION = `${ASSISTANT_NAME} listens through your mic so yo
 
 /** What each app event asks the assistant to do. */
 export const EVENT_BRIEFS = Object.freeze({
-  descent_settled: 'The descent has settled on the market. Say how many houses and signals are on the board and when and where the nearest auction is, then offer the best one.',
-  find_money_complete: 'The hunt is complete and the camera is on the gold pick. Name it, its score and its best path in one breath.',
-  house_focused: 'A house is now in focus with its card open. Say the one figure that decides its best path and whether it works.',
-  drive_approach: 'The drive is approaching a signal. Say what is coming up and on which side, in one breath.',
-  xray: 'The x-ray just fired on the focused house. One short clause on what the see-through shows, then stop.',
+  descent_settled: 'The descent has settled on the market. Say how many houses and notices there are and when and where the nearest auction is, then ask if they want the best one.',
+  find_money_complete: 'The hunt is complete and the camera is on the gold pick. Name it, the money in it and its play in one breath, then the next step as a question.',
+  house_focused: 'A house is now in focus with its card open. Say the figure that decides its play and whether it works, then the next step as a question.',
+  drive_approach: 'The drive is approaching a notice. Say what is coming up and on which side, in one breath.',
+  xray: 'The x-ray just fired on the house in focus. One short clause on what the see-through shows, then stop.',
   save_done: 'The save just landed. Confirm in four words or fewer.',
 });
 
@@ -50,13 +50,13 @@ export function followupInstructions(result) {
   const outcome = result?.ok === false
     ? `The action did not run (${String(result?.error || result?.spoken || 'no reason given').slice(0, 120)}). Say so in a few words.`
     : 'The action ran and the state item just before this is the new state.';
-  return `${outcome} One breath, in plain sentences: if the state item shows camera.change, open with a short clause on where we are now; then the figure that decides it and whether the house works. Do not read the tool result's spoken caption word for word. Do not repeat yourself.`;
+  return `${outcome} No bridge now — straight to the answer, one breath, in plain sentences: if the state item shows camera.change, open with a short clause on where we are now; then the money and the deadline, the play in plain words and whether it works, and the next step as a short question. Do not read the tool result's spoken caption word for word. Do not repeat yourself.`;
 }
 
 /** How the model is asked for a brief: the event, then the rules it already has. */
 export function briefInstructions(type) {
   const ask = EVENT_BRIEFS[type] || `The app raised "${type}". Brief it in one breath.`;
-  return `event: ${type}. The app has already acted — do NOT call any tool for this, just speak. ${ask} Read the state item just before this. Numbers exact. One breath. Do not repeat a property you briefed in the last minute.`;
+  return `event: ${type}. The app has already acted — do NOT call any tool and do not bridge, just speak. ${ask} Read the state item just before this. Numbers exact. One breath. Do not repeat a house you spoke about in the last minute.`;
 }
 
 /**
