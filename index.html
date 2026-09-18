@@ -3,7 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>God's Eye View</title>
+  <title>TerraSignal Investor — See what others miss.</title>
+  <script>
+    (function () {
+      try {
+        var product = new URLSearchParams(location.search).get('product') || '';
+        if (product === 'classic' || product === 'gev' || product === 'gods-eye-view') return;
+        document.documentElement.classList.add('terrasignal-investor');
+      } catch (e) { /* keep GEV fallback */ }
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="stylesheet" href="/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -911,6 +920,98 @@
   <!-- Intelligence HUD Overlay -->
   <div id="intel-hud"></div>
 
+  <div id="terrasignal-shell">
+    <header id="terrasignal-brand" aria-label="TerraSignal Investor">
+      <button type="button" class="ts-brand-mark" aria-label="TerraSignal Investor — legend" aria-haspopup="true">TS</button>
+      <div class="ts-brand-flyout" role="group" aria-label="Legend">
+        <div class="ts-brand-copy">
+          <strong>TerraSignal Investor</strong>
+          <span id="ts-brand-tagline">See what others miss.</span>
+        </div>
+        <ul class="ts-legend" aria-label="Signals">
+          <li><i style="--c: rgb(140, 5, 15)"></i>Notice of Sale Under Power</li>
+          <li><i style="--c: rgb(219, 71, 20)"></i>Mortgage delinquency</li>
+          <li><i style="--c: rgb(133, 56, 219)"></i>Tax sale (fi. fa.)</li>
+          <li><i style="--c: rgb(235, 158, 31)"></i>Distress</li>
+          <li><i style="--c: rgb(41, 219, 235)"></i>Listed under comps</li>
+        </ul>
+        <label class="ts-vision-toggle">
+          <input type="checkbox" id="ts-opportunity-vision" checked />
+          <span>Opportunity Vision</span>
+        </label>
+        <div class="ts-brand-chips">
+          <div id="ts-lod-chip" aria-live="polite">GLOBE</div>
+          <span id="ts-sound-chip" data-on="1">SOUND ON</span>
+          <button type="button" id="ts-demo-chip" hidden>DEMO</button>
+        </div>
+        <p class="ts-brand-help">Press / to type · "sound off" · "voice on"</p>
+        <p id="ts-attribution">
+          Built on <a href="https://github.com/bilawalsidhu/gods-eye-view" rel="noreferrer">God's Eye View</a>
+          by Bilawal Sidhu · MIT · Mock data only · Not investment advice
+        </p>
+      </div>
+    </header>
+    <div id="ts-vignette" aria-hidden="true"></div>
+    <svg id="ts-leader" aria-hidden="true" hidden><line x1="0" y1="0" x2="0" y2="0" /><circle cx="0" cy="0" r="3" /></svg>
+    <p id="ts-ai-prompt" role="status" aria-live="polite" tabindex="0" title="Tap to type, or press /">Where are we hunting today?</p>
+    <aside id="ts-imagery-status" hidden role="status">Loading Earth imagery…</aside>
+    <aside id="ts-basemap-toast" hidden role="status"></aside>
+    <aside id="ts-first-hunt">
+      <span class="ts-kicker">First hunt</span>
+      <strong id="ts-first-hunt-title">Where are we hunting today?</strong>
+      <p>One world. One AI. Mock signals only — not listings, not advice.</p>
+      <div class="ts-hunt-choices">
+        <button type="button" data-ts-begin-hunt>
+          <strong>Atlanta / Decatur</strong>
+          <small>Foreclosure, tax sale, and distress pulses</small>
+        </button>
+        <button type="button" class="ts-hunt-explore" data-ts-hunt-explore>
+          <strong>Stay on the globe</strong>
+          <small>Look around first. MIC still works.</small>
+        </button>
+      </div>
+      <label class="ts-hunt-suppress">
+        <input type="checkbox" data-ts-hunt-suppress />
+        <span>Don't show this again</span>
+      </label>
+    </aside>
+    <aside id="ts-demo-script" hidden>
+      <span class="ts-kicker">5-minute demo</span>
+      <strong data-ts-demo-step-title>1 · Hunt</strong>
+      <p data-ts-demo-step-copy>Where are we hunting today? Choose Atlanta / Decatur to descend.</p>
+      <code data-ts-demo-phrase hidden></code>
+      <div class="ts-demo-actions">
+        <button type="button" data-ts-demo-next>Atlanta / Decatur</button>
+        <button type="button" data-ts-demo-auto>Play</button>
+      </div>
+      <ol data-ts-demo-list></ol>
+      <p class="ts-demo-hint">Typed commands work with no mic and no API keys. Voice is optional.</p>
+    </aside>
+    <aside id="ts-focus-card" hidden></aside>
+    <aside id="ts-saved-sheet" hidden></aside>
+    <nav id="ts-bottom-nav" aria-label="TerraSignal">
+      <button type="button" data-ts-nav="world" class="is-active">WORLD</button>
+      <button type="button" data-ts-nav="drive">DRIVE</button>
+      <div id="ts-ai-slot">
+        <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="Hold Space to speak, or click the microphone">MIC</button>
+      </div>
+      <button type="button" data-ts-nav="type" id="ts-type-button" aria-label="Type" aria-pressed="false" title="Type">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="6.5" width="19" height="11" rx="2" /><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M6 13.5h1M9.5 13.5h5M16.5 13.5h1" /></svg>
+        <span class="ts-type-label">Type</span>
+      </button>
+      <button type="button" data-ts-nav="saved">SAVED</button>
+    </nav>
+    <form id="ts-demo-form" autocomplete="off">
+      <label class="visually-hidden" for="ts-demo-input">Talk to TerraSignal</label>
+      <input id="ts-demo-input" name="q" placeholder="Find me money" />
+      <label class="ts-quiet-toggle" title="Quiet mode — replies in text, no audio">
+        <input type="checkbox" id="ts-quiet-toggle" />
+        <span>Quiet</span>
+      </label>
+      <button type="submit">SEND</button>
+    </form>
+  </div>
+
   <!-- Loading screen -->
   <div id="loading-screen">
     <div class="loader-content">
@@ -920,6 +1021,7 @@
     </div>
   </div>
 
+  <script type="module" src="/src/investor/boot.js"></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

@@ -14,6 +14,8 @@
  * the chip and the dialog are removed outright.
  */
 
+import { isInvestorProduct } from './investor/config.js';
+
 /** Chip label — pure, exported for tests. */
 export function keySetupChipLabel(status) {
   const missing = Math.max(0, (status?.total || 0) - (status?.setCount || 0));
@@ -142,10 +144,21 @@ function buildRow(documentRef, key) {
  * Wire the chip + dialog. Fire-and-forget from main.js; resolves to null when
  * the surface has no business existing (prod build, LAN visitor, no markup).
  */
-export async function initKeySetup({ documentRef = globalThis.document, fetchImpl } = {}) {
+export async function initKeySetup({
+  documentRef = globalThis.document,
+  fetchImpl,
+  investor = isInvestorProduct(),
+} = {}) {
   const chip = documentRef?.getElementById?.('key-setup-chip');
   const root = documentRef?.getElementById?.('key-setup');
   if (!chip || !root || root.dataset.initialized === 'true') return null;
+  if (investor) {
+    // TerraSignal is "one world, one AI, almost no menus" — a GEV provider
+    // dashboard has no place in its chrome. Keys come from .env on this path.
+    chip.remove();
+    root.remove();
+    return null;
+  }
   root.dataset.initialized = 'true';
   const doFetch = fetchImpl || globalThis.fetch?.bind(globalThis);
 
