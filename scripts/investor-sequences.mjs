@@ -140,7 +140,14 @@ async function main() {
     }
     return null;
   };
+  // The parser directly: the typed bar routes through the assistant when a
+  // key is present, and a choreography check must not ride on a model's
+  // timing or open a paid session per phrase (smoke:voice covers that path).
   const sendPhrase = (text) => page.evaluate((phrase) => {
+    if (window.__terraSignal?.handleIntent) {
+      window.__terraSignal.handleIntent(phrase);
+      return 'handleIntent';
+    }
     const input = document.getElementById('ts-demo-input');
     const form = document.getElementById('ts-demo-form');
     if (input && form) {
@@ -148,8 +155,7 @@ async function main() {
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       return 'typed-bar';
     }
-    window.__terraSignal?.handleIntent?.(phrase);
-    return 'handleIntent';
+    return 'NONE';
   }, text).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
   const audioState = () => page.evaluate(() => {
     const audio = window.__terraSignal?.audio;
@@ -166,8 +172,11 @@ async function main() {
       focusedId: session?.focused?.id ?? null,
       topPickId: session?.conversation?.topPickId ?? null,
       typedBarVisible: document.body.classList.contains('ts-typing'),
-      navButtonsShown: [...document.querySelectorAll('#ts-bottom-nav > button[data-ts-nav]')]
+      // The Type button is product furniture beside the orb; the demo's
+      // WORLD / DRIVE / SAVED buttons are what must stay hidden.
+      navButtonsShown: [...document.querySelectorAll('#ts-bottom-nav > button[data-ts-nav]:not(#ts-type-button)')]
         .filter((b) => getComputedStyle(b).display !== 'none').length,
+      typeButtonShown: (() => { const b = document.getElementById('ts-type-button'); return Boolean(b && getComputedStyle(b).display !== 'none'); })(),
       demoRailShown: (() => { const rail = document.getElementById('ts-demo-script'); return Boolean(rail && !rail.hidden && getComputedStyle(rail).display !== 'none'); })(),
       brandFlyoutHidden: (() => { const f = document.querySelector('.ts-brand-flyout'); return f ? Number(getComputedStyle(f).opacity) === 0 : null; })(),
       product: document.body.classList.contains('ts-product'),
@@ -315,6 +324,7 @@ async function main() {
     .every((name) => played.has(name));
   const framesOk = Object.values(stats).every((stat) => stat && stat.p95 <= budget) && Object.keys(stats).length === 3;
   const furnitureOk = Boolean(furniture && furniture.product && furniture.navButtonsShown === 0
+    && furniture.typeButtonShown === true
     && !furniture.demoRailShown && !furniture.typedBarVisible && furniture.brandFlyoutHidden === true);
   const errorsOk = errors.length === 0;
   const pass = ranOk && fmOrderOk && fmTimingOk && briefAfterFlightOk && lcOrderOk && cardOk
@@ -338,7 +348,7 @@ async function main() {
     line(cardOk, 'card assembled', card ? `${card.revealed.length}/${card.lines} lines · side ${card.side} · sheet ${card.sheet} · at ${card.left},${card.top}` : 'no card'),
     line(saveOrderOk && saveTimingOk, 'SAVE', `${saveIds.join(' → ') || 'no log'} · tone at ${saveTone ? Math.round(saveTone.firedMs) : '?'} ms (design 300)`),
     line(soundsOk, 'sound palette', `${checks.audio?.plays ?? 0} plays: ${[...played].join(', ') || 'none'}`),
-    line(furnitureOk, 'furniture', furniture ? `product ${furniture.product} · nav buttons ${furniture.navButtonsShown} · rail ${furniture.demoRailShown} · typed bar ${furniture.typedBarVisible} · legend hidden ${furniture.brandFlyoutHidden}` : 'no data'),
+    line(furnitureOk, 'furniture', furniture ? `product ${furniture.product} · nav buttons ${furniture.navButtonsShown} · type button ${furniture.typeButtonShown} · rail ${furniture.demoRailShown} · typed bar ${furniture.typedBarVisible} · legend hidden ${furniture.brandFlyoutHidden}` : 'no data'),
     line(framesOk, 'frame time p95', Object.entries(stats).map(([k, s]) => `${k} ${s ? `${s.p95}ms` : 'no data'}`).join(' · ')
       + ` (budget ${budget.toFixed(1)}ms — viewer capped at ${targetFrameRate} fps${CAPTURE ? ', screencast on' : ''})`),
     line(errorsOk, 'console errors', String(errors.length)),
