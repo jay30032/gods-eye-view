@@ -251,6 +251,55 @@ async function main() {
       }
     }
 
+    // ---- 2b. five investing questions, spoken -------------------------------
+    // The house in focus is the gold pick after the hunt. Each question must
+    // come back with the exact figure the calculators produce for it — read
+    // straight off session.facts(), which is what the tool returns.
+    const questions = [
+      { say: 'what are the rental numbers', label: 'rental numbers', expect: (f) => [f.strategies.rental.cashFlowMonthly] },
+      { say: "what's the cap rate", label: 'cap rate', expect: (f) => [f.strategies.rental.capRatePct] },
+      { say: 'how much cash is left in if I refinance', label: 'cash left in on a BRRRR', expect: (f) => [f.strategies.brrrr.cashLeftIn === 0 ? 'zero|\\$0\\b|0 left|nothing left|no cash left' : f.strategies.brrrr.cashLeftIn, f.strategies.brrrr.cashOut], any: true },
+      { say: "what's the maximum allowable offer", label: 'MAO', expect: (f) => [f.strategies.wholesale.mao] },
+      { say: 'what if rehab is sixty', label: 'what if rehab is sixty', expect: (f) => [f.strategies.flip.profit], after: true },
+    ];
+    const spokenAnswers = [];
+    if (haveWav) {
+      for (const [index, q] of questions.entries()) {
+        const wav = join(SHOT_DIR, `voice-q${index + 1}.wav`);
+        if (!existsSync(wav)) synthesizePrompt(wav, q.say);
+        if (!existsSync(wav)) { check(false, `could not synthesize "${q.say}"`); continue; }
+        await page.waitForFunction(() => !window.__gevVoiceCommands.responseActive && !window.__terraSignal.terra.speaking, null, { timeout: 25_000 }).catch(() => {});
+        await sleep(400);
+        // Count the substantive replies only, the same way the wait below does,
+        // or a bridge before the question makes the wait count from the wrong line.
+        const before = await page.evaluate(() => window.__terraSignal.terra.transcript
+          .filter((l) => l.role === 'assistant' && !/^(on it|one second)\.?$/i.test(l.text.trim())).length);
+        await page.evaluate((b64) => window.__voiceProbe.say(b64), readFileSync(wav).toString('base64'));
+        record(`asked "${q.say}"`);
+        const answer = await page.waitForFunction((before) => {
+          const t = window.__terraSignal.terra;
+          const replies = t.transcript.filter((l) => l.role === 'assistant' && !/^(on it|one second)\.?$/i.test(l.text.trim()));
+          if (replies.length <= before) return false;
+          if (window.__gevVoiceCommands.responseActive || t.speaking) return false;
+          return replies.at(-1).text;
+        }, before, { timeout: 40_000 }).then((h) => h.jsonValue()).catch(() => null);
+        const facts = await page.evaluate(() => window.__terraSignal.facts());
+        const expected = q.expect(facts);
+        const normalize = (v) => String(v).replace(/[$,]/g, '').toLowerCase();
+        const reply = normalize(answer || '');
+        const hits = expected.map((e) => (typeof e === 'string' && /[|\\]/.test(e)
+          ? new RegExp(e, 'i').test(answer || '')
+          : reply.includes(normalize(e))));
+        const ok = Boolean(answer) && (q.any ? hits.some(Boolean) : hits.every(Boolean));
+        spokenAnswers.push({ question: q.say, answer, expected });
+        check(ok, `${q.label}: reply carries ${JSON.stringify(expected)} — "${answer || 'NO REPLY'}"`);
+        if (q.after) {
+          const intent = await page.evaluate(() => window.__terraSignal.lastIntent?.intent);
+          check(intent === 'what_if', `the what-if ran through the parser (${intent})`);
+        }
+      }
+    }
+
     // ---- 3. pause, responsiveness, errors ---------------------------------
     await page.click('#gev-voice-button');
     await sleep(300);
@@ -295,6 +344,8 @@ async function main() {
     }
     lines.push(`# metrics ${JSON.stringify(dump.metrics)}`);
     lines.push(`# text-event → audio: ${firstAudioMs} ms`);
+    lines.push('# spoken questions');
+    for (const row of spokenAnswers) lines.push(`  Q: ${row.question}\n  A: ${row.answer}\n  expected: ${JSON.stringify(row.expected)}`);
     lines.push(`# events ${JSON.stringify(dump.events.map((e) => ({ type: e.type, speak: e.speak, reason: e.reason, sent: e.sent })))}`);
     lines.push(`# interruptions ${JSON.stringify(dump.interruptions)}`);
     lines.push(`# last snapshot ${JSON.stringify(dump.snapshot)}`);

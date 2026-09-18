@@ -97,6 +97,7 @@ test('the session keeps only investor tools and carries transcription', () => {
   assert.equal(config.model, 'gpt-realtime-2');
   assert.equal(config.audio.input.transcription.model, 'gpt-4o-mini-transcribe');
   assert.deepEqual(config.audio.input.turn_detection, { ...ASSISTANT_TURN_DETECTION });
-  assert.equal(ASSISTANT_TOOL_NAMES.length, 17);
-  assert.equal(new Set(ASSISTANT_TOOL_NAMES).size, 17);
+  assert.equal(ASSISTANT_TOOL_NAMES.length, 21);
+  assert.equal(new Set(ASSISTANT_TOOL_NAMES).size, 21);
+  for (const name of ['property_facts', 'what_if', 'rank_shortlist', 'compare_properties']) assert.ok(ASSISTANT_TOOL_NAMES.includes(name), name);
 });

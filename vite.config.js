@@ -6640,6 +6640,60 @@ const GEV_REALTIME_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    name: 'property_facts',
+    description: 'TerraSignal Investor: every number about the focused (or named) mock house — all four plays with every line item (purchase, rehab and contingency, ARV, rent, closing, points, interest, carrying cost, hold, all-in, profit, cash needed, cash-on-cash, annualized, margin, MAO; rental gross rent, vacancy, management, maintenance, capex, taxes, insurance, NOI, cap rate, yield on cost, down payment, loan, payment, cash flow, cash invested, DSCR; BRRRR refinance amount, refi closing, cash left in / cash out, post-refi cash flow, DSCR; wholesale MAO, spread, fee, buyer discount), verdicts, the assumptions in use, signals with filing and auction dates, county, lot acreage, owner equity, entry vs value. Call it for ANY question involving a number, ratio, rate or date. Figures are exact.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyId: { type: 'string', description: 'Omit for the house in focus.' },
+        query: { type: 'string', description: 'An address or street name to look the house up by, when the investor names one.' },
+        strategy: { type: 'string', enum: ['flip', 'rental', 'brrrr', 'wholesale'], description: 'Optional: return only this play\'s line items.' },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'what_if',
+    description: 'TerraSignal Investor: change one number on the focused house and re-underwrite — "what if rent is 3000", "what if I pay 200", "rehab is twenty thousand higher", "rate 6.5", "hold 9 months". Pass the investor\'s words; the same parser as the typed bar applies the change, the card updates, and the result carries the exact figures after the change.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        text: { type: 'string', description: 'The what-if in the investor\'s own words.' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'rank_shortlist',
+    description: 'TerraSignal Investor: why each house ranks where it does — the shortlist (or the whole board) in order with each house\'s score, the three parts it is made of (best play, signal strength, owner equity) and the drivers.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        all: { type: 'boolean', description: 'Rank the whole board rather than the current shortlist.' },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'compare_properties',
+    description: 'TerraSignal Investor: two houses side by side on one play with every line item and the differences. "Compare with the last one" compares the focused house with the one focused before it; or name two addresses.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        propertyA: { type: 'string', description: 'Id or address of the first house. Omit for the house in focus.' },
+        propertyB: { type: 'string', description: 'Id or address of the second house. Omit with withPrevious for the house focused before.' },
+        withPrevious: { type: 'boolean', description: 'Compare the focused house with the previously focused one.' },
+        strategy: { type: 'string', enum: ['flip', 'rental', 'brrrr', 'wholesale'] },
+      },
+    },
+  },
 ];
 
 /**

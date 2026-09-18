@@ -1,4 +1,4 @@
-import { normalizeStrategy } from './deal/index.js';
+import { bestStrategyFor, normalizeStrategy } from './deal/index.js';
 import { whyThisMatters } from './focus.js';
 import { isPropertySaved } from './saved.js';
 import { ASSISTANT_TOOL_NAMES } from './terra/identity.js';
@@ -173,6 +173,44 @@ export function runInvestorVoiceTool(name, rawArgs = {}, context = {}) {
 
   if (name === 'show_saved_properties') {
     return session.showSaved();
+  }
+
+  if (name === 'property_facts') {
+    const property = args.query ? session.search({ query: args.query, limit: 1 })[0]?.property : resolveProperty(session, args);
+    if (!property) return { ok: false, action: name, error: 'No property in focus — say "show me the best one" or name a house.' };
+    const facts = session.facts(property.id);
+    const strategy = normalizeStrategy(args.strategy);
+    if (strategy && facts?.strategies) {
+      return { ok: true, action: name, ...facts, strategies: { [strategy]: facts.strategies[strategy] }, verdicts: { [strategy]: facts.verdicts[strategy] } };
+    }
+    return { ok: true, action: name, ...facts };
+  }
+
+  if (name === 'what_if') {
+    const text = String(args.text || '').trim();
+    if (!text) return { ok: false, action: name, error: 'what_if needs the words' };
+    const result = session.handleIntent(text);
+    const property = session.focused;
+    const strategy = result?.strategy || session.conversation.lastStrategy || (property ? bestStrategyFor(property) : null);
+    const facts = property ? session.facts(property.id) : null;
+    return {
+      ...result,
+      action: name,
+      strategy,
+      facts: facts && strategy ? facts.strategies[strategy] : null,
+      overridesInUse: facts?.overridesInUse || null,
+    };
+  }
+
+  if (name === 'rank_shortlist') {
+    return { ok: true, action: name, ...session.rankFacts({ all: Boolean(args.all) }) };
+  }
+
+  if (name === 'compare_properties') {
+    const result = session.compareFacts({
+      a: args.propertyA, b: args.propertyB, withPrevious: Boolean(args.withPrevious), strategy: args.strategy,
+    });
+    return result?.ok === false ? { ...result, action: name } : { ok: true, action: name, ...result };
   }
 
   if (name === 'start_drive_demo') {

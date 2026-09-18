@@ -98,6 +98,7 @@ import {
 } from './ui/driveChrome.js';
 import { hideSavedSheet, renderSavedSheet } from './ui/savedSheet.js';
 import { createTerra } from './terra/presence.js';
+import { compareFacts, propertyFacts, rankFacts } from './terra/facts.js';
 import { ASSISTANT_NAME } from './terra/identity.js';
 import { demoNow } from './clock.js';
 
@@ -158,6 +159,8 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
   const scene = sceneMode === 'six' ? buildSixHouseScene(properties) : null;
   const conversation = createConversationState();
   let focused = null;
+  /** The house focused before this one: what "compare with the last one" means. */
+  let previousFocusedId = null;
   let lastAnalysis = null;
   let lastAnalysisId = null;
   let hunt = null;
@@ -529,7 +532,36 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     /** What the card is doing, for the headed check. */
     get card() { return focusCardState(); },
     get focused() { return focused; },
+    get previousFocusedId() { return previousFocusedId; },
     get lastAnalysis() { return lastAnalysis; },
+    /**
+     * Every number about a house, under the conversation's what-ifs — the
+     * assistant's answer to any investing question.
+     */
+    facts(id = null) {
+      const property = id ? this.getById(id) : focused;
+      return property ? propertyFacts(property, { overrides: overridesFor(conversation) }) : null;
+    },
+    /** Why each house ranks where it does: the shortlist, or the whole board. */
+    rankFacts({ all = false } = {}) {
+      const ids = !all && conversation.candidateIds?.length ? conversation.candidateIds : null;
+      const rows = rankFacts(properties, ids);
+      return { scope: ids ? 'shortlist' : 'board', count: rows.length, rows };
+    },
+    /** Two houses side by side on a play. */
+    compareFacts({ a = null, b = null, withPrevious = false, strategy = null } = {}) {
+      const lookup = (ref) => {
+        if (!ref) return null;
+        return this.getById(ref) || searchMockProperties(properties, { query: String(ref), limit: 1 })[0]?.property || null;
+      };
+      const left = lookup(a) || focused;
+      const right = lookup(b) || (withPrevious || !b ? (previousFocusedId ? this.getById(previousFocusedId) : null) : null);
+      if (!left) return { ok: false, error: 'No house in focus to compare from.' };
+      if (!right) return { ok: false, error: 'Nothing to compare with yet — focus a second house, or name one.' };
+      return compareFacts(left, right, normalizeStrategy(strategy) || conversation.lastStrategy || null, {
+        overrides: overridesFor(conversation),
+      });
+    },
     getById(id) {
       return provider.getById(id) || properties.find((row) => row.id === id) || null;
     },
@@ -546,6 +578,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const property = this.getById(id);
       if (!property) return { ok: false, action: 'focus_property', error: 'Unknown mock property' };
       const previous = focused;
+      if (previous && previous.id !== property.id) previousFocusedId = previous.id;
       focused = property;
       conversation.focusedId = property.id;
       visuals.setFocused(property.id);

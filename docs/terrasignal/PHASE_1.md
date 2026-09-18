@@ -1329,6 +1329,30 @@ the routing, the session update, the reply-event classes — and `smoke:six`
 opens the bar from the icon, turns Quiet on, sends "what's the best one", and
 asserts a text reply appears and nothing was ever heard.
 
+### Every investing question
+
+The snapshot carries one headline per house, which is enough to brief and
+not enough to answer "what are the rental numbers". Four tools carry the
+rest, all pure and unit-tested in `terra/facts.js`:
+
+| tool | returns |
+|---|---|
+| `property_facts` | all four plays with every line item in plain labels, verdicts, the assumptions in use, signals with filing and auction dates, county, lot acreage, owner equity, entry against value — under the conversation's what-ifs |
+| `what_if` | the investor's words through the same parser as the typed bar, then the changed play's line items |
+| `rank_shortlist` | each house's score, the three parts it is made of and its drivers |
+| `compare_properties` | two houses on one play, line by line, with the differences; "the last one" is the house focused before |
+
+Figures are exactly what the calculators produce: cents on money, ratios as
+percentages to two places, DSCR to two places as it is quoted. The
+instructions make any question with a number, a rate, a date or a "what if"
+a tool call first, forbid saying a number is unavailable when
+`property_facts` has it, and fix the rental answer's order: cash flow,
+cash-on-cash, cap rate, DSCR. `questionRouter.js` writes that contract down
+as a table of forty-one investor questions → tool and fields, and its test
+checks every named field exists on the fixture house. `smoke:voice` asks
+five of them out loud — rental numbers, cap rate, cash left in, MAO, "what
+if rehab is sixty" — and asserts each reply carries the exact figure.
+
 ### Situational awareness
 
 Before every assistant turn the app puts **one system item** in the

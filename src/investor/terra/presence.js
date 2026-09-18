@@ -129,6 +129,8 @@ export function createTerra({
   let muted = false;
   /** True between the first and last audio frame of a response. */
   let audioPlaying = false;
+  /** When the speaker was last actually loud, for the case the transport never says "stopped". */
+  let lastLoudAt = -Infinity;
   let controllerRef = controller;
   /** The event a queued brief is about, consumed by the snapshot that precedes it. */
   let briefEvent = null;
@@ -149,6 +151,26 @@ export function createTerra({
     const c = ctl();
     return Boolean(c && c.isActive?.() && c.dc?.readyState === 'open');
   };
+
+  /**
+   * Is the assistant audible right now?
+   *
+   * `audioPlaying` is set by `output_audio_buffer.started` and cleared by
+   * `.stopped` / `.cleared` — but the transport does not always send
+   * `.stopped`, and a flag that never clears would treat every later user
+   * turn as an interruption and hold a probe forever. So while the flag is
+   * up the speaker is measured: loud keeps it; a second of quiet clears it.
+   */
+  function speaking() {
+    if (!audioPlaying) return false;
+    const level = ctl()?.assistantAudioLevel?.();
+    if (level === null || level === undefined) return true;
+    const t = now();
+    if (level > 0.04) { lastLoudAt = t; return true; }
+    if (t - lastLoudAt < 1000) return true;
+    audioPlaying = false;
+    return false;
+  }
 
   function log(role, text, extra = {}) {
     const entry = { role, text: String(text || ''), at: Math.round(now()), ...extra };
@@ -214,7 +236,7 @@ export function createTerra({
     const c = ctl();
     // A live stream element is never "paused", so playing is tracked from the
     // transport's own audio-buffer events rather than read off the element.
-    const wasSpeaking = Boolean(c?.responseActive) || audioPlaying;
+    const wasSpeaking = Boolean(c?.responseActive) || speaking();
     if (!wasSpeaking) return null;
     const at = now();
     setMuted(true);
@@ -257,6 +279,7 @@ export function createTerra({
     }
     if (type === 'output_audio_buffer.started') {
       audioPlaying = true;
+      lastLoudAt = now();
       setMuted(false);
       metrics.observe(type, payload);
       return;
@@ -494,7 +517,7 @@ export function createTerra({
     get started() { return started; },
     get muted() { return muted; },
     get quiet() { return quiet; },
-    get speaking() { return audioPlaying; },
+    get speaking() { return speaking(); },
     get pendingText() { return pendingText; },
     setQuiet,
     get transcript() { return transcript.slice(); },

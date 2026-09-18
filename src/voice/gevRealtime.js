@@ -363,6 +363,26 @@ export class GevRealtimeController {
   get audioElement() { return this.audioEl; }
 
   /**
+   * How loud the assistant is right now, 0–1, off the output analyser the
+   * visualizer already runs. The transport's audio-buffer events say when
+   * playback started; they do not always say when it stopped, and a presence
+   * that waits on silence needs a signal that cannot get stuck.
+   */
+  assistantAudioLevel() {
+    const analyser = this.visualizerOutputAnalyser;
+    const data = this.visualizerOutputData;
+    if (!analyser || !data) return null;
+    try {
+      analyser.getByteFrequencyData(data);
+      let energy = 0;
+      for (let i = 0; i < data.length; i += 1) energy += data[i];
+      return Math.min(1, (energy / data.length) / 190);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Put one system item of state in front of the model, replacing the last.
    *
    * The same housekeeping as the viewport screenshot: the previous item is

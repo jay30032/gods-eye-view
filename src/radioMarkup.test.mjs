@@ -21,11 +21,11 @@ function realtimeTools() {
   return new Function(`return ${literal};`)();
 }
 
-test('Realtime schema exposes the authoritative 45-tool inventory', () => {
+test('Realtime schema exposes the authoritative 49-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 45);
+  assert.equal(tools.length, 49);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 45, 'tool names are unique');
+  assert.equal(new Set(names).size, 49, 'tool names are unique');
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('select_nearest_aircraft'));
@@ -36,6 +36,10 @@ test('Realtime schema exposes the authoritative 45-tool inventory', () => {
   assert.ok(names.includes('investor_command'));
   assert.ok(names.includes('compare_strategies'));
   assert.ok(names.includes('explain_strategy'));
+  assert.ok(names.includes('property_facts'));
+  assert.ok(names.includes('what_if'));
+  assert.ok(names.includes('rank_shortlist'));
+  assert.ok(names.includes('compare_properties'));
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
@@ -199,6 +203,10 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'show_saved_properties',
     'start_drive_demo',
     'stop_drive_demo',
+    'property_facts',
+    'what_if',
+    'rank_shortlist',
+    'compare_properties',
   ]);
   const unchanged = realtimeTools()
     .filter((tool) => !TOUCHED.has(tool.name) && !INVESTOR_ADDED.has(tool.name))
