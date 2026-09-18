@@ -218,22 +218,19 @@ export function buildSnapshot({
     ...(event ? { event } : {}),
     market: market ? { id: market.id, name: market.name } : null,
     clock: clock || null,
-    camera: {
-      view: viewWords(camera.shot),
-      flying: Boolean(camera.flying),
-      orbiting: Boolean(camera.orbiting),
-      heightM: Number.isFinite(camera.heightM) ? Math.round(camera.heightM) : null,
-      // Present only when the view moved since the last snapshot: the cue for
-      // the "announce every view change" clause, and its absence is the cue
-      // not to narrate a camera standing still.
-      ...(camera.change ? {
+    // The camera is described ONLY when it just moved. A standing view,
+    // an `orbiting` flag, a height — every one of them was read back as a
+    // stock opener ("here at the house", "orbiting the target"). The change
+    // is the cue for the view clause; an empty object is the cue for none.
+    camera: camera.change
+      ? {
         change: {
           from: viewWords(camera.change.from),
           to: viewWords(camera.change.to),
           ...(camera.change.flying ? { flying: true } : {}),
         },
-      } : {}),
-    },
+      }
+      : {},
     drive: {
       running: Boolean(drive.running),
       paused: Boolean(drive.paused),

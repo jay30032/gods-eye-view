@@ -44,9 +44,9 @@ test('server VAD with barge-in, and a silence window under the first-word target
 
 test('the style rules are all present', () => {
   const text = buildAssistantInstructions();
-  for (const rule of ['One breath', 'Lead with the money and the deadline', 'name the play in plain words',
+  for (const rule of ['One breath', 'lead with the money and the deadline', 'name the play in plain words',
     'next step as a short question', '"sure"', '"great"', 'Do not repeat what is already on screen',
-    'opens with a short clause', 'repeat exactly', 'ACT FIRST, BRIDGE THE PAUSE', 'never bridge twice',
+    'open with a short clause', 'and nowhere else', 'ACT FIRST, BRIDGE THE PAUSE', 'never bridge twice',
     'camera.change', 'SOUND LIKE THIS', 'NEVER calls a tool and never bridges']) {
     assert.ok(text.includes(rule), rule);
   }
@@ -70,6 +70,15 @@ test('six example replies in an investor\'s voice, every number exact for the si
   assert.ok(text.includes('at most 25 words in total, and the closing question counts inside the 25'));
   assert.ok(text.includes('never hedge one'));
   assert.ok(text.includes('"signals" unless every one of them is a notice of sale'));
+  // Spoken rounding, the view clause only on a change, and the question asked.
+  assert.ok(text.includes('money to the dollar'));
+  assert.ok(text.includes('percentages to one decimal'));
+  assert.ok(text.includes('Cents and second decimals stay on the card'));
+  assert.ok(text.includes('all four figures, every time'));
+  assert.ok(text.includes('Without camera.change there is no view clause at all'));
+  assert.ok(text.includes('ANSWER THE QUESTION ASKED'));
+  assert.ok(text.includes('Do not restate the best play, whether it works, the price or the auction unless'));
+  assert.ok(text.includes('the figure asked for is the first thing said and the whole of the reply'));
   // Real figures from DEMO-SIX-001 and DEMO-SIX-004, so an example can never
   // teach the model a number the calculators would contradict.
   for (const figure of ['$100,493', '$55,747', '23.3%', '$76,909', '$59,531', '26 days', '45% under value', '$7 a month', '1.01']) {

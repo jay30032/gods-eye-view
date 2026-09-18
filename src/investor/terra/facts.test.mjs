@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMockPropertyProvider } from '../mock/provider.js';
 import { analyzePropertyDeal } from '../deal/index.js';
-import { compareFacts, pct, plainStrategy, propertyFacts, rankFacts } from './facts.js';
+import { compareFacts, pct, plainStrategy, propertyFacts, rankFacts, spokenFacts } from './facts.js';
 
 const rows = createMockPropertyProvider({ dataset: 'six' }).list();
 const house = rows.find((r) => r.id === 'DEMO-SIX-001');
@@ -101,4 +101,21 @@ test('two houses side by side on a strategy, with the differences', () => {
   assert.equal(compareFacts(house, other).strategy, 'flip');
   assert.equal(compareFacts(house, other, 'rental').a.cashFlowMonthly, 532.77);
   assert.equal(compareFacts(null, other), null);
+});
+
+test('the spoken form rounds money to the dollar and percentages to one decimal; the exact facts keep their cents', () => {
+  const facts = propertyFacts(house);
+  const said = spokenFacts(facts);
+  assert.equal(said.strategies.rental.cashFlowMonthly, 533);
+  assert.equal(facts.strategies.rental.cashFlowMonthly, 532.77);
+  assert.equal(said.strategies.brrrr.cashOut, 11933);
+  assert.equal(said.strategies.rental.capRatePct, 8.7);
+  assert.equal(said.strategies.rental.cashOnCashPct, 6.2);
+  assert.equal(said.strategies.rental.dscr, 1.45);
+  assert.equal(said.entry.underValuePct, 44.9);
+  assert.equal(said.parcel.acres, 0.3535);
+  assert.equal(said.signals[0].auction.daysUntil, 26);
+  assert.equal(said.strategies.wholesale.mao, 262800);
+  assert.equal(said.assumptions.mortgageRatePct, 7);
+  assert.equal(spokenFacts(null), null);
 });

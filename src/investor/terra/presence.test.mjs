@@ -100,7 +100,7 @@ test('attaching sets the persona token query and always-on, and every turn gets 
   assert.equal(controller.contextItems[0].prefix, SNAPSHOT_ITEM_PREFIX);
   const parsed = JSON.parse(controller.contextItems[0].text);
   assert.equal(parsed.assistant, ASSISTANT_NAME);
-  assert.equal(parsed.camera.view, 'over the market');
+  assert.equal('view' in parsed.camera, false);
   assert.equal(parsed.focused.address, '621 Third Ave');
   // A typed command refreshes before its response.create.
   terra.sendText('why');
@@ -219,7 +219,12 @@ test('the briefs and follow-ups never teach a banned term either', () => {
     ...Object.keys(EVENT_BRIEFS).map((type) => briefInstructions(type)),
     followupInstructions({ ok: true }),
     followupInstructions({ ok: false, error: 'nothing focused' }),
+    followupInstructions({ ok: true, action: 'property_facts', strategies: { rental: {} } }),
+    followupInstructions({ ok: true, action: 'what_if' }),
   ];
+  assert.match(followupInstructions({ ok: true, action: 'property_facts', strategies: { rental: {} } }), /cash flow per month, cash-on-cash, cap rate and DSCR/);
+  assert.match(followupInstructions({ ok: true, action: 'property_facts' }), /Answer the question that was asked/);
+  assert.doesNotMatch(followupInstructions({ ok: true, action: 'property_facts' }), /all four/);
   for (const text of texts) assert.deepEqual(bannedTermsIn(text), [], text);
 });
 

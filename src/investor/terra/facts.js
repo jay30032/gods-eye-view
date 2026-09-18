@@ -348,3 +348,27 @@ export function compareFacts(a, b, strategy = null, { overrides = {}, now = demo
     clock: now.toISOString().slice(0, 10),
   };
 }
+
+const PCT_KEY = /Pct$/;
+const RATIO_KEYS = new Set(['dscr']);
+const KEEP_EXACT = new Set(['acres', 'squareMeters', 'ageDays', 'daysUntil', 'confidencePct', 'composite', 'rank',
+  'beds', 'baths', 'sqft', 'yearBuilt', 'units', 'holdMonths', 'seasoningMonths', 'mortgageYears', 'flipHoldMonths',
+  'bestPlayWeightPct', 'signalWeightPct', 'equityWeightPct', 'otherPathsThatWork', 'otherPathsBonus', 'signalStrength', 'equityScore']);
+
+/**
+ * The facts as they are said: money to the dollar, percentages to one
+ * decimal, coverage to two. The calculators keep their cents and the card
+ * shows them; the model gets what an investor would say out loud, so it
+ * never has to round on its feet.
+ */
+export function spokenFacts(value, key = '') {
+  if (Array.isArray(value)) return value.map((item) => spokenFacts(item, key));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, spokenFacts(v, k)]));
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) return value;
+  if (KEEP_EXACT.has(key)) return value;
+  if (PCT_KEY.test(key)) return Math.round(value * 10) / 10;
+  if (RATIO_KEYS.has(key)) return Math.round(value * 100) / 100;
+  return Math.round(value);
+}

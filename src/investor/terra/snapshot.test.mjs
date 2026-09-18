@@ -65,9 +65,11 @@ test('the snapshot is compact JSON with the shortlist, the camera, the drive and
   assert.equal(snapshot.assistant, ASSISTANT_NAME);
   assert.equal(snapshot.event, 'descent_settled');
   assert.deepEqual(snapshot.market, { id: 'atlanta', name: 'Atlanta / Decatur' });
-  assert.equal(snapshot.camera.heightM, 900);
-  assert.equal(snapshot.camera.view, 'over the market');
+  assert.deepEqual(snapshot.camera, {});
+  assert.equal('view' in snapshot.camera, false);
   assert.equal('shot' in snapshot.camera, false);
+  const moved = buildSnapshot({ camera: { shot: 'HERO', change: { from: 'CRUISE', to: 'HERO' } } });
+  assert.deepEqual(moved.camera.change, { from: 'over the market', to: 'at the house' });
   assert.equal(snapshot.drive.alongM, 121);
   assert.equal(snapshot.drive.current.address, '1344 Oakview Rd');
   assert.equal(snapshot.shortlist.length, 2);

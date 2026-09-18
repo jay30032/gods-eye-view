@@ -255,12 +255,16 @@ async function main() {
     // The house in focus is the gold pick after the hunt. Each question must
     // come back with the exact figure the calculators produce for it — read
     // straight off session.facts(), which is what the tool returns.
+    // Spoken rounding: money to the dollar, percentages to one decimal,
+    // coverage to two — the tool carries cents and the card shows them.
+    const dollars = (v) => String(Math.round(Number(v)));
+    const onePlace = (v) => (Math.round(Number(v) * 10) / 10).toString();
     const questions = [
-      { say: 'what are the rental numbers', label: 'rental numbers', expect: (f) => [f.strategies.rental.cashFlowMonthly] },
-      { say: "what's the cap rate", label: 'cap rate', expect: (f) => [f.strategies.rental.capRatePct] },
-      { say: 'how much cash is left in if I refinance', label: 'cash left in on a BRRRR', expect: (f) => [f.strategies.brrrr.cashLeftIn === 0 ? 'zero|\\$0\\b|0 left|nothing left|no cash left' : f.strategies.brrrr.cashLeftIn, f.strategies.brrrr.cashOut], any: true },
-      { say: "what's the maximum allowable offer", label: 'MAO', expect: (f) => [f.strategies.wholesale.mao] },
-      { say: 'what if rehab is sixty', label: 'what if rehab is sixty', expect: (f) => [f.strategies.flip.profit], after: true },
+      { say: 'what are the rental numbers', label: 'rental numbers (all four, in order)', expect: (f) => [dollars(f.strategies.rental.cashFlowMonthly), onePlace(f.strategies.rental.cashOnCashPct), onePlace(f.strategies.rental.capRatePct), String(f.strategies.rental.dscr)], ordered: true },
+      { say: "what's the cap rate", label: 'cap rate', expect: (f) => [onePlace(f.strategies.rental.capRatePct)] },
+      { say: 'how much cash is left in if I refinance', label: 'cash left in on a BRRRR', expect: (f) => [f.strategies.brrrr.cashLeftIn === 0 ? 'zero|\\$0\\b|0 left|nothing left|no cash left' : dollars(f.strategies.brrrr.cashLeftIn), dollars(f.strategies.brrrr.cashOut)], any: true },
+      { say: "what's the maximum allowable offer", label: 'MAO', expect: (f) => [dollars(f.strategies.wholesale.mao)] },
+      { say: 'what if rehab is sixty', label: 'what if rehab is sixty', expect: (f) => [dollars(f.strategies.flip.profit)], after: true },
     ];
     const spokenAnswers = [];
     if (haveWav) {
@@ -290,9 +294,18 @@ async function main() {
         const hits = expected.map((e) => (typeof e === 'string' && /[|\\]/.test(e)
           ? new RegExp(e, 'i').test(answer || '')
           : reply.includes(normalize(e))));
-        const ok = Boolean(answer) && (q.any ? hits.some(Boolean) : hits.every(Boolean));
+        // In order, when the rule says so: cash flow, cash-on-cash, cap rate, DSCR.
+        const positions = expected.map((e) => reply.indexOf(normalize(e)));
+        const ordered = !q.ordered || positions.every((pos, i) => pos >= 0 && (i === 0 || pos > positions[i - 1]));
+        const ok = Boolean(answer) && (q.any ? hits.some(Boolean) : hits.every(Boolean)) && ordered;
         spokenAnswers.push({ question: q.say, answer, expected });
-        check(ok, `${q.label}: reply carries ${JSON.stringify(expected)} — "${answer || 'NO REPLY'}"`);
+        check(ok, `${q.label}: reply carries ${JSON.stringify(expected)}${q.ordered ? ' in order' : ''} — "${answer || 'NO REPLY'}"`);
+        // No cents spoken, and no stock view clause: the camera did not move
+        // between these questions, so nothing should open with where we are.
+        if (answer) {
+          check(!/\$\d[\d,]*\.\d/.test(answer), `${q.label}: no cents spoken`);
+          check(!/^(here|we'?re|we are|still|over the|down on|at the house)/i.test(answer.trim()), `${q.label}: no view clause when the view did not change`);
+        }
         if (q.after) {
           const intent = await page.evaluate(() => window.__terraSignal.lastIntent?.intent);
           check(intent === 'what_if', `the what-if ran through the parser (${intent})`);
