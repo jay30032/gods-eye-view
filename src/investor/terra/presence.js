@@ -26,6 +26,13 @@ import {
   SNAPSHOT_ITEM_PREFIX,
 } from './identity.js';
 import { createSpeakPolicy } from './speakPolicy.js';
+import {
+  classifyReplyEvent,
+  readQuietPref,
+  sessionUpdateFor,
+  stripLineFor,
+  writeQuietPref,
+} from './quietMode.js';
 import { buildSnapshot, snapshotText } from './snapshot.js';
 import { createTurnMetrics } from './turnMetrics.js';
 
@@ -98,6 +105,9 @@ export function createTerra({
   permissions = globalThis.navigator?.permissions || null,
   now = () => (globalThis.performance?.now?.() ?? Date.now()),
   parseIntent = null,
+  storage = globalThis.localStorage,
+  /** Shows the muted state on the orb. */
+  onQuiet = null,
 } = {}) {
   const policy = createSpeakPolicy({ now });
   const metrics = createTurnMetrics({
@@ -125,8 +135,16 @@ export function createTerra({
   /** The shot the model last saw, so a snapshot can say the view changed. */
   let lastShot = null;
   let lastFocusedId = null;
+  /** Quiet mode: text replies, no audio. Remembered per browser. */
+  let quiet = readQuietPref(storage);
+  /** The reply being produced, streamed into the strip word by word. */
+  let replyText = '';
+  let replyResponseId = null;
+  /** Text typed before the session was up, sent the moment it is. */
+  let pendingText = null;
 
   const ctl = () => controllerRef || globalThis.__gevVoiceCommands || null;
+  try { onQuiet?.(quiet); } catch { /* indicator */ }
   const live = () => {
     const c = ctl();
     return Boolean(c && c.isActive?.() && c.dc?.readyState === 'open');
@@ -188,7 +206,7 @@ export function createTerra({
     const c = ctl();
     const el = c?.audioElement || null;
     muted = Boolean(next);
-    if (el) el.muted = muted;
+    if (el) el.muted = muted || quiet;
   }
 
   /** The user is talking over the assistant. */
@@ -212,7 +230,14 @@ export function createTerra({
     const type = payload?.type;
     if (type === 'session.created') {
       // The data channel is open and the model is on the line.
-      if (!paused) strip?.(`${ASSISTANT_NAME} is listening.`);
+      if (quiet) applyQuiet();
+      if (!paused) strip?.(`${ASSISTANT_NAME} is listening${quiet ? ' — quiet mode, replies in text' : ''}.`);
+      if (pendingText) {
+        const text = pendingText;
+        pendingText = null;
+        sendText(text);
+        return;
+      }
       // Joining a settled market view is the same moment as the descent
       // settling: brief the board once, then wait to be spoken to.
       const state = gather() || {};
@@ -227,10 +252,6 @@ export function createTerra({
       return;
     }
     if (type === 'input_audio_buffer.speech_stopped' || type === 'response.created') {
-      metrics.observe(type, payload);
-      return;
-    }
-    if (type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') {
       metrics.observe(type, payload);
       return;
     }
@@ -250,9 +271,26 @@ export function createTerra({
       if (text) log('user', text, { itemId: payload.item_id || null });
       return;
     }
-    if (type === 'response.output_audio_transcript.done' || type === 'response.audio_transcript.done') {
-      const text = String(payload.transcript || '').trim();
-      if (text) log('assistant', text, { responseId: payload.response_id || null });
+    // The reply, as it is produced: the strip follows the words in step with
+    // the audio, or carries the whole answer when there is no audio.
+    const reply = classifyReplyEvent(type);
+    if (reply) {
+      const responseId = payload.response_id || null;
+      if (reply.kind === 'delta') {
+        if (responseId !== replyResponseId) { replyText = ''; replyResponseId = responseId; }
+        replyText += String(payload.delta || '');
+        strip?.(stripLineFor(replyText));
+        // Only the audio marker counts for latency; text deltas are the reply itself.
+        if (reply.modality === 'audio') metrics.observe(type, payload);
+        return;
+      }
+      const text = String(payload.transcript ?? payload.text ?? replyText).trim();
+      replyText = '';
+      replyResponseId = null;
+      if (text) {
+        strip?.(stripLineFor(text));
+        log('assistant', text, { responseId, modality: reply.modality });
+      }
       return;
     }
     if (type === 'response.function_call_arguments.done') {
@@ -410,13 +448,42 @@ export function createTerra({
     return record;
   }
 
-  /** Text through the same session the voice uses. */
+  /**
+   * Text through the same session the voice uses: same state item, same
+   * tools, same wording. Typed before the session is up, it opens the session
+   * and goes the moment the model is on the line.
+   */
   function sendText(text) {
     const c = ctl();
-    if (!c || !live()) return false;
-    log('user', text, { typed: true });
-    c.sendTextCommand(text);
+    const clean = String(text || '').trim();
+    if (!clean) return false;
+    if (!c || !live()) {
+      if (available === false) return false;
+      pendingText = clean;
+      void start();
+      return true;
+    }
+    log('user', clean, { typed: true });
+    c.sendTextCommand(clean);
     return true;
+  }
+
+  /** Switch the live session's reply modality and mute the speaker. */
+  function applyQuiet() {
+    const c = ctl();
+    if (c && live()) c.sendRealtimeEvent(sessionUpdateFor(quiet), 'client.session_update.quiet');
+    if (c?.audioElement) c.audioElement.muted = quiet || muted;
+    try { onQuiet?.(quiet); } catch { /* indicator */ }
+  }
+
+  /**
+   * Quiet mode on or off. Persists per browser; applies to the live session
+   * at once and to the next one when it opens.
+   */
+  function setQuiet(next) {
+    quiet = writeQuietPref(Boolean(next), storage);
+    applyQuiet();
+    return quiet;
   }
 
   return {
@@ -426,7 +493,10 @@ export function createTerra({
     get paused() { return paused; },
     get started() { return started; },
     get muted() { return muted; },
+    get quiet() { return quiet; },
     get speaking() { return audioPlaying; },
+    get pendingText() { return pendingText; },
+    setQuiet,
     get transcript() { return transcript.slice(); },
     get toolCalls() { return toolCalls.slice(); },
     get interruptions() { return interruptions.slice(); },

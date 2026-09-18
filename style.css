@@ -10669,12 +10669,159 @@ body.ts-product #ts-bottom-nav {
   border: 0;
 }
 
-body.ts-product #ts-bottom-nav > button[data-ts-nav] {
+body.ts-product #ts-bottom-nav > button[data-ts-nav]:not(#ts-type-button) {
   display: none;
 }
 
 body.ts-product #ts-ai-slot {
   margin: 0;
+}
+
+/* ---- the Type button: a keyboard beside the mic ----------------------- */
+#ts-bottom-nav #ts-type-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  min-width: 2.9rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  background: rgba(10, 8, 4, 0.72);
+  color: #f4efe4;
+  transition: box-shadow 200ms ease, border-color 200ms ease, transform var(--ts-spring-ms) var(--ts-spring);
+}
+
+#ts-type-button svg {
+  width: 1.35rem;
+  height: 1.35rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+#ts-type-button:hover,
+#ts-type-button:focus-visible,
+#ts-type-button[aria-pressed='true'] {
+  border-color: rgba(212, 160, 23, 0.8);
+  box-shadow: 0 0 0 4px rgba(212, 160, 23, 0.12), 0 0 16px rgba(212, 160, 23, 0.22);
+  outline: none;
+}
+
+#ts-type-button[aria-pressed='true'] {
+  background: rgba(212, 160, 23, 0.18);
+}
+
+/* "Type", on hover or a long press. */
+#ts-type-button .ts-type-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.45rem);
+  transform: translate(-50%, 4px);
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(10, 8, 4, 0.88);
+  border: 1px solid rgba(212, 160, 23, 0.35);
+  color: #f4efe4;
+  font-family: Inter, sans-serif;
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 200ms var(--ts-spring);
+}
+
+#ts-type-button:hover .ts-type-label,
+#ts-type-button:focus-visible .ts-type-label,
+#ts-type-button.is-pressed .ts-type-label {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* Thumb-sized on a phone. */
+@media (max-width: 640px), (pointer: coarse) {
+  #ts-bottom-nav #ts-type-button {
+    width: 3.4rem;
+    height: 3.4rem;
+    min-width: 3.4rem;
+  }
+}
+
+/* ---- Quiet: replies in text, no audio ---------------------------------- */
+#ts-demo-form .ts-quiet-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 160, 23, 0.3);
+  color: rgba(244, 239, 228, 0.8);
+  font-family: Inter, sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  padding-inline: 0;
+  border-width: 0;
+  transition: opacity 140ms ease;
+}
+
+body.ts-typing #ts-demo-form .ts-quiet-toggle,
+#ts-demo-form:focus-within .ts-quiet-toggle,
+#ts-demo-form:hover .ts-quiet-toggle {
+  opacity: 1;
+  width: auto;
+  padding-inline: 0.55rem;
+  border-width: 1px;
+}
+
+#ts-demo-form .ts-quiet-toggle input {
+  accent-color: #e0b84a;
+  margin: 0;
+}
+
+#ts-demo-form .ts-quiet-toggle:has(input:checked) {
+  border-color: rgba(224, 184, 74, 0.85);
+  color: #f4efe4;
+  background: rgba(212, 160, 23, 0.16);
+}
+
+/* The orb, muted: the ring dims and a small QUIET mark sits under it. */
+#ts-ai-slot[data-ts-quiet='1'] {
+  --orb: rgba(160, 150, 130, 0.55);
+}
+
+#ts-ai-slot[data-ts-quiet='1'] #ts-ai-button,
+#ts-ai-slot[data-ts-quiet='1'] #gev-voice-button {
+  filter: saturate(0.4) brightness(0.85);
+}
+
+#ts-ai-slot[data-ts-quiet='1']::after {
+  content: 'QUIET';
+  inset: auto auto -1.15rem 50%;
+  transform: translateX(-50%);
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+  background: rgba(10, 8, 4, 0.8);
+  color: rgba(244, 239, 228, 0.75);
+  font-family: Inter, sans-serif;
+  font-size: 0.5rem;
+  letter-spacing: 0.16em;
+  opacity: 1;
+  animation: none;
 }
 
 #ts-ai-slot {

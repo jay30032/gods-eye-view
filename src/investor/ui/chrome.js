@@ -88,6 +88,7 @@ export function openTypedBar({ focus = true } = {}) {
   if (focus) {
     try { input?.focus?.({ preventScroll: true }); } catch { input?.focus?.(); }
   }
+  document.getElementById('ts-type-button')?.setAttribute('aria-pressed', 'true');
   return true;
 }
 
@@ -95,7 +96,24 @@ export function closeTypedBar() {
   document.body.classList.remove('ts-typing');
   const input = document.getElementById('ts-demo-input');
   try { input?.blur?.(); } catch { /* fine */ }
+  document.getElementById('ts-type-button')?.setAttribute('aria-pressed', 'false');
   return false;
+}
+
+/** The Type button: open with focus, or close if already open. */
+export function toggleTypedBar() {
+  return isTypedBarOpen() ? closeTypedBar() : openTypedBar({ focus: true });
+}
+
+/** The Quiet toggle inside the typed bar, kept in step with the assistant. */
+export function setQuietToggle(on) {
+  const box = document.getElementById('ts-quiet-toggle');
+  if (box && box.checked !== Boolean(on)) box.checked = Boolean(on);
+  const slot = document.getElementById('ts-ai-slot');
+  if (slot) {
+    if (on) slot.dataset.tsQuiet = '1';
+    else delete slot.dataset.tsQuiet;
+  }
 }
 
 export function isTypedBarOpen() {
@@ -117,13 +135,38 @@ function bindTypedBar() {
     }
   });
   const input = document.getElementById('ts-demo-input');
-  input?.addEventListener('blur', () => {
+  input?.addEventListener('blur', (event) => {
     // Empty and abandoned: fold away. Half-typed stays, so a stray click on the
-    // map does not lose the sentence.
+    // map does not lose the sentence. Moving to the Quiet toggle or the Type
+    // button is not abandoning it.
+    const next = event.relatedTarget;
+    if (next && (next.closest?.('#ts-demo-form') || next.id === 'ts-type-button')) return;
     if (!String(input.value || '').trim() && !document.body.classList.contains('ts-demo')) {
       closeTypedBar();
     }
   });
+  /**
+   * The Type button. A tap opens the bar with focus in it; a second tap
+   * closes it. On a phone a long press shows the "Type" label the way hover
+   * does on a desktop.
+   */
+  const typeButton = document.getElementById('ts-type-button');
+  typeButton?.addEventListener('click', (event) => {
+    event.preventDefault();
+    toggleTypedBar();
+  });
+  let pressTimer = null;
+  typeButton?.addEventListener('pointerdown', () => {
+    globalThis.clearTimeout(pressTimer);
+    pressTimer = globalThis.setTimeout(() => typeButton.classList.add('is-pressed'), 350);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+    typeButton?.addEventListener(type, () => {
+      globalThis.clearTimeout(pressTimer);
+      globalThis.setTimeout(() => typeButton.classList.remove('is-pressed'), 900);
+    });
+  }
+  typeButton?.addEventListener('contextmenu', (event) => event.preventDefault());
   document.addEventListener('keydown', (event) => {
     if (event.defaultPrevented) return;
     const target = event.target;
@@ -213,11 +256,19 @@ function ensureInvestorShell(productName, tagline) {
       <div id="ts-ai-slot">
         <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="Hold Space to speak, or click the microphone">MIC</button>
       </div>
+      <button type="button" data-ts-nav="type" id="ts-type-button" aria-label="Type" aria-pressed="false" title="Type">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="6.5" width="19" height="11" rx="2" /><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M6 13.5h1M9.5 13.5h5M16.5 13.5h1" /></svg>
+        <span class="ts-type-label">Type</span>
+      </button>
       <button type="button" data-ts-nav="saved">SAVED</button>
     </nav>
     <form id="ts-demo-form" autocomplete="off">
       <label class="visually-hidden" for="ts-demo-input">Talk to TerraSignal</label>
       <input id="ts-demo-input" name="q" placeholder="Find me money" />
+      <label class="ts-quiet-toggle" title="Quiet mode — replies in text, no audio">
+        <input type="checkbox" id="ts-quiet-toggle" />
+        <span>Quiet</span>
+      </label>
       <button type="submit">SEND</button>
     </form>
   `;

@@ -22,7 +22,7 @@ export const INTENTS = Object.freeze([
   'camera_angle', 'drive_pause', 'drive_resume', 'drive_speed', 'drive_look',
   'look_closer', 'drive_best', 'drive_narration', 'how_recent', 'more_like_it',
   'xray', 'solid', 'show_lot', 'help', 'sound_on', 'sound_off', 'voice_on', 'voice_off',
-  'listen_on', 'listen_off',
+  'listen_on', 'listen_off', 'quiet_on', 'quiet_off',
   'unknown',
 ]);
 
@@ -579,6 +579,19 @@ export function parseCommand(text, options = {}) {
       return result('sound_off', {}, raw, normalized, 0.95);
     }
     if (/\b(on|unmute|enable|back)\b/.test(normalized)) return result('sound_on', {}, raw, normalized, 0.95);
+  }
+  /**
+   * Quiet mode: the assistant answers in text, no audio — for the places you
+   * cannot talk. "Quiet mode" alone turns it on; "quiet mode off", "speak
+   * again" or "voice back" turn it off. Matched before the drive's narration
+   * level, which owns the bare word "quiet".
+   */
+  if (/\b(quiet|silent|text[\s-]?only|text) mode\b/.test(normalized) || /\btext only\b/.test(normalized)) {
+    if (/\b(off|end|exit|leave|stop|disable)\b/.test(normalized)) return result('quiet_off', {}, raw, normalized, 0.95);
+    return result('quiet_on', {}, raw, normalized, 0.95);
+  }
+  if (/\b(speak again|voice back|talk again|unmute yourself|out of quiet)\b/.test(normalized)) {
+    return result('quiet_off', {}, raw, normalized, 0.9);
   }
   /**
    * The assistant's ear. "Stop listening" pauses the always-on mic; "listen"

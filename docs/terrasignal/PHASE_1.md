@@ -1307,6 +1307,28 @@ tool has run, and the follow-up instruction forbids a second bridge.
 `smoke:voice` checks headed that the turn's first audio belongs to the tool
 call's own response and lands before the tool result returns.
 
+### Typing, and quiet mode
+
+A keyboard button sits to the right of the mic — thumb-sized on a phone, a
+"Type" label on hover or long-press. It opens the typed bar with focus in it;
+Escape or a second tap closes it. Typed words go through the same session the
+voice does — same state item, same tools, same wording — and open the session
+if it is not up yet; with no key they go to the parser as before. The reply
+streams into the status strip as the model produces it, in step with the
+audio (`response.output_audio_transcript.delta`).
+
+**Quiet** is a toggle inside the typed bar and the command "quiet mode": the
+session is switched to `output_modalities: ['text']` with one
+`session.update`, the audio element is muted as a belt-and-braces, the reply
+comes back as `response.output_text.*` and is written to the strip, and the
+orb shows a muted state (`data-ts-quiet` on the slot). The choice is remembered
+in `localStorage` and applied to the next session on `session.created`.
+Sequences and the card still assemble at reading pace: the narrator's pacing
+never depended on a voice. `quietMode.js` holds the pure parts — persistence,
+the routing, the session update, the reply-event classes — and `smoke:six`
+opens the bar from the icon, turns Quiet on, sends "what's the best one", and
+asserts a text reply appears and nothing was ever heard.
+
 ### Situational awareness
 
 Before every assistant turn the app puts **one system item** in the

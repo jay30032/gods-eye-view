@@ -995,11 +995,19 @@
       <div id="ts-ai-slot">
         <button type="button" data-ts-nav="ai" id="ts-ai-button" aria-label="Hold Space to speak, or click the microphone">MIC</button>
       </div>
+      <button type="button" data-ts-nav="type" id="ts-type-button" aria-label="Type" aria-pressed="false" title="Type">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="6.5" width="19" height="11" rx="2" /><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M6 13.5h1M9.5 13.5h5M16.5 13.5h1" /></svg>
+        <span class="ts-type-label">Type</span>
+      </button>
       <button type="button" data-ts-nav="saved">SAVED</button>
     </nav>
     <form id="ts-demo-form" autocomplete="off">
       <label class="visually-hidden" for="ts-demo-input">Talk to TerraSignal</label>
       <input id="ts-demo-input" name="q" placeholder="Find me money" />
+      <label class="ts-quiet-toggle" title="Quiet mode — replies in text, no audio">
+        <input type="checkbox" id="ts-quiet-toggle" />
+        <span>Quiet</span>
+      </label>
       <button type="submit">SEND</button>
     </form>
   </div>

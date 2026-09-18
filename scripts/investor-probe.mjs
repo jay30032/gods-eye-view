@@ -180,6 +180,11 @@ const FRAME_CAP_TOLERANCE = 1.12;
  * @param {number|null} targetFrameRate frames per second the viewer is capped at
  * @returns {number} milliseconds
  */
+/** The assistant is still producing a reply (a tool call's follow-up may be next). */
+function window_busy(state) {
+  return Boolean(state?.speaking);
+}
+
 function frameBudgetFor(targetFrameRate) {
   const interval = Number.isFinite(targetFrameRate) && targetFrameRate > 0
     ? 1000 / targetFrameRate
@@ -328,8 +333,16 @@ async function main() {
     keyless = await startKeylessServer();
   }
 
-  const browser = await chromium.launch({ channel: 'chrome', headless: false });
+  // Fake media: the six-house check opens the assistant's session from the
+  // typed bar, and a real permission prompt would hang the run. Harmless for
+  // every other check, which never asks for a microphone.
+  const browser = await chromium.launch({
+    channel: 'chrome',
+    headless: false,
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
+  });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try { await context.grantPermissions(['microphone'], { origin: new URL(URL_ARG).origin }); } catch { /* keyless spawn */ }
   const page = await context.newPage();
 
   const tiles = new Map(TILE_HOSTS.map((h) => [h, { n: 0, bytes: 0, statuses: new Map() }]));
@@ -648,6 +661,10 @@ async function main() {
 
   /** Say something through the typed bar, the way a reviewer would. */
   const sendPhrase = (text) => page.evaluate((phrase) => {
+    if (window.__terraSignal?.handleIntent) {
+      window.__terraSignal.handleIntent(phrase);
+      return 'handleIntent';
+    }
     const input = document.getElementById('ts-demo-input');
     const form = document.getElementById('ts-demo-form');
     if (input && form) {
@@ -655,8 +672,7 @@ async function main() {
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       return 'typed-bar';
     }
-    window.__terraSignal?.handleIntent?.(phrase);
-    return 'handleIntent';
+    return 'NONE';
   }, text).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
 
   /**
@@ -720,13 +736,7 @@ async function main() {
     // "show me the best one" — the same words a reviewer says out loud.
     const heroStart = await pageNow();
     const sent = await page.evaluate(() => {
-      const input = document.getElementById('ts-demo-input');
-      const form = document.getElementById('ts-demo-form');
-      if (input && form) {
-        input.value = 'show me the best one';
-        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        return 'typed-bar';
-      }
+      // The parser directly — see sendPhrase.
       window.__terraSignal?.handleIntent?.('show me the best one');
       return 'handleIntent';
     }).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
@@ -817,6 +827,14 @@ async function main() {
 
     for (const angle of SIX_ANGLES) {
       const sent = await page.evaluate((text) => {
+        // Straight to the parser: the typed bar routes through the assistant
+        // when a key is present, and a scene check must not ride on a model's
+        // timing or open a paid session per phrase. The typed path has its
+        // own step below, and smoke:voice.
+        if (window.__terraSignal?.handleIntent) {
+          window.__terraSignal.handleIntent(text);
+          return 'handleIntent';
+        }
         const input = document.getElementById('ts-demo-input');
         const form = document.getElementById('ts-demo-form');
         if (input && form) {
@@ -824,8 +842,7 @@ async function main() {
           form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
           return 'typed-bar';
         }
-        window.__terraSignal?.handleIntent?.(text);
-        return 'handleIntent';
+        return 'NONE';
       }, angle.phrase).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
       record(`SIX "${angle.phrase}" via ${sent}`);
 
@@ -839,6 +856,83 @@ async function main() {
         + `, house at ${frame ? `${(frame.fx * 100).toFixed(0)}%, ${(frame.fy * 100).toFixed(0)}%` : 'OFF SCREEN'}`);
       await shot(angle.shot);
     }
+
+    /**
+     * Typing, and quiet mode.
+     *
+     * The keyboard button beside the mic opens the typed bar with focus in
+     * it; the Quiet toggle inside it makes the assistant answer in text only.
+     * With a key the words go through the real session and the reply is a
+     * text response — nothing must ever be heard; without one the parser
+     * answers and the caption is the reply. Either way a written reply must
+     * land in the strip.
+     */
+    const stripBefore = await page.evaluate(() => document.getElementById('ts-ai-prompt')?.textContent || '');
+    await page.click('#ts-type-button');
+    await new Promise((r) => setTimeout(r, 250));
+    const typedOpen = await page.evaluate(() => ({
+      open: document.body.classList.contains('ts-typing'),
+      focused: document.activeElement?.id === 'ts-demo-input',
+      pressed: document.getElementById('ts-type-button')?.getAttribute('aria-pressed'),
+      visible: (() => { const b = document.getElementById('ts-type-button'); const r = b?.getBoundingClientRect(); return Boolean(r && r.width >= 40 && r.height >= 40); })(),
+    }));
+    record(`CHECK typed bar via icon ${JSON.stringify(typedOpen)}`);
+    await page.click('#ts-quiet-toggle');
+    await new Promise((r) => setTimeout(r, 200));
+    const quietOn = await page.evaluate(() => ({
+      quiet: window.__terraSignal?.terra?.quiet ?? null,
+      stored: localStorage.getItem('terrasignal:quiet:v1'),
+      slot: document.getElementById('ts-ai-slot')?.dataset.tsQuiet ?? null,
+      available: window.__terraSignal?.terra?.available ?? null,
+    }));
+    record(`CHECK quiet on ${JSON.stringify(quietOn)}`);
+    const heardBefore = await page.evaluate(() => window.__terraSignal?.terra?.metrics?.heard ?? 0);
+    await page.fill('#ts-demo-input', "what's the best one");
+    await page.press('#ts-demo-input', 'Enter');
+    const replyDeadline = Date.now() + 30_000;
+    let typedReply = null;
+    while (Date.now() < replyDeadline) {
+      typedReply = await page.evaluate(({ before, heardBefore }) => {
+        const t = window.__terraSignal?.terra;
+        const strip = document.getElementById('ts-ai-prompt')?.textContent || '';
+        // The substantive reply, not the two-word bridge before the tool call.
+        const reply = t?.transcript?.filter((l) => l.role === 'assistant' && !/^(on it|one second)\.?$/i.test(l.text.trim())).at(-1) || null;
+        const viaAssistant = Boolean(t?.available);
+        return {
+          viaAssistant,
+          live: Boolean(t?.live),
+          strip,
+          stripChanged: strip !== before && !/is listening|quiet mode/.test(strip),
+          reply: reply ? { text: reply.text, modality: reply.modality || null } : null,
+          heard: (t?.metrics?.heard ?? 0) - heardBefore,
+          speaking: Boolean(t?.speaking),
+          audioMuted: (() => { const el = document.querySelector('audio[data-gev-realtime-audio]'); return el ? el.muted : null; })(),
+          lastIntent: window.__terraSignal?.lastIntent?.intent || null,
+          toolCalls: (t?.toolCalls || []).map((c) => c.intent || c.name),
+        };
+      }, { before: stripBefore, heardBefore }).catch(() => null);
+      const done = typedReply && (typedReply.viaAssistant
+        ? typedReply.reply && typedReply.reply.modality === 'text' && !window_busy(typedReply)
+        : typedReply.stripChanged);
+      if (done) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    checks.typed = { open: typedOpen, quiet: quietOn, reply: typedReply };
+    record(`CHECK typed reply ${JSON.stringify(typedReply)}`);
+    playLog.push(`Type → bar ${typedOpen.open ? 'open' : 'CLOSED'}, focus ${typedOpen.focused}`
+      + ` · Quiet ${quietOn.quiet} (stored ${quietOn.stored})`
+      + ` · reply ${typedReply?.reply ? `[${typedReply.reply.modality}] ${typedReply.reply.text.slice(0, 80)}` : (typedReply?.strip || 'NONE').slice(0, 80)}`
+      + ` · heard ${typedReply?.heard ?? '?'}`);
+    // Quiet off and the bar closed, so the run ends where it started.
+    await page.click('#ts-quiet-toggle');
+    await page.keyboard.press('Escape');
+    await new Promise((r) => setTimeout(r, 200));
+    checks.typedClosed = await page.evaluate(() => ({
+      open: document.body.classList.contains('ts-typing'),
+      quiet: window.__terraSignal?.terra?.quiet ?? null,
+    }));
+    record(`CHECK typed bar closed ${JSON.stringify(checks.typedClosed)}`);
+    await page.evaluate(() => window.__terraSignal?.terra?.stop?.()).catch(() => {});
   }
 
   if (CLEAR) {
@@ -907,11 +1001,8 @@ async function main() {
     // The gold house, and the building tint that is this world's answer.
     const heroStart = await pageNow();
     const sent = await page.evaluate(() => {
-      const input = document.getElementById('ts-demo-input');
-      const form = document.getElementById('ts-demo-form');
-      input.value = 'show me the best one';
-      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      return 'typed-bar';
+      window.__terraSignal?.handleIntent?.('show me the best one');
+      return 'handleIntent';
     }).catch(() => 'failed');
     playLog.push(`"show me the best one" → ${sent}`);
     await waitForShot('HERO', 30_000);
@@ -943,10 +1034,7 @@ async function main() {
     // And one lap of the drive, in a world with no canopy to clear.
     const driveStart = await pageNow();
     await page.evaluate(() => {
-      const input = document.getElementById('ts-demo-input');
-      const form = document.getElementById('ts-demo-form');
-      input.value = 'drive';
-      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      window.__terraSignal?.handleIntent?.('drive');
     }).catch(() => {});
     await new Promise((r) => setTimeout(r, 1_500));
     await page.evaluate(() => {
@@ -981,13 +1069,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1_500));
 
     const send = (text) => page.evaluate((phrase) => {
-      const input = document.getElementById('ts-demo-input');
-      const form = document.getElementById('ts-demo-form');
-      if (input && form) {
-        input.value = phrase;
-        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        return 'typed-bar';
-      }
+      // The parser directly — see sendPhrase.
       window.__terraSignal?.handleIntent?.(phrase);
       return 'handleIntent';
     }, text).catch((e) => `ERROR ${String(e.message).slice(0, 60)}`);
@@ -1368,14 +1450,8 @@ async function main() {
     // Find me money: REVEAL settles (halo appears), then HERO.
     const heroStart = await pageNow();
     await page.evaluate(() => {
-      const input = document.getElementById('ts-demo-input');
-      const form = document.getElementById('ts-demo-form');
-      if (input && form) {
-        input.value = 'Find me money';
-        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      } else {
-        window.__terraSignal?.handleIntent?.('Find me money');
-      }
+      // The parser directly — see sendPhrase.
+      window.__terraSignal?.handleIntent?.('Find me money');
     }).catch(() => {});
     playLog.push('"Find me money" → typed-bar');
 
@@ -1413,6 +1489,14 @@ async function main() {
     for (const phrase of PLAY_PHRASES.filter((p) => p !== 'Find me money')) {
       // Through the typed bar, the way a reviewer drives it.
       const sent = await page.evaluate((text) => {
+        // Straight to the parser: the typed bar routes through the assistant
+        // when a key is present, and a scene check must not ride on a model's
+        // timing or open a paid session per phrase. The typed path has its
+        // own step below, and smoke:voice.
+        if (window.__terraSignal?.handleIntent) {
+          window.__terraSignal.handleIntent(text);
+          return 'handleIntent';
+        }
         const input = document.getElementById('ts-demo-input');
         const form = document.getElementById('ts-demo-form');
         if (input && form) {
@@ -1420,8 +1504,7 @@ async function main() {
           form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
           return 'typed-bar';
         }
-        window.__terraSignal?.handleIntent?.(text);
-        return 'handleIntent';
+        return 'NONE';
       }, phrase).catch((e) => `ERROR ${e.message.slice(0, 60)}`);
       record(`PLAY "${phrase}" via ${sent}`);
       playLog.push(`"${phrase}" → ${sent}`);
@@ -1582,6 +1665,25 @@ async function main() {
   );
   const sixXrayFramesOk = !SIX || Boolean(sixXrayFrames && sixXrayFrames.p95 <= sixBudgetMs);
   const sixXrayOk = sixXrayTookOk && sixXrayBackOk && sixXrayFramesOk;
+
+  /**
+   * Typing and quiet mode: the icon opened the bar with focus, Quiet stuck and
+   * persisted, a written reply landed, and nothing was ever heard. Through the
+   * assistant the reply must be a text-modality response; through the parser
+   * (no key) the caption in the strip is the reply.
+   */
+  const typed = checks.typed || null;
+  const sixTypedOk = !SIX || Boolean(
+    typed?.open?.open && typed.open.focused && typed.open.visible && typed.open.pressed === 'true'
+    && typed.quiet?.quiet === true && typed.quiet.stored === '1' && typed.quiet.slot === '1'
+    && typed.reply
+    && (typed.reply.viaAssistant
+      ? typed.reply.reply?.modality === 'text' && typed.reply.reply.text.length > 0
+      : typed.reply.stripChanged)
+    && typed.reply.heard === 0 && typed.reply.speaking === false
+    && (typed.reply.audioMuted === null || typed.reply.audioMuted === true)
+    && checks.typedClosed?.open === false && checks.typedClosed?.quiet === false,
+  );
 
   /**
    * Sprites stand on their houses, at CRUISE and at HERO.
@@ -1772,6 +1874,7 @@ async function main() {
   const pass = paintOk && respondOk && errorsOk && renderOk && loopOk
     && framesOk && markersOk && heroOk
     && sixFramesOk && sixSceneOk && sixRimOk && sixGoldOk && sixAnglesOk && sixAngleChoiceOk && sixXrayOk
+    && sixTypedOk
     && alignOk
     && driveRanOk && driveFramesOk && driveCoverageOk && driveGoldOk && drivePropertyOk
     && driveLotViewOk && driveResumeOk
@@ -1829,6 +1932,11 @@ async function main() {
           ? ` · now ${Math.round(checks.angleChoice.pose.headingDeg)}°`
             + ` @ ${Math.round(checks.angleChoice.pose.rangeM)} m`
           : ''),
+      `  ${sixTypedOk ? 'PASS' : 'FAIL'}  type + quiet       `
+        + `bar ${typed?.open?.open ? 'open' : 'closed'}/focus ${typed?.open?.focused ?? '?'}`
+        + ` · quiet ${typed?.quiet?.quiet ?? '?'} stored ${typed?.quiet?.stored ?? '?'}`
+        + ` · reply ${typed?.reply?.reply ? `[${typed.reply.reply.modality}]` : (typed?.reply?.stripChanged ? '[caption]' : 'NONE')}`
+        + ` · heard ${typed?.reply?.heard ?? '?'} · via ${typed?.reply?.viaAssistant ? 'assistant' : 'parser'}`,
       `  ${sixAnglesOk ? 'PASS' : 'FAIL'}  any-angle framing  `
         + (angleRows.length
           ? angleRows.map((row) => `${row.phrase.replace('show me the ', '')} `

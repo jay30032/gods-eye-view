@@ -62,7 +62,9 @@ import {
   setAiPrompt,
   setLodChip,
   setNavActive,
+  setQuietToggle,
   setSoundChip,
+  toggleTypedBar,
 } from './ui/chrome.js';
 import { bindDemoScript } from './ui/demoScript.js';
 import { initFirstHunt } from './ui/firstHunt.js';
@@ -102,7 +104,7 @@ import { demoNow } from './clock.js';
 /** Commands that change a switch, not the board: they never interrupt a moment. */
 const ASIDE_INTENTS = new Set([
   'sound_on', 'sound_off', 'voice_on', 'voice_off', 'vision_on', 'vision_off', 'help', 'unknown',
-  'drive_narration', 'listen_on', 'listen_off',
+  'drive_narration', 'listen_on', 'listen_off', 'quiet_on', 'quiet_off',
 ]);
 
 /** What the six-house scene says instead of the market's opening hint. */
@@ -966,6 +968,9 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       if (parsed.intent === 'listen_on' || parsed.intent === 'listen_off') {
         return this.setListening(parsed.intent === 'listen_on');
       }
+      if (parsed.intent === 'quiet_on' || parsed.intent === 'quiet_off') {
+        return this.setQuiet(parsed.intent === 'quiet_on');
+      }
 
       if (parsed.intent === 'xray') return this.seeThrough();
       if (parsed.intent === 'solid') return this.goSolid();
@@ -1149,6 +1154,20 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
       const spoken = on ? 'Voice on.' : 'Voice off.';
       say(spoken);
       return { ok: true, action: 'set_voice', enabled: on, spoken };
+    },
+
+    /**
+     * "quiet mode" / "quiet mode off": replies in text only, no audio.
+     *
+     * For the places you cannot talk. The session keeps listening; the reply
+     * comes back written, the orb shows muted, and the choice is remembered.
+     */
+    setQuiet(enabled) {
+      const on = terra ? terra.setQuiet(enabled) : Boolean(enabled);
+      setQuietToggle(on);
+      const spoken = on ? 'Quiet mode — replies in text.' : 'Quiet mode off.';
+      say(spoken);
+      return { ok: true, action: 'set_quiet', enabled: on, spoken };
     },
 
     /**
@@ -1461,6 +1480,7 @@ export async function startInvestorSession({ viewer, styleManager, dataManager }
     parseIntent: parseDemoIntent,
     strip: setAiPrompt,
     openTyped: () => openTypedBar(),
+    onQuiet: (on) => setQuietToggle(on),
     onInterrupt: () => {
       // The half-spoken line ends; the card it was assembling finishes now.
       narrator.cancel();
@@ -1708,6 +1728,7 @@ function bindUi(session) {
       if (voice) voice.click();
       else openTypedBar();
     }
+    // 'type' is bound by the chrome itself (toggleTypedBar); nothing here.
   });
 
   /**
@@ -1725,16 +1746,22 @@ function bindUi(session) {
     voiceButton.setAttribute('aria-label', `${ASSISTANT_NAME} — tap to listen, tap again to pause`);
   }
 
+  document.getElementById('ts-quiet-toggle')?.addEventListener('change', (event) => {
+    session.setQuiet(Boolean(event.target.checked));
+  });
+
   document.getElementById('ts-demo-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const input = document.getElementById('ts-demo-input');
     const text = input?.value || '';
     if (!text.trim()) return;
-    // With the assistant live, typed words go through the same session the
-    // voice does, so the answer is spoken by one presence. Without it, the
-    // parser answers directly — the product before there was a voice.
-    if (session.terra?.live && !session.terra.paused) session.terra.sendText(text);
-    else session.handleIntent(text);
+    // With the assistant available, typed words go through the same session
+    // the voice does — same state item, same tools, same wording — opening
+    // it if it is not up yet. Without it (no key), the parser answers
+    // directly: the product before there was a voice.
+    const viaTerra = session.terra && session.terra.available !== false && !session.terra.paused
+      && session.terra.sendText(text);
+    if (!viaTerra) session.handleIntent(text);
     input.value = '';
   });
 

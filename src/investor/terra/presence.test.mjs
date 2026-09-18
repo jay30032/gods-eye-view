@@ -53,17 +53,25 @@ function fakeController({ open = true } = {}) {
   return c;
 }
 
-function harness({ open = true, flying = false, level = 'full', focusedId = 'A' } = {}) {
+function memoryStorage() {
+  const map = new Map();
+  return { getItem: (k) => (map.has(k) ? map.get(k) : null), setItem: (k, v) => map.set(k, String(v)), map };
+}
+
+function harness({ open = true, flying = false, level = 'full', focusedId = 'A', storage = memoryStorage() } = {}) {
   let t = 0;
   const controller = fakeController({ open });
   const strip = [];
   const interrupts = [];
+  const quietSeen = [];
   let typed = 0;
   const terra = createTerra({
     session: {},
     controller,
     now: () => t,
     parseIntent: parseCommand,
+    storage,
+    onQuiet: (on) => quietSeen.push(on),
     strip: (line) => strip.push(line),
     openTyped: () => { typed += 1; },
     onInterrupt: () => interrupts.push(t),
@@ -78,7 +86,7 @@ function harness({ open = true, flying = false, level = 'full', focusedId = 'A' 
     }),
   });
   terra.attach();
-  return { terra, controller, strip, interrupts, typed: () => typed, tick: (ms) => { t += ms; } };
+  return { terra, controller, strip, interrupts, quietSeen, storage, typed: () => typed, tick: (ms) => { t += ms; } };
 }
 
 test('attaching sets the persona token query and always-on, and every turn gets a fresh snapshot first', () => {
@@ -268,4 +276,78 @@ test('the first start explains the mic once when permission is not yet granted',
   assert.equal(terra.live, true);
   // A second start is a no-op.
   assert.equal((await terra.start()).already, true);
+});
+
+test('quiet mode switches the live session to text, mutes the speaker, shows on the orb and persists', () => {
+  const { terra, controller, quietSeen, storage } = harness();
+  assert.equal(terra.quiet, false);
+  assert.deepEqual(quietSeen, [false]);
+  assert.equal(terra.setQuiet(true), true);
+  const update = controller.sent.find((m) => m.type === 'session.update');
+  assert.deepEqual(update.session.output_modalities, ['text']);
+  assert.equal(controller.audioElement.muted, true);
+  assert.deepEqual(quietSeen, [false, true]);
+  assert.equal(storage.getItem('terrasignal:quiet:v1'), '1');
+  // A new presence on the same browser remembers it and applies it when the session comes up.
+  const again = harness({ storage, open: false });
+  assert.equal(again.terra.quiet, true);
+  again.controller.status = 'listening';
+  again.controller.dc.readyState = 'open';
+  again.controller.receive({ type: 'session.created' });
+  assert.ok(again.controller.sent.some((m) => m.type === 'session.update' && m.session.output_modalities[0] === 'text'));
+  assert.match(again.strip.at(-1), /quiet mode/);
+  // Off again: audio back, unmuted, remembered.
+  assert.equal(terra.setQuiet(false), false);
+  assert.deepEqual(controller.sent.at(-1).session.output_modalities, ['audio']);
+  assert.equal(controller.audioElement.muted, false);
+  assert.equal(storage.getItem('terrasignal:quiet:v1'), '0');
+});
+
+test('a text reply streams into the strip and lands in the transcript without counting as audio', () => {
+  const { terra, controller, strip } = harness();
+  terra.setQuiet(true);
+  terra.sendText('why');
+  controller.receive({ type: 'response.created', response: { id: 'r9' } });
+  controller.receive({ type: 'response.output_text.delta', response_id: 'r9', delta: 'Strong flip, ' });
+  controller.receive({ type: 'response.output_text.delta', response_id: 'r9', delta: '$100,493 profit.' });
+  assert.equal(strip.at(-1), 'Strong flip, $100,493 profit.');
+  controller.receive({ type: 'response.output_text.done', response_id: 'r9', text: 'Strong flip, $100,493 profit.' });
+  controller.receive({ type: 'response.done', response: { id: 'r9', output: [{ type: 'message' }] } });
+  const reply = terra.transcript.find((l) => l.role === 'assistant');
+  assert.equal(reply.text, 'Strong flip, $100,493 profit.');
+  assert.equal(reply.modality, 'text');
+  assert.equal(terra.metrics.heard, 0);
+  assert.equal(terra.speaking, false);
+  // With audio, the transcript deltas keep the strip in step and mark the first word.
+  terra.setQuiet(false);
+  terra.sendText('next');
+  controller.receive({ type: 'response.created', response: { id: 'r10' } });
+  controller.receive({ type: 'response.output_audio_transcript.delta', response_id: 'r10', delta: 'Over ' });
+  controller.receive({ type: 'response.output_audio_transcript.delta', response_id: 'r10', delta: 'the six.' });
+  assert.equal(strip.at(-1), 'Over the six.');
+  controller.receive({ type: 'response.output_audio_transcript.done', response_id: 'r10', transcript: 'Over the six.' });
+  controller.receive({ type: 'response.done', response: { id: 'r10', output: [{ type: 'message' }] } });
+  assert.equal(terra.metrics.heard, 1);
+});
+
+test('typed before the session is up opens it and sends the words the moment the model is on the line', async () => {
+  const controller = fakeController({ open: false });
+  const terra = createTerra({
+    session: {},
+    controller,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ available: true }) }),
+    permissions: { query: async () => ({ state: 'granted' }) },
+  });
+  assert.equal(terra.sendText("what's the best one"), true);
+  assert.equal(terra.pendingText, "what's the best one");
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(terra.live, true);
+  controller.receive({ type: 'session.created' });
+  assert.equal(terra.pendingText, null);
+  assert.ok(controller.sent.some((m) => m.type === 'conversation.item.create' && m.text === "what's the best one"));
+  // With no key, typing goes nowhere through the assistant: the parser answers.
+  const none = createTerra({ session: {}, controller: fakeController({ open: false }), fetchImpl: async () => ({ ok: true, json: async () => ({ available: false }) }) });
+  await none.probe();
+  assert.equal(none.sendText('why'), false);
 });
