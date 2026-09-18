@@ -57,9 +57,9 @@ export function followupInstructions(result) {
   const action = String(result?.action || '');
   if (['property_facts', 'what_if', 'compare_properties', 'rank_shortlist', 'explain_strategy', 'compare_strategies'].includes(action) && result?.ok !== false) {
     const rental = action === 'property_facts' && result?.strategies && Object.keys(result.strategies).length === 1 && result.strategies.rental
-      ? ' A rental answer is cash flow per month, cash-on-cash, cap rate and DSCR — all four, in that order — then the offer of the line items.'
+      ? ' A rental answer is cash flow per month, cash-on-cash, cap rate and DSCR — all four, in that order, each with its name — then the offer of the line items.'
       : '';
-    return `Answer the question that was asked from this result and nothing else: the figure or figures asked for come first and are the whole reply, then one short question offering the next number. Money to the dollar, percentages to one decimal, as the result gives them. No view clause, no price, no auction, no play and no "strong" unless the question was about them.${rental} At most 25 words unless the investor asked to walk the numbers.`;
+    return `Answer the question that was asked from this result and nothing else: the figure or figures asked for come first and are the whole reply, then one short question offering the next number. Money to the dollar, percentages to one decimal, as the result gives them. A single figure may stand bare; when there is more than one, every figure gets its name beside it ("$533 a month cash flow, 6.2 percent cash-on-cash, 8.7 cap, 1.45 DSCR"), never a bare list of numbers. No view clause, no price, no auction, no play and no "strong" unless the question was about them.${rental} At most 25 words plus the names, unless the investor asked to walk the numbers.`;
   }
   const outcome = result?.ok === false
     ? `The action did not run (${String(result?.error || result?.spoken || 'no reason given').slice(0, 120)}). Say so in a few words.`

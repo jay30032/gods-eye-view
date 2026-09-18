@@ -59,8 +59,11 @@ test('six example replies in an investor\'s voice, every number exact for the si
   assert.equal(examples.length, 6);
   for (const example of examples) {
     assert.match(example, /\?"$/, `ends with a question: ${example}`);
-    // The cap the rule states, question included.
-    assert.ok(example.replace(/"/g, '').trim().split(/\s+/).length <= 25, `25 words: ${example}`);
+    // The cap the rule states, question included — stretched only by the
+    // names beside the figures in a multi-number answer.
+    const figures = (example.match(/\$?\d[\d,]*(\.\d+)?%?/g) || []).length;
+    const cap = figures > 1 ? 25 + figures * 2 : 25;
+    assert.ok(example.replace(/"/g, '').trim().split(/\s+/).length <= cap, `${cap} words: ${example}`);
     // No hedge on any figure.
     const words = example.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/);
     for (const hedge of BANNED_HEDGES) assert.ok(!words.includes(hedge), `"${hedge}" in: ${example}`);
@@ -79,9 +82,14 @@ test('six example replies in an investor\'s voice, every number exact for the si
   assert.ok(text.includes('ANSWER THE QUESTION ASKED'));
   assert.ok(text.includes('Do not restate the best play, whether it works, the price or the auction unless'));
   assert.ok(text.includes('the figure asked for is the first thing said and the whole of the reply'));
+  assert.ok(text.includes('every figure gets its name beside it'));
+  assert.ok(text.includes('the 25-word cap stretches to fit the names'));
+  const labelled = exampleReplies(text).find((e) => e.includes('1.45 DSCR'));
+  assert.ok(labelled, 'a labelled multi-figure example');
+  for (const name of ['cash flow', 'cash-on-cash', 'cap', 'DSCR']) assert.ok(labelled.includes(name), name);
   // Real figures from DEMO-SIX-001 and DEMO-SIX-004, so an example can never
   // teach the model a number the calculators would contradict.
-  for (const figure of ['$100,493', '$55,747', '23.3%', '$76,909', '$59,531', '26 days', '45% under value', '$7 a month', '1.01']) {
+  for (const figure of ['$100,493', '$55,747', '23.3%', '$76,909', '$59,531', '26 days', '45% under value', '$533 a month', '1.45 DSCR']) {
     assert.ok(text.includes(figure), figure);
   }
 });

@@ -260,9 +260,9 @@ async function main() {
     const dollars = (v) => String(Math.round(Number(v)));
     const onePlace = (v) => (Math.round(Number(v) * 10) / 10).toString();
     const questions = [
-      { say: 'what are the rental numbers', label: 'rental numbers (all four, in order)', expect: (f) => [dollars(f.strategies.rental.cashFlowMonthly), onePlace(f.strategies.rental.cashOnCashPct), onePlace(f.strategies.rental.capRatePct), String(f.strategies.rental.dscr)], ordered: true },
+      { say: 'what are the rental numbers', label: 'rental numbers (all four, in order, each named)', expect: (f) => [dollars(f.strategies.rental.cashFlowMonthly), onePlace(f.strategies.rental.cashOnCashPct), onePlace(f.strategies.rental.capRatePct), String(f.strategies.rental.dscr)], ordered: true, names: [/cash ?flow|a month|per month|monthly/i, /cash[- ]on[- ]cash|coc/i, /cap/i, /dscr|coverage/i] },
       { say: "what's the cap rate", label: 'cap rate', expect: (f) => [onePlace(f.strategies.rental.capRatePct)] },
-      { say: 'how much cash is left in if I refinance', label: 'cash left in on a BRRRR', expect: (f) => [f.strategies.brrrr.cashLeftIn === 0 ? 'zero|\\$0\\b|0 left|nothing left|no cash left' : dollars(f.strategies.brrrr.cashLeftIn), dollars(f.strategies.brrrr.cashOut)], any: true },
+      { say: 'how much cash is left in if I refinance', label: 'cash left in on a BRRRR', expect: (f) => [f.strategies.brrrr.cashLeftIn === 0 ? 'zero|\\$0\\b|\\b0 (cash )?left|nothing left|no cash left' : dollars(f.strategies.brrrr.cashLeftIn), dollars(f.strategies.brrrr.cashOut)], any: true },
       { say: "what's the maximum allowable offer", label: 'MAO', expect: (f) => [dollars(f.strategies.wholesale.mao)] },
       { say: 'what if rehab is sixty', label: 'what if rehab is sixty', expect: (f) => [dollars(f.strategies.flip.profit)], after: true },
     ];
@@ -297,9 +297,19 @@ async function main() {
         // In order, when the rule says so: cash flow, cash-on-cash, cap rate, DSCR.
         const positions = expected.map((e) => reply.indexOf(normalize(e)));
         const ordered = !q.ordered || positions.every((pos, i) => pos >= 0 && (i === 0 || pos > positions[i - 1]));
-        const ok = Boolean(answer) && (q.any ? hits.some(Boolean) : hits.every(Boolean)) && ordered;
+        // Each figure named, when there is more than one: the name sits in
+        // the same clause as its number.
+        let named = true;
+        if (q.names && answer) {
+          const clauses = answer.split(/[,;—]|\band\b/).map((c) => c.replace(/[$,]/g, ''));
+          named = q.names.every((pattern, i) => {
+            const clause = clauses.find((c) => c.includes(String(expected[i])));
+            return Boolean(clause) && pattern.test(clause);
+          });
+        }
+        const ok = Boolean(answer) && (q.any ? hits.some(Boolean) : hits.every(Boolean)) && ordered && named;
         spokenAnswers.push({ question: q.say, answer, expected });
-        check(ok, `${q.label}: reply carries ${JSON.stringify(expected)}${q.ordered ? ' in order' : ''} — "${answer || 'NO REPLY'}"`);
+        check(ok, `${q.label}: reply carries ${JSON.stringify(expected)}${q.ordered ? ' in order' : ''}${q.names ? (named ? ', each named' : ', NOT each named') : ''} — "${answer || 'NO REPLY'}"`);
         // No cents spoken, and no stock view clause: the camera did not move
         // between these questions, so nothing should open with where we are.
         if (answer) {
